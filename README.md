@@ -1,6 +1,6 @@
 # AntForest TrollFools Port
 
-蚂蚁森林自动收取插件的 TrollFools 移植版。它不依赖 MobileSubstrate、Theos 或 CaptainHook，使用 Objective-C Runtime Hook 构建为 `arm64e` dylib。
+基于IOS巨魔插件的支付宝蚂蚁森林自动收取插件，支持巨魔商店 TrollStore + 巨魔注入器 TrollFools 。它不依赖 MobileSubstrate、Theos 或 CaptainHook，使用 Objective-C Runtime Hook 构建为 `arm64e` dylib。
 
 > 请自行评估账号、服务规则与设备安全风险。本项目不提供绕过风控或安全机制的功能。
 
@@ -18,7 +18,7 @@
 
 ## 使用说明
 
-1. 使用 TrollFools 注入 [`build/AntForestPort.dylib`](build/AntForestPort.dylib) 到支付宝。
+1. 使用巨魔注入器 TrollFools 注入 [`build/AntForestPort.dylib`](build/AntForestPort.dylib) 到支付宝。
 2. 注入前移除旧的 `AntForestProbe.dylib`，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，长按并拖动叶子图标。
@@ -40,10 +40,10 @@
 | CPU 架构 | `arm64e` |
 | iOS | iOS 16 及以上 |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
-| 非越狱 | 需要 TrollStore 与 TrollFools 都支持目标系统 |
+| 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
 
-“支持 TrollStore”并不等于必然兼容：TrollFools 注入能力、支付宝版本、私有类和响应字段也必须匹配。
+“支持巨魔商店 TrollStore”并不等于必然兼容：巨魔注入器 TrollFools 的注入能力、支付宝版本、私有类和响应字段也必须匹配。
 
 ## 已验证环境
 
@@ -53,7 +53,7 @@
 | --- | --- |
 | 设备 | iPhone 14 Pro（A16，`arm64e`） |
 | 系统 | iOS 16.2 |
-| 安装环境 | 非越狱：TrollStore + TrollFools |
+| 安装环境 | 非越狱：巨魔商店 TrollStore + 巨魔注入器 TrollFools |
 | 支付宝 | 12.12.6 |
 | 探针结果 | `H5WebViewController` 与 `PSDJsBridge` Hook 成功 |
 | 森林首页 | 新版顶层 `bubbles`、`userBaseInfo` 已确认 |
@@ -95,7 +95,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make
 Issue 请附上：
 
 - 设备型号与 CPU 架构
-- iOS、支付宝、TrollStore 与 TrollFools 版本
+- iOS、支付宝、巨魔商店 TrollStore 与巨魔注入器 TrollFools 版本
 - 注入方式
 - `[AntForestPort]` 相关设备控制台日志
 - 是否出现浮窗、是否闪退、是否能打开日志面板
