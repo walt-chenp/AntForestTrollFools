@@ -270,9 +270,6 @@ NSString* getCurrentDateTimeString() {
 -(void)autoCollectBubbles {
     @try {
         
-        NSString *log = [NSString stringWithFormat:@"%@\n自动收集开始",getCurrentDateTimeString()];
-        [[AntForestManager sharedInstance] addLog:log];
-        
         // 查询总排行 获取 AllFriendId MySelfUserId
         [[AntForestManager sharedInstance] queryTotalRank];
         
@@ -317,8 +314,6 @@ NSString* getCurrentDateTimeString() {
                     [arrUid removeAllObjects];
                 }
                 
-                //NSString *log = [NSString stringWithFormat:@"%@\n自动收集结束",getCurrentDateTimeString()];
-                [[AntForestManager sharedInstance] addLog:log];
                 // 主要是更新标题 失败次数与当前时间间隔
                 self.failedTimes++;
             });
@@ -491,8 +486,8 @@ NSString* getCurrentDateTimeString() {
 
 -(void)matchFriendIdAndBubbles:(id)args {
     @try {
-        if (args != nil && [args isKindOfClass:[NSMutableDictionary class]]) {
-            NSMutableDictionary *dict = args;
+        if (args != nil && [args isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *dict = args;
             // 匹配 过期能量球 返回的  signId
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"forestSignVOList"]) {
                 NSArray *signList =[[dict objectForKey:@"resData"] objectForKey:@"forestSignVOList"];
@@ -531,7 +526,7 @@ NSString* getCurrentDateTimeString() {
                 });
             }
             // 匹配查询好的返回的所有能量球
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"treeEnergy"] && [dict objectForKey:@"bubbles"]) {
+            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"bubbles"] && [dict objectForKey:@"userBaseInfo"]) {
                 NSString *userId;
                 if([dict objectForKey:@"userBaseInfo"]) {
                     NSDictionary *pDic =[dict objectForKey:@"userBaseInfo"];
@@ -539,8 +534,8 @@ NSString* getCurrentDateTimeString() {
                 }
                 
                 //判断是否有能量保护罩
-                if([dict objectForKey:@"usingUserProps"]) {
-                    NSArray *pArr =[dict objectForKey:@"usingUserProps"];
+                NSArray *pArr = [dict objectForKey:@"usingUserProps"] ?: [dict objectForKey:@"usingUserPropsNew"];
+                if(pArr) {
                     for(NSDictionary *dic in pArr){
                         NSString *type = [dic objectForKey:@"type"];
                         NSString *myUserId = [[AntForestManager sharedInstance] myUserId]; //我自己的ID
@@ -607,13 +602,21 @@ NSString* getCurrentDateTimeString() {
                     NSNumber *energyValue = [bubble objectForKey:@"collectedEnergy"];
                     NSInteger num = [energyValue integerValue];
                     NSInteger total = [[AntForestManager sharedInstance] totalCollectedEnergy] + num;
+                    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+                    if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
+                        [[AntForestManager sharedInstance] setTodayCollectedEnergy:0];
+                        [defaults setObject:getCurrentDateString() forKey:@"todayCollectedEnergyDate"];
+                    }
+                    NSInteger today = [[AntForestManager sharedInstance] todayCollectedEnergy] + num;
                     NSString *userId = [bubble objectForKey:@"userId"];
                     NSString *bid = [bubble objectForKey:@"id"];
                     NSString *remainEnergy = [bubble objectForKey:@"remainEnergy"];
                     NSString *fullEnery = [bubble objectForKey:@"fullEnergy"];
                     [[AntForestManager sharedInstance] setTotalCollectedEnergy:total];
-                    [[NSUserDefaults standardUserDefaults] setInteger:total forKey:@"totalCollectedEnergy"];
-                    [[NSUserDefaults standardUserDefaults] synchronize];
+                    [[AntForestManager sharedInstance] setTodayCollectedEnergy:today];
+                    [defaults setInteger:total forKey:@"totalCollectedEnergy"];
+                    [defaults setInteger:today forKey:@"todayCollectedEnergy"];
+                    [defaults synchronize];
                     if(num > 0) {
                         NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg/%@g,剩%@g,总拾取%ldg %@",[[AntForestManager sharedInstance] getUserName:userId],num,fullEnery,remainEnergy,total,bid];
                         [[AntForestManager sharedInstance] addLog:log];

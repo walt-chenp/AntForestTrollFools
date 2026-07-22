@@ -22,6 +22,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic,strong) NSMutableDictionary *friendsRank; //
 @property(nonatomic,strong) NSMutableArray *logRecord;
 @property(atomic) NSInteger totalCollectedEnergy; //总收集能量
+@property(atomic) NSInteger todayCollectedEnergy;
 
 @property (nonatomic, strong) NSTimer *autoCollectTimer; //后台任务定时器
 
@@ -48,10 +49,13 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)autoCollectBubbles;
 -(void)matchFriendIdAndBubbles:(id)args;
 -(NSString*)getUserName:(NSString*)uid;
+-(void)addLog:(NSString *)logMessage;
 
 @end
 
-NSString *convertTimestampToDateString(long long timestamp) {
+NSString *getCurrentDateTimeString(void);
+
+static NSString *convertTimestampToDateString(long long timestamp) {
     // 将时间戳从毫秒转换为秒
     NSTimeInterval seconds = timestamp / 1000.0;
     
@@ -67,7 +71,7 @@ NSString *convertTimestampToDateString(long long timestamp) {
     return dateString;
 }
 
-void FileLog(NSString *format, ...) {
+static void FileLog(NSString *format, ...) {
     //不用了就屏蔽掉
     //return;
 //    // 获取应用的沙盒 Documents 目录路径
