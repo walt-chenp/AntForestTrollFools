@@ -1,6 +1,6 @@
 # AntForest TrollFools Port
 
-基于IOS巨魔插件的支付宝蚂蚁森林自动收取插件，支持巨魔商店 TrollStore + 巨魔注入器 TrollFools 。它不依赖 MobileSubstrate、Theos 或 CaptainHook，使用 Objective-C Runtime Hook 构建为 `arm64e` dylib。
+基于iOS巨魔插件的支付宝蚂蚁森林能量自动收取插件，支持巨魔商店 TrollStore + 巨魔注入器 TrollFools 。它不依赖 MobileSubstrate、Theos 或 CaptainHook，使用 Objective-C Runtime Hook 构建为 `arm64e` dylib。
 
 > 请自行评估账号、服务规则与设备安全风险。本项目不提供绕过风控或安全机制的功能。
 
