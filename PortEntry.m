@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 
 #import "antforest/AntForestManager.h"
@@ -10,6 +11,28 @@ static id (*originalTransformResponseData)(id, SEL, id);
 static NSInteger const AntForestButtonTag = 941204;
 static NSString * const AntForestButtonXKey = @"AntForestButtonX";
 static NSString * const AntForestButtonYKey = @"AntForestButtonY";
+
+static BOOL isEnergyRainURL(NSURL *url) {
+    NSString *text = [url.absoluteString lowercaseString];
+    return [text containsString:@"energyrain"] || [text containsString:@"energy-rain"] || [text containsString:@"energy_rain"] || [text containsString:@"68687791.h5app.alipay.com"] || [text containsString:@"/p/c/18031y38qhq8"];
+}
+
+static void installEnergyRainCollector(id controller) {
+    static const void *collectorKey = &collectorKey;
+    if (objc_getAssociatedObject(controller, collectorKey)) return;
+    objc_setAssociatedObject(controller, collectorKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    id webView = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView));
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) {
+        NSLog(@"[AntForestRain] collector unavailable");
+        return;
+    }
+    NSString *script = @"(()=>{const c=document.querySelector('canvas'),state=window.__antForestRainCollector={frames:{}},rects=d=>{const b=d instanceof ArrayBuffer?d:d.buffer,o=d.byteOffset||0,f=new Float32Array(b,o,Math.floor(d.byteLength/4)),a=[];for(let i=0;i+19<f.length;i+=20){const xs=[f[i],f[i+5],f[i+10],f[i+15]],ys=[f[i+1],f[i+6],f[i+11],f[i+16]];if(xs.every(Number.isFinite)&&ys.every(Number.isFinite)){const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y;if(w>0&&h>0)a.push({x,y,w,h})}}return a},event=(type,t,active)=>{let e;try{const touch=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[touch]:[],targetTouches:active?[touch]:[],changedTouches:[touch]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)},tap=(x,y)=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};event('touchstart',t,true);setTimeout(()=>event('touchend',t,false),12)},hook=P=>{if(!P||P.__antForestRainCollectorHook)return;P.__antForestRainCollectorHook=1;const f=P.bufferSubData;if(f)P.bufferSubData=function(target,offset,data,...v){if(c&&this.canvas===c&&data&&data.byteLength){const now=rects(data),key=data.byteLength+':'+now.slice(0,2).map(q=>[q.x,q.y,q.w,q.h].map(Math.round).join(',')).join('/'),old=state.frames[key],time=Date.now();if(old&&old.boxes.length===now.length)now.forEach((q,i)=>{const r=old.boxes[i],dy=q.y-r.y,cx=q.x+q.w/2,cy=q.y+q.h/2;if(Math.abs(q.x-r.x)<5&&dy>.2&&dy<30&&q.w>=25&&q.w<=180&&q.h>=25&&q.h<=180&&cx>10&&cx<383&&cy>80&&cy<780&&time-(old.taps[i]||0)>400){old.taps[i]=time;setTimeout(()=>tap(cx,cy),0)}});state.frames[key]={boxes:now,taps:old?old.taps:{}}}return f.call(this,target,offset,data,...v)}};hook(window.WebGLRenderingContext&&WebGLRenderingContext.prototype);hook(window.WebGL2RenderingContext&&WebGL2RenderingContext.prototype);return c?'installed':'canvas unavailable'})()";
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
+        NSLog(@"[AntForestRain] collector: %@%@", result ?: @"", error ? [NSString stringWithFormat:@" error=%@", error] : @"");
+    });
+}
 
 @interface AntForestLogPanel : UIViewController <UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
@@ -311,6 +334,12 @@ static void portViewDidLoad(id self, SEL _cmd) {
 
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
+    NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
+    if (isEnergyRainURL(url) && ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoCollect) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            installEnergyRainCollector(self);
+        });
+    }
     addLogButton(self);
 }
 
