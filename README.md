@@ -109,7 +109,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make
 
 ## 反馈
 
-其他机型、iOS 版本或支付宝版本如有问题，欢迎提交 [Issue](../../issues/new)。
+- TG 讨论群：[点击加入](https://t.me/+Sal6MVCFnNFiZmQ1)，用于日常交流、使用讨论和问题收集。
+- GitHub [Issues](../../issues) 用于提交可复现的问题、兼容性反馈和设备日志，便于持续跟踪处理。
 
 ### 获取 `[AntForestPort]` 设备控制台日志
 
