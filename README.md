@@ -63,17 +63,19 @@
 
 ## 当前兼容范围
 
-当前发布产物是 `arm64e`，最低构建目标为 iOS 15：
+当前发布产物为 `arm64 + arm64e` 通用 dylib，最低构建目标为 iOS 15：
 
 | 项目 | 当前状态 |
 | --- | --- |
-| CPU 架构 | `arm64e` |
+| CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
 | iOS | iOS 15 及以上 |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
 
 “支持巨魔商店 TrollStore”并不等于必然兼容：巨魔注入器 TrollFools 的注入能力、支付宝版本、私有类和响应字段也必须匹配。
+
+典型设备：iPhone X、iPhone 8/8 Plus、iPhone 7 等为 `arm64`；iPhone XS/XR、iPhone 11 至 iPhone 16 系列为 `arm64e`。
 
 ## 已验证环境
 
@@ -103,6 +105,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make
 ```
 
 产物位于 `build/AntForestPort.dylib`。
+
+GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
 ## 反馈
 
