@@ -111,7 +111,8 @@ GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
 ## 反馈
 
-- TG 讨论群：[点击加入](https://t.me/+Sal6MVCFnNFiZmQ1)，用于日常交流、使用讨论和问题收集。
+- TG 讨论群：[iOS_AntFore](https://t.me/iOS_AntFore)，用于日常交流、使用讨论和问题收集。
+- TG 频道：[AntFore](https://t.me/AntFore)，用于发布版本与项目动态。
 - GitHub [Issues](../../issues) 用于提交可复现的问题、兼容性反馈和设备日志，便于持续跟踪处理。
 
 ### 获取 `[AntForestPort]` 设备控制台日志
