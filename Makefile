@@ -9,7 +9,7 @@ all: $(TARGET)
 
 $(TARGET): $(SOURCES)
 	@mkdir -p build
-	$(CLANG) -target arm64e-apple-ios16.0 -isysroot $(SDK) -fobjc-arc -dynamiclib $(SOURCES) -Iantforest -Iantforest/Headers/PSDJsBridge -Iantforest/Headers/PSDJsBridge/Protocol -Iantforest/DebugTool -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -o $@
+	$(CLANG) -target arm64e-apple-ios15.0 -isysroot $(SDK) -fobjc-arc -dynamiclib $(SOURCES) -Iantforest -Iantforest/Headers/PSDJsBridge -Iantforest/Headers/PSDJsBridge/Protocol -Iantforest/DebugTool -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -o $@
 
 clean:
 	rm -rf build
