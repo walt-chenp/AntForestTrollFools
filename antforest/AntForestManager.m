@@ -12,6 +12,9 @@
 @implementation AntForestManager
 
 static AntForestManager *afm = nil;
+static NSDate *lastCollectStartedAt = nil;
+static NSString *lastScheduledMinute = nil;
+static NSMutableSet<NSString *> *recordedCollectedBubbles = nil;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -27,6 +30,7 @@ dispatch_queue_t globalSerialQueueTest;
         globalSerialQueueQuery = dispatch_queue_create("antforest_query", DISPATCH_QUEUE_SERIAL);
         globalSerialQueueCollect = dispatch_queue_create("antforest_collect", DISPATCH_QUEUE_SERIAL);
         globalSerialQueueTest = dispatch_queue_create("antforest_test", DISPATCH_QUEUE_SERIAL);
+        recordedCollectedBubbles = [NSMutableSet set];
         
     });
     return afm;
@@ -55,6 +59,35 @@ dispatch_queue_t globalSerialQueueTest;
                                                            userInfo:nil
                                                             repeats:YES];
     [self.autoCollectTimer fire];
+}
+
+-(void)stopAutoCollectTimer {
+    [self.autoCollectTimer invalidate];
+    self.autoCollectTimer = nil;
+}
+
+-(void)startScheduledCollectTimer {
+    [self.scheduledCollectTimer invalidate];
+    self.scheduledCollectTimer = [NSTimer scheduledTimerWithTimeInterval:15
+                                                                    target:self
+                                                                  selector:@selector(checkScheduledCollect)
+                                                                  userInfo:nil
+                                                                   repeats:YES];
+    [self checkScheduledCollect];
+}
+
+-(void)checkScheduledCollect {
+    if (!self.enableAutoCollect || !self.enableScheduledCollect) return;
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm";
+    NSString *time = [formatter stringFromDate:NSDate.date];
+    if (![self.scheduledTimes containsObject:time]) return;
+    formatter.dateFormat = @"yyyy-MM-dd HH:mm";
+    NSString *minute = [formatter stringFromDate:NSDate.date];
+    if ([lastScheduledMinute isEqualToString:minute]) return;
+    lastScheduledMinute = minute;
+    [self addLog:[NSString stringWithFormat:@"%@\n定时收取开始", getCurrentDateTimeString()]];
+    [self autoCollectBubbles];
 }
 
 NSString* getCurrentDateString() {
@@ -269,6 +302,9 @@ NSString* getCurrentDateTimeString() {
 // 每隔300秒一次
 -(void)autoCollectBubbles {
     @try {
+        if (!self.enableAutoCollect) return;
+        if (lastCollectStartedAt && -[lastCollectStartedAt timeIntervalSinceNow] < 45) return;
+        lastCollectStartedAt = NSDate.date;
         
         // 查询总排行 获取 AllFriendId MySelfUserId
         [[AntForestManager sharedInstance] queryTotalRank];
@@ -484,8 +520,41 @@ NSString* getCurrentDateTimeString() {
     }
 }
 
+- (void)recordCollectedEnergyFromResponse:(id)args {
+    if (![args isKindOfClass:NSDictionary.class] && ![args isKindOfClass:NSArray.class]) return;
+    NSMutableArray *pending = [NSMutableArray arrayWithObject:args];
+    while (pending.count) {
+        id value = pending.lastObject; [pending removeLastObject];
+        if ([value isKindOfClass:NSArray.class]) { [pending addObjectsFromArray:value]; continue; }
+        if (![value isKindOfClass:NSDictionary.class]) continue;
+        NSDictionary *bubble = value;
+        for (id child in bubble.allValues) if ([child isKindOfClass:NSDictionary.class] || [child isKindOfClass:NSArray.class]) [pending addObject:child];
+        NSNumber *energy = bubble[@"collectedEnergy"];
+        if (!energy || energy.integerValue <= 0) continue;
+        NSString *userId = [bubble[@"userId"] description] ?: @"";
+        NSString *bubbleId = [bubble[@"id"] description] ?: @"";
+        NSString *key = [NSString stringWithFormat:@"%@:%@:%ld", userId, bubbleId, (long)energy.integerValue];
+        if (bubbleId.length && [recordedCollectedBubbles containsObject:key]) continue;
+        if (bubbleId.length) { if (recordedCollectedBubbles.count > 1000) [recordedCollectedBubbles removeAllObjects]; [recordedCollectedBubbles addObject:key]; }
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
+            self.todayCollectedEnergy = 0;
+            [defaults setObject:getCurrentDateString() forKey:@"todayCollectedEnergyDate"];
+        }
+        self.totalCollectedEnergy += energy.integerValue;
+        self.todayCollectedEnergy += energy.integerValue;
+        [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
+        [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
+        [defaults synchronize];
+        NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg", getCurrentDateTimeString(), (long)energy.integerValue];
+        [self addLog:log];
+    }
+}
+
 -(void)matchFriendIdAndBubbles:(id)args {
     @try {
+        [self recordCollectedEnergyFromResponse:args];
+        if (!self.enableAutoCollect) return;
         if (args != nil && [args isKindOfClass:[NSDictionary class]]) {
             NSDictionary *dict = args;
             // 匹配 过期能量球 返回的  signId
@@ -594,38 +663,6 @@ NSString* getCurrentDateTimeString() {
                 //                    [[AntForestManager sharedInstance] addLog:log];
                 //                    [[AntForestManager sharedInstance] collectBubbles:userId bubblesId:bidStr];
                 //                }
-            }
-            // 匹配拾取日志
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"bubbles"]) {
-                NSMutableDictionary *dictBubbles = [[dict objectForKey:@"resData"] objectForKey:@"bubbles"];
-                for (NSDictionary *bubble in dictBubbles) {
-                    NSNumber *energyValue = [bubble objectForKey:@"collectedEnergy"];
-                    NSInteger num = [energyValue integerValue];
-                    NSInteger total = [[AntForestManager sharedInstance] totalCollectedEnergy] + num;
-                    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-                    if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
-                        [[AntForestManager sharedInstance] setTodayCollectedEnergy:0];
-                        [defaults setObject:getCurrentDateString() forKey:@"todayCollectedEnergyDate"];
-                    }
-                    NSInteger today = [[AntForestManager sharedInstance] todayCollectedEnergy] + num;
-                    NSString *userId = [bubble objectForKey:@"userId"];
-                    NSString *bid = [bubble objectForKey:@"id"];
-                    NSString *remainEnergy = [bubble objectForKey:@"remainEnergy"];
-                    NSString *fullEnery = [bubble objectForKey:@"fullEnergy"];
-                    [[AntForestManager sharedInstance] setTotalCollectedEnergy:total];
-                    [[AntForestManager sharedInstance] setTodayCollectedEnergy:today];
-                    [defaults setInteger:total forKey:@"totalCollectedEnergy"];
-                    [defaults setInteger:today forKey:@"todayCollectedEnergy"];
-                    [defaults synchronize];
-                    if(num > 0) {
-                        NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg/%@g,剩%@g,总拾取%ldg %@",[[AntForestManager sharedInstance] getUserName:userId],num,fullEnery,remainEnergy,total,bid];
-                        [[AntForestManager sharedInstance] addLog:log];
-                        dispatch_async(globalSerialQueueQuery, ^{
-                            [[AntForestManager sharedInstance] takeLook];
-                        });
-                    }
-                    //[[AntForestManager sharedInstance] startAutoCollectTimerWithInterval:60];
-                }
             }
             // 匹配用户名
             if([dict objectForKey:@"contactsDicArray"]) {

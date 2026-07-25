@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
+#import <math.h>
 
 #import "antforest/AntForestManager.h"
 
@@ -39,6 +40,132 @@ static void installEnergyRainCollector(id controller) {
 @property (nonatomic, strong) UILabel *todayLabel;
 @property (nonatomic, strong) UILabel *totalLabel;
 @property (nonatomic, strong) UILabel *statusLabel;
+@property (nonatomic, strong) UIButton *intervalButton;
+@end
+
+@interface AntForestSchedulePanel : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIDatePicker *picker;
+@property (nonatomic, strong) UIButton *saveButton;
+@property (nonatomic, strong) UILabel *emptyLabel;
+@property (nonatomic) NSInteger editingIndex;
+@end
+
+@interface AntForestIntervalPanel : UIViewController
+@end
+
+@implementation AntForestIntervalPanel
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.view.backgroundColor = UIColor.systemBackgroundColor;
+    UILabel *title = [[UILabel alloc] init]; title.text = @"后台循环间隔"; title.font = [UIFont boldSystemFontOfSize:22]; title.translatesAutoresizingMaskIntoConstraints = NO;
+    UISlider *slider = [[UISlider alloc] init]; slider.minimumValue = 1; slider.maximumValue = 60; slider.value = [NSUserDefaults.standardUserDefaults integerForKey:@"backgroundIntervalMinutes"] ?: 5; slider.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *value = [[UILabel alloc] init]; value.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold]; value.textColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0]; value.translatesAutoresizingMaskIntoConstraints = NO;
+    void (^update)(void) = ^{ value.text = [NSString stringWithFormat:@"%d 分钟", (int)lroundf(slider.value)]; };
+    update();
+    [slider addAction:[UIAction actionWithHandler:^(__unused UIAction *action) { slider.value = roundf(slider.value); update(); }] forControlEvents:UIControlEventValueChanged];
+    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem]; [save setTitle:@"保存" forState:UIControlStateNormal]; save.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; save.translatesAutoresizingMaskIntoConstraints = NO;
+    [save addAction:[UIAction actionWithHandler:^(__unused UIAction *action) { NSInteger minutes = lroundf(slider.value); AntForestManager *manager = AntForestManager.sharedInstance; manager.collectInterval = minutes * 60; [NSUserDefaults.standardUserDefaults setInteger:minutes forKey:@"backgroundIntervalMinutes"]; if (manager.enableAutoCollect && manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval]; [self dismissViewControllerAnimated:YES completion:nil]; }] forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:title]; [self.view addSubview:slider]; [self.view addSubview:value]; [self.view addSubview:save];
+    [NSLayoutConstraint activateConstraints:@[
+        [title.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:28], [title.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [value.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:20], [value.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [slider.topAnchor constraintEqualToAnchor:value.bottomAnchor constant:20], [slider.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:28], [slider.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-28],
+        [save.topAnchor constraintEqualToAnchor:slider.bottomAnchor constant:24], [save.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+    ]];
+}
+@end
+
+@implementation AntForestSchedulePanel
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"定时收取设置";
+    self.editingIndex = NSNotFound;
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    self.navigationItem.rightBarButtonItem = close;
+    UIView *enabledCard = [[UIView alloc] init]; enabledCard.backgroundColor = UIColor.systemBackgroundColor; enabledCard.layer.cornerRadius = 16; enabledCard.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledTitle = [[UILabel alloc] init]; enabledTitle.text = @"启用每日定时收取"; enabledTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; enabledTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledDetail = [[UILabel alloc] init]; enabledDetail.text = @"仅收取好友与自己的成熟能量"; enabledDetail.font = [UIFont systemFontOfSize:13]; enabledDetail.textColor = UIColor.secondaryLabelColor; enabledDetail.translatesAutoresizingMaskIntoConstraints = NO;
+    UISwitch *enabled = [[UISwitch alloc] init]; enabled.on = [AntForestManager sharedInstance].enableScheduledCollect; [enabled addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; enabled.translatesAutoresizingMaskIntoConstraints = NO;
+    [enabledCard addSubview:enabledTitle]; [enabledCard addSubview:enabledDetail]; [enabledCard addSubview:enabled];
+    self.picker = [[UIDatePicker alloc] init];
+    self.picker.datePickerMode = UIDatePickerModeTime;
+    self.picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
+    self.saveButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal];
+    self.saveButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    [self.saveButton addTarget:self action:@selector(addTime) forControlEvents:UIControlEventTouchUpInside];
+    UIView *addCard = [[UIView alloc] init]; addCard.backgroundColor = UIColor.systemBackgroundColor; addCard.layer.cornerRadius = 16; addCard.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *addTitle = [[UILabel alloc] init]; addTitle.text = @"添加收取时间"; addTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; addTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UIStackView *bar = [[UIStackView alloc] initWithArrangedSubviews:@[self.picker, self.saveButton]];
+    bar.spacing = 16; bar.alignment = UIStackViewAlignmentCenter; bar.translatesAutoresizingMaskIntoConstraints = NO;
+    [addCard addSubview:addTitle]; [addCard addSubview:bar];
+    UILabel *sectionTitle = [[UILabel alloc] init]; sectionTitle.text = @"已添加时间"; sectionTitle.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]; sectionTitle.textColor = UIColor.secondaryLabelColor; sectionTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.backgroundColor = UIColor.clearColor; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    self.emptyLabel = [[UILabel alloc] init]; self.emptyLabel.text = @"尚未添加定时任务"; self.emptyLabel.font = [UIFont systemFontOfSize:15]; self.emptyLabel.textColor = UIColor.secondaryLabelColor; self.emptyLabel.textAlignment = NSTextAlignmentCenter; self.emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:enabledCard]; [self.view addSubview:addCard]; [self.view addSubview:sectionTitle]; [self.view addSubview:self.tableView]; [self.view addSubview:self.emptyLabel];
+    [NSLayoutConstraint activateConstraints:@[
+        [enabledCard.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [enabledCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [enabledCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [enabledCard.heightAnchor constraintEqualToConstant:70],
+        [enabledTitle.topAnchor constraintEqualToAnchor:enabledCard.topAnchor constant:14], [enabledTitle.leadingAnchor constraintEqualToAnchor:enabledCard.leadingAnchor constant:16],
+        [enabledDetail.topAnchor constraintEqualToAnchor:enabledTitle.bottomAnchor constant:4], [enabledDetail.leadingAnchor constraintEqualToAnchor:enabledTitle.leadingAnchor],
+        [enabled.centerYAnchor constraintEqualToAnchor:enabledCard.centerYAnchor], [enabled.trailingAnchor constraintEqualToAnchor:enabledCard.trailingAnchor constant:-16],
+        [addCard.topAnchor constraintEqualToAnchor:enabledCard.bottomAnchor constant:12], [addCard.leadingAnchor constraintEqualToAnchor:enabledCard.leadingAnchor], [addCard.trailingAnchor constraintEqualToAnchor:enabledCard.trailingAnchor], [addCard.heightAnchor constraintEqualToConstant:74],
+        [addTitle.topAnchor constraintEqualToAnchor:addCard.topAnchor constant:12], [addTitle.leadingAnchor constraintEqualToAnchor:addCard.leadingAnchor constant:16],
+        [bar.topAnchor constraintEqualToAnchor:addTitle.bottomAnchor constant:6], [bar.leadingAnchor constraintEqualToAnchor:addCard.leadingAnchor constant:16],
+        [sectionTitle.topAnchor constraintEqualToAnchor:addCard.bottomAnchor constant:18], [sectionTitle.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
+        [self.tableView.topAnchor constraintEqualToAnchor:sectionTitle.bottomAnchor constant:2],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [self.emptyLabel.topAnchor constraintEqualToAnchor:sectionTitle.bottomAnchor constant:38], [self.emptyLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+    ]];
+    [self updateEmptyState];
+}
+
+- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)updateEmptyState { self.emptyLabel.hidden = [AntForestManager sharedInstance].scheduledTimes.count > 0; }
+- (void)toggle:(UISwitch *)sender {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    manager.enableScheduledCollect = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableScheduledCollect"];
+    if (sender.on) [manager startScheduledCollectTimer]; else { [manager.scheduledCollectTimer invalidate]; manager.scheduledCollectTimer = nil; }
+}
+- (void)addTime {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
+    NSString *time = [formatter stringFromDate:self.picker.date];
+    NSMutableArray *times = [[AntForestManager sharedInstance].scheduledTimes mutableCopy] ?: NSMutableArray.array;
+    if (self.editingIndex != NSNotFound) [times removeObjectAtIndex:self.editingIndex];
+    if (![times containsObject:time]) [times addObject:time];
+    [times sortUsingSelector:@selector(compare:)];
+    [AntForestManager sharedInstance].scheduledTimes = times;
+    [NSUserDefaults.standardUserDefaults setObject:times forKey:@"scheduledCollectTimes"];
+    self.editingIndex = NSNotFound;
+    [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal];
+    [self.tableView reloadData];
+    [self updateEmptyState];
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [AntForestManager sharedInstance].scheduledTimes.count; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"time"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"time"];
+    cell.textLabel.text = [AntForestManager sharedInstance].scheduledTimes[indexPath.row]; cell.textLabel.font = [UIFont monospacedDigitSystemFontOfSize:20 weight:UIFontWeightSemibold];
+    cell.accessoryView = nil;
+    return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
+    self.picker.date = [formatter dateFromString:[AntForestManager sharedInstance].scheduledTimes[indexPath.row]] ?: NSDate.date;
+    self.editingIndex = indexPath.row;
+    [self.saveButton setTitle:@"保存修改" forState:UIControlStateNormal];
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (style != UITableViewCellEditingStyleDelete) return;
+    NSMutableArray *times = [[AntForestManager sharedInstance].scheduledTimes mutableCopy]; [times removeObjectAtIndex:indexPath.row]; [AntForestManager sharedInstance].scheduledTimes = times; [NSUserDefaults.standardUserDefaults setObject:times forKey:@"scheduledCollectTimes"]; [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+    [self updateEmptyState];
+}
 @end
 
 @implementation AntForestLogPanel
@@ -52,16 +179,16 @@ static void installEnergyRainCollector(id controller) {
     grabber.layer.cornerRadius = 3;
     grabber.translatesAutoresizingMaskIntoConstraints = NO;
 
-    UIView *titleIcon = [self iconWithName:@"leaf.fill" size:30];
+    UIView *titleIcon = [self iconWithName:@"leaf.fill" size:24];
     titleIcon.translatesAutoresizingMaskIntoConstraints = NO;
     UILabel *title = [[UILabel alloc] init];
     title.text = @"收取记录";
-    title.font = [UIFont boldSystemFontOfSize:26];
+    title.font = [UIFont boldSystemFontOfSize:24];
     title.textColor = [UIColor colorWithRed:0.09 green:0.23 blue:0.16 alpha:1.0];
     title.translatesAutoresizingMaskIntoConstraints = NO;
 
     UIButton *clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [clearButton setTitle:@"清空" forState:UIControlStateNormal];
+    [clearButton setTitle:@"清空日志" forState:UIControlStateNormal];
     clearButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
     [clearButton addTarget:self action:@selector(clearLogs) forControlEvents:UIControlEventTouchUpInside];
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -107,6 +234,57 @@ static void installEnergyRainCollector(id controller) {
     autoRow.distribution = UIStackViewDistributionEqualSpacing;
     autoRow.translatesAutoresizingMaskIntoConstraints = NO;
 
+    UIView *rainIcon = [self iconWithName:@"cloud.rain.fill" size:24];
+    UILabel *rainLabel = [[UILabel alloc] init];
+    rainLabel.text = @"自动能量雨";
+    rainLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    UISwitch *rainSwitch = [[UISwitch alloc] init];
+    rainSwitch.on = ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoRain;
+    [rainSwitch addTarget:self action:@selector(toggleAutoRain:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *rainLeading = [[UIStackView alloc] initWithArrangedSubviews:@[rainIcon, rainLabel]];
+    rainLeading.spacing = 12;
+    rainLeading.alignment = UIStackViewAlignmentCenter;
+    UIStackView *rainRow = [[UIStackView alloc] initWithArrangedSubviews:@[rainLeading, rainSwitch]];
+    rainRow.alignment = UIStackViewAlignmentCenter;
+    rainRow.distribution = UIStackViewDistributionEqualSpacing;
+    rainRow.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIView *loopIcon = [self iconWithName:@"clock.arrow.circlepath" size:24];
+    UILabel *loopLabel = [[UILabel alloc] init];
+    loopLabel.text = @"后台循环";
+    loopLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    UIButton *intervalButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    intervalButton.layer.borderWidth = 1; intervalButton.layer.borderColor = UIColor.systemGray5Color.CGColor; intervalButton.layer.cornerRadius = 10;
+    intervalButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [intervalButton addTarget:self action:@selector(showIntervalSettings) forControlEvents:UIControlEventTouchUpInside];
+    self.intervalButton = intervalButton;
+    [self updateIntervalLabel];
+    UISwitch *loopSwitch = [[UISwitch alloc] init];
+    loopSwitch.on = [AntForestManager sharedInstance].enableBackgroundLoop;
+    [loopSwitch addTarget:self action:@selector(toggleBackgroundLoop:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *loopLeading = [[UIStackView alloc] initWithArrangedSubviews:@[loopIcon, loopLabel]];
+    loopLeading.spacing = 12; loopLeading.alignment = UIStackViewAlignmentCenter;
+    [intervalButton.widthAnchor constraintEqualToConstant:70].active = YES;
+    UIStackView *loopControls = [[UIStackView alloc] initWithArrangedSubviews:@[intervalButton, loopSwitch]];
+    loopControls.spacing = 8; loopControls.alignment = UIStackViewAlignmentCenter;
+    UIStackView *loopRow = [[UIStackView alloc] initWithArrangedSubviews:@[loopLeading, loopControls]];
+    loopRow.alignment = UIStackViewAlignmentCenter; loopRow.distribution = UIStackViewDistributionEqualSpacing; loopRow.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIButton *scheduleButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [scheduleButton setTitle:@"定时收取设置" forState:UIControlStateNormal];
+    [scheduleButton setImage:[UIImage systemImageNamed:@"calendar"] forState:UIControlStateNormal];
+    scheduleButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    scheduleButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    scheduleButton.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    scheduleButton.imageEdgeInsets = UIEdgeInsetsMake(0, 0, 0, 10);
+    [scheduleButton addTarget:self action:@selector(showScheduleSettings) forControlEvents:UIControlEventTouchUpInside];
+    scheduleButton.translatesAutoresizingMaskIntoConstraints = NO;
+    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevron.tintColor = UIColor.systemGray3Color;
+    UIStackView *scheduleRow = [[UIStackView alloc] initWithArrangedSubviews:@[scheduleButton, chevron]];
+    scheduleRow.alignment = UIStackViewAlignmentCenter;
+    scheduleRow.translatesAutoresizingMaskIntoConstraints = NO;
+
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.dataSource = self;
     self.tableView.rowHeight = 52;
@@ -121,6 +299,10 @@ static void installEnergyRainCollector(id controller) {
     card.layer.borderWidth = 1;
     card.layer.borderColor = [UIColor systemGray5Color].CGColor;
     card.translatesAutoresizingMaskIntoConstraints = NO;
+    UIView *scheduleCard = [[UIView alloc] init];
+    scheduleCard.backgroundColor = UIColor.whiteColor; scheduleCard.layer.cornerRadius = 16; scheduleCard.layer.borderWidth = 1; scheduleCard.layer.borderColor = UIColor.systemGray5Color.CGColor; scheduleCard.translatesAutoresizingMaskIntoConstraints = NO;
+    UIView *divider1 = [[UIView alloc] init]; divider1.backgroundColor = UIColor.systemGray5Color; divider1.translatesAutoresizingMaskIntoConstraints = NO;
+    UIView *divider2 = [[UIView alloc] init]; divider2.backgroundColor = UIColor.systemGray5Color; divider2.translatesAutoresizingMaskIntoConstraints = NO;
 
     [self.view addSubview:grabber];
     [self.view addSubview:titleIcon];
@@ -128,33 +310,55 @@ static void installEnergyRainCollector(id controller) {
     [self.view addSubview:clearButton];
     [self.view addSubview:stats];
     [self.view addSubview:card];
+    [self.view addSubview:scheduleCard];
+    [self.view addSubview:self.tableView];
     [card addSubview:autoRow];
-    [card addSubview:self.tableView];
+    [card addSubview:rainRow];
+    [card addSubview:loopRow];
+    [card addSubview:divider1]; [card addSubview:divider2];
+    [scheduleCard addSubview:scheduleRow];
     [NSLayoutConstraint activateConstraints:@[
         [grabber.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:10],
         [grabber.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [grabber.widthAnchor constraintEqualToConstant:44], [grabber.heightAnchor constraintEqualToConstant:6],
         [titleIcon.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
         [titleIcon.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [titleIcon.widthAnchor constraintEqualToConstant:30], [titleIcon.heightAnchor constraintEqualToConstant:30],
+        [titleIcon.widthAnchor constraintEqualToConstant:34], [titleIcon.heightAnchor constraintEqualToConstant:34],
         [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:titleIcon.trailingAnchor constant:10],
+        [clearButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
+        [clearButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [stats.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:18],
         [stats.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
         [stats.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
         [card.topAnchor constraintEqualToAnchor:stats.bottomAnchor constant:18],
         [card.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [card.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [card.bottomAnchor constraintEqualToAnchor:clearButton.topAnchor constant:-10],
-        [clearButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [clearButton.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-8],
         [autoRow.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
         [autoRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
         [autoRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
-        [self.tableView.topAnchor constraintEqualToAnchor:autoRow.bottomAnchor constant:10],
-        [self.tableView.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:0],
-        [self.tableView.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:0],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:card.bottomAnchor constant:-4],
+        [rainRow.topAnchor constraintEqualToAnchor:autoRow.bottomAnchor constant:10],
+        [rainRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
+        [rainRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
+        [divider1.topAnchor constraintEqualToAnchor:rainRow.topAnchor constant:-5],
+        [divider1.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider1.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider1.heightAnchor constraintEqualToConstant:1],
+        [loopRow.topAnchor constraintEqualToAnchor:rainRow.bottomAnchor constant:10],
+        [loopRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
+        [loopRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
+        [divider2.topAnchor constraintEqualToAnchor:loopRow.topAnchor constant:-5],
+        [divider2.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider2.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider2.heightAnchor constraintEqualToConstant:1],
+        [card.bottomAnchor constraintEqualToAnchor:loopRow.bottomAnchor constant:16],
+        [scheduleCard.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:12],
+        [scheduleCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [scheduleCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [scheduleRow.topAnchor constraintEqualToAnchor:scheduleCard.topAnchor constant:12],
+        [scheduleRow.leadingAnchor constraintEqualToAnchor:scheduleCard.leadingAnchor constant:20],
+        [scheduleRow.trailingAnchor constraintEqualToAnchor:scheduleCard.trailingAnchor constant:-20],
+        [scheduleRow.heightAnchor constraintEqualToConstant:34],
+        [scheduleCard.bottomAnchor constraintEqualToAnchor:scheduleRow.bottomAnchor constant:12],
+        [self.tableView.topAnchor constraintEqualToAnchor:scheduleCard.bottomAnchor constant:8],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [self.tableView.heightAnchor constraintEqualToConstant:156],
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:@"LogUpdated" object:nil];
     [self refresh];
@@ -165,13 +369,13 @@ static void installEnergyRainCollector(id controller) {
     imageView.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
     imageView.contentMode = UIViewContentModeScaleAspectFit;
     if (size <= 26) {
-        UIView *badge = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 48, 48)];
+        UIView *badge = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 34, 34)];
         badge.backgroundColor = [UIColor colorWithRed:0.90 green:0.95 blue:0.91 alpha:1.0];
-        badge.layer.cornerRadius = 24;
-        imageView.frame = CGRectMake(12, 12, 24, 24);
+        badge.layer.cornerRadius = 17;
+        imageView.frame = CGRectMake(9, 9, 16, 16);
         [badge addSubview:imageView];
-        [badge.widthAnchor constraintEqualToConstant:48].active = YES;
-        [badge.heightAnchor constraintEqualToConstant:48].active = YES;
+        [badge.widthAnchor constraintEqualToConstant:34].active = YES;
+        [badge.heightAnchor constraintEqualToConstant:34].active = YES;
         return badge;
     }
     return imageView;
@@ -211,11 +415,53 @@ static void installEnergyRainCollector(id controller) {
     [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"enableAutoCollect"];
     if (sender.on) {
         [manager addLog:[NSString stringWithFormat:@"%@\n自动收集开始", getCurrentDateTimeString()]];
-        [manager startAutoCollectTimerWithInterval:300];
+        if (manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300];
+        if (manager.enableScheduledCollect) [manager startScheduledCollectTimer];
     } else {
-        [manager.autoCollectTimer invalidate];
+        [manager stopAutoCollectTimer];
+        [manager.scheduledCollectTimer invalidate];
+        manager.scheduledCollectTimer = nil;
         [manager addLog:[NSString stringWithFormat:@"%@\n自动收集关闭", getCurrentDateTimeString()]];
     }
+}
+
+- (void)toggleAutoRain:(UISwitch *)sender {
+    AntForestManager *manager = [AntForestManager sharedInstance];
+    manager.enableAutoRain = sender.on;
+    [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"enableAutoRain"];
+}
+
+- (void)updateIntervalLabel {
+    NSInteger minutes = MAX(1, [NSUserDefaults.standardUserDefaults integerForKey:@"backgroundIntervalMinutes"] ?: 5);
+    [self.intervalButton setTitle:[NSString stringWithFormat:@"%ld 分钟", (long)minutes] forState:UIControlStateNormal];
+}
+
+- (void)showIntervalSettings {
+    AntForestIntervalPanel *settings = [[AntForestIntervalPanel alloc] init];
+    settings.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) settings.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.mediumDetent];
+    [self presentViewController:settings animated:YES completion:nil];
+}
+
+- (void)toggleBackgroundLoop:(UISwitch *)sender {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    manager.enableBackgroundLoop = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableBackgroundLoop"];
+    if (sender.on && manager.enableAutoCollect) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300]; else [manager stopAutoCollectTimer];
+}
+
+- (void)toggleScheduledCollect:(UISwitch *)sender {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    manager.enableScheduledCollect = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableScheduledCollect"];
+    if (sender.on && manager.enableAutoCollect) [manager startScheduledCollectTimer]; else { [manager.scheduledCollectTimer invalidate]; manager.scheduledCollectTimer = nil; }
+}
+
+- (void)showScheduleSettings {
+    AntForestSchedulePanel *settings = [[AntForestSchedulePanel alloc] init];
+    UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:settings];
+    navigation.modalPresentationStyle = UIModalPresentationPageSheet;
+    [self presentViewController:navigation animated:YES completion:nil];
 }
 
 - (void)clearLogs {
@@ -252,7 +498,7 @@ static void showLogPanel(UIButton *button) {
     AntForestLogPanel *panel = [[AntForestLogPanel alloc] init];
     panel.modalPresentationStyle = UIModalPresentationPageSheet;
     if (@available(iOS 16.0, *)) {
-        panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent customDetentWithIdentifier:@"log" resolver:^CGFloat(id<UISheetPresentationControllerDetentResolutionContext> context) { return 440; }]];
+        panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent customDetentWithIdentifier:@"log" resolver:^CGFloat(id<UISheetPresentationControllerDetentResolutionContext> context) { return 600; }]];
     } else if (@available(iOS 15.0, *)) {
         panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent mediumDetent]];
     }
@@ -266,8 +512,8 @@ static void handleButtonPan(id controller, SEL _cmd, UIPanGestureRecognizer *ges
     if (gesture.state == UIGestureRecognizerStateChanged || gesture.state == UIGestureRecognizerStateEnded) {
         CGPoint center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
         UIEdgeInsets safe = view.safeAreaInsets;
-        center.x = MIN(MAX(center.x, safe.left + 28), view.bounds.size.width - safe.right - 28);
-        center.y = MIN(MAX(center.y, safe.top + 28), view.bounds.size.height - safe.bottom - 28);
+        center.x = MIN(MAX(center.x, safe.left + 24), view.bounds.size.width - safe.right - 24);
+        center.y = MIN(MAX(center.y, safe.top + 24), view.bounds.size.height - safe.bottom - 24);
         button.center = center;
         [gesture setTranslation:CGPointZero inView:view];
     }
@@ -283,11 +529,11 @@ static void addLogButton(UIViewController *controller) {
     button.tag = AntForestButtonTag;
     button.tintColor = UIColor.whiteColor;
     button.backgroundColor = [UIColor colorWithRed:0.06 green:0.22 blue:0.14 alpha:0.92];
-    button.layer.cornerRadius = 28;
+    button.layer.cornerRadius = 24;
     button.layer.shadowColor = UIColor.blackColor.CGColor;
     button.layer.shadowOpacity = 0.2;
     button.layer.shadowRadius = 8;
-    button.frame = CGRectMake(controller.view.bounds.size.width - 72, controller.view.safeAreaInsets.top + 160, 56, 56);
+    button.frame = CGRectMake(controller.view.bounds.size.width - 64, controller.view.safeAreaInsets.top + 160, 48, 48);
     button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
     UIImage *image = [UIImage systemImageNamed:@"leaf.fill"];
     [button setImage:image forState:UIControlStateNormal];
@@ -323,7 +569,13 @@ static void initializeManager(void) {
         [defaults setObject:today forKey:@"todayCollectedEnergyDate"];
     }
     manager.enableAutoCollect = [defaults boolForKey:@"enableAutoCollect"];
-    if (manager.enableAutoCollect) [manager startAutoCollectTimerWithInterval:300];
+    manager.enableAutoRain = [defaults objectForKey:@"enableAutoRain"] ? [defaults boolForKey:@"enableAutoRain"] : manager.enableAutoCollect;
+    manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
+    manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
+    manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
+    manager.collectInterval = MAX(1, [defaults integerForKey:@"backgroundIntervalMinutes"] ?: 5) * 60;
+    if (manager.enableAutoCollect && manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval];
+    if (manager.enableAutoCollect && manager.enableScheduledCollect) [manager startScheduledCollectTimer];
 }
 
 static void portViewDidLoad(id self, SEL _cmd) {
@@ -335,7 +587,8 @@ static void portViewDidLoad(id self, SEL _cmd) {
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
-    if (isEnergyRainURL(url) && ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoCollect) {
+    AntForestManager *manager = [AntForestManager sharedInstance];
+    if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installEnergyRainCollector(self);
         });

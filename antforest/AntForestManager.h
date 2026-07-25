@@ -13,7 +13,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface AntForestManager : NSObject
 
-+(id)sharedInstance;
++(AntForestManager *)sharedInstance;
 + (NSLock*)sharedLock;
 
 @property(nonatomic,strong) PSDJsBridge* jsBridge;
@@ -25,8 +25,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property(atomic) NSInteger todayCollectedEnergy;
 
 @property (nonatomic, strong) NSTimer *autoCollectTimer; //后台任务定时器
+@property (nonatomic, strong) NSTimer *scheduledCollectTimer;
 
 @property (assign, nonatomic) BOOL enableAutoCollect; //允许自动收集则自动开启后台模式
+@property (assign, nonatomic) BOOL enableAutoRain;
+@property (assign, nonatomic) BOOL enableBackgroundLoop;
+@property (assign, nonatomic) BOOL enableScheduledCollect;
+@property (nonatomic, strong) NSArray<NSString *> *scheduledTimes;
 
 @property (assign, nonatomic) int failedTimes; //未成功收取能量的次数
 @property(atomic) NSTimeInterval collectInterval; //takeLook时间间隔
@@ -34,6 +39,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (strong, nonatomic) NSString* myUserId; //我自己的ID
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval;
+-(void)startScheduledCollectTimer;
+-(void)stopAutoCollectTimer;
 
 -(void)cleanFriendsOcean:(NSString*)uid;
 -(void)cleanMyOcean;
@@ -48,6 +55,7 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)reviveEnergy:(NSString*)uid signId:(NSString*)signId; //貌似查询
 -(void)autoCollectBubbles;
 -(void)matchFriendIdAndBubbles:(id)args;
+-(void)recordCollectedEnergyFromResponse:(id)args;
 -(NSString*)getUserName:(NSString*)uid;
 -(void)addLog:(NSString *)logMessage;
 
