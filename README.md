@@ -28,8 +28,8 @@
 
 ## 使用说明
 
-1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort.dylib`](build/AntForestPort.dylib) 到支付宝。
-2. 注入前移除旧的 `AntForestProbe.dylib`，避免两个 dylib 同时 Hook 同一方法。
+1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.x.dylib`](build/AntForestPort.dylib) 到支付宝。
+2. 注入前移除旧的 `AntForestProbe-v2.x.dylib`，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，长按并拖动叶子图标。
 5. 在收取记录面板中按需打开“自动收取”和“自动能量雨”：两者相互独立；前者关闭后，后台循环与定时收取均暂停。
@@ -51,7 +51,7 @@
 
 后台使用步骤：
 
-1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.4.dylib` 和 `ImmortalizerJailed.dylib`。
+1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.x.dylib` 和 `ImmortalizerJailed.dylib`。
 2. 完全杀掉并重新打开支付宝，进入蚂蚁森林首页。
 3. 点击叶子按钮，在收取记录面板中开启“自动收取”。
 4. 点击 ImmortalizerJailed 的浮动按钮启用保活。
@@ -110,7 +110,7 @@
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make
 ```
 
-产物位于 `build/AntForestPort.dylib`。
+产物位于 `build/AntForestPort-v2.x.dylib`。
 
 GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
