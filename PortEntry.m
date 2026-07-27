@@ -9,9 +9,19 @@
 static void (*originalViewDidLoad)(id, SEL);
 static void (*originalViewDidAppear)(id, SEL, BOOL);
 static id (*originalTransformResponseData)(id, SEL, id);
+
+static void portInstallMarker(id self, SEL _cmd) {}
 static NSInteger const AntForestButtonTag = 941204;
 static NSString * const AntForestButtonXKey = @"AntForestButtonX";
 static NSString * const AntForestButtonYKey = @"AntForestButtonY";
+static NSString * const AntForestButtonSideKey = @"AntForestButtonSide";
+static const void *AntForestButtonCollapsedKey = &AntForestButtonCollapsedKey;
+static const void *AntForestButtonCollapseTokenKey = &AntForestButtonCollapseTokenKey;
+static BOOL shouldRevealLeafOnNextForestAppearance = YES;
+
+static BOOL isForestHomeURL(NSURL *url) {
+    return [url.absoluteString containsString:@"180020010001247580"];
+}
 
 static BOOL isEnergyRainURL(NSURL *url) {
     NSString *text = [url.absoluteString lowercaseString];
@@ -34,6 +44,30 @@ static void installEnergyRainCollector(id controller) {
         NSLog(@"[AntForestRain] collector: %@%@", result ?: @"", error ? [NSString stringWithFormat:@" error=%@", error] : @"");
     });
 }
+
+#if ANTFOREST_EARN_PROBE
+static void installEarnEnergyProbe(id controller) {
+    static const void *probeKey = &probeKey;
+    if (objc_getAssociatedObject(controller, probeKey)) return;
+    objc_setAssociatedObject(controller, probeKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) return;
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    NSString *install = @"(()=>{let p=window.__antForestEarnProbe;if(p)return JSON.stringify(p.summary);p={events:[],summary:{href:location.href,title:document.title,canvases:[...document.querySelectorAll('canvas')].map(c=>[c.width,c.height]),images:document.images.length},emit:(type,data)=>{if(p.events.length<80)p.events.push({type,...data})}};window.__antForestEarnProbe=p;const point=e=>{const t=e.touches&&e.touches[0]||e.changedTouches&&e.changedTouches[0]||e;const n=e.target||{};return{x:Math.round(t.clientX||0),y:Math.round(t.clientY||0),tag:n.tagName||'',id:n.id||'',class:String(n.className||'').slice(0,80)}};document.addEventListener('touchstart',e=>p.emit('touch',point(e)),true);document.addEventListener('click',e=>p.emit('click',point(e)),true);p.hook=()=>{const b=window.AlipayJSBridge;if(!b||!b.call||b.__afEarnProbe)return;b.__afEarnProbe=1;const f=b.call;b.call=function(handler,data){try{const r=data&&data.requestData&&data.requestData[0]||{};p.emit('bridge',{handler:String(handler),operation:String(data&&data.operationType||''),keys:Object.keys(data||{}).sort(),requestKeys:Object.keys(r).sort()})}catch(_){}return f.apply(this,arguments)}};p.hook();return JSON.stringify(p.summary)})()";
+    runJavaScript(webView, evaluate, install, ^(id result, NSError *error) {
+        NSLog(@"[AntForestEarnProbe] page=%@%@", result ?: @"", error ? [NSString stringWithFormat:@" error=%@", error.localizedDescription] : @"");
+    });
+    for (NSInteger tick = 1; tick <= 100; tick++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * 500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            NSString *drain = @"(()=>{const p=window.__antForestEarnProbe;if(!p)return '';p.hook&&p.hook();return p.events.length?JSON.stringify(p.events.splice(0,p.events.length)):''})()";
+            runJavaScript(webView, evaluate, drain, ^(id result, NSError *error) {
+                if ([result isKindOfClass:NSString.class] && [(NSString *)result length]) NSLog(@"[AntForestEarnProbe] events=%@", result);
+            });
+        });
+    }
+}
+#endif
 
 @interface AntForestLogPanel : UIViewController <UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
@@ -505,11 +539,92 @@ static void showLogPanel(UIButton *button) {
     [presenter presentViewController:panel animated:YES completion:nil];
 }
 
+static BOOL buttonIsCollapsed(UIButton *button) {
+    return [objc_getAssociatedObject(button, AntForestButtonCollapsedKey) boolValue];
+}
+
+static BOOL buttonIsOnLeft(UIButton *button) {
+    NSNumber *side = [[NSUserDefaults standardUserDefaults] objectForKey:AntForestButtonSideKey];
+    return side ? side.boolValue : button.center.x <= button.superview.bounds.size.width / 2;
+}
+
+static CGFloat buttonCenterY(UIButton *button) {
+    UIView *view = button.superview;
+    UIEdgeInsets safe = view.safeAreaInsets;
+    return MIN(MAX(button.center.y, safe.top + 24), view.bounds.size.height - safe.bottom - 24);
+}
+
+static void saveButtonPosition(UIButton *button, BOOL left) {
+    UIView *view = button.superview;
+    if (!view.bounds.size.width || !view.bounds.size.height) return;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    [defaults setFloat:button.center.x / view.bounds.size.width forKey:AntForestButtonXKey];
+    [defaults setFloat:button.center.y / view.bounds.size.height forKey:AntForestButtonYKey];
+    [defaults setBool:left forKey:AntForestButtonSideKey];
+}
+
+static void setButtonCollapsed(UIButton *button, BOOL collapsed, BOOL animated) {
+    UIView *view = button.superview;
+    if (!view) return;
+    BOOL left = buttonIsOnLeft(button);
+    UIEdgeInsets safe = view.safeAreaInsets;
+    CGFloat scale = 0.72;
+    CGFloat visibleWidth = 14;
+    CGFloat halfWidth = button.bounds.size.width * scale / 2;
+    CGPoint center = CGPointMake(left ? safe.left - halfWidth + visibleWidth : view.bounds.size.width - safe.right + halfWidth - visibleWidth, buttonCenterY(button));
+    if (!collapsed) center.x = left ? safe.left + 24 : view.bounds.size.width - safe.right - 24;
+    void (^changes)(void) = ^{
+        button.transform = collapsed ? CGAffineTransformMakeScale(scale, scale) : CGAffineTransformIdentity;
+        button.alpha = collapsed ? 0.88 : 1.0;
+        button.center = center;
+    };
+    if (animated) [UIView animateWithDuration:0.2 delay:0 options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut animations:changes completion:nil];
+    else changes();
+    objc_setAssociatedObject(button, AntForestButtonCollapsedKey, @(collapsed), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void scheduleButtonCollapse(UIButton *button) {
+    NSInteger token = [objc_getAssociatedObject(button, AntForestButtonCollapseTokenKey) integerValue] + 1;
+    objc_setAssociatedObject(button, AntForestButtonCollapseTokenKey, @(token), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (button.superview && [objc_getAssociatedObject(button, AntForestButtonCollapseTokenKey) integerValue] == token) {
+            setButtonCollapsed(button, YES, YES);
+        }
+    });
+}
+
+static void expandButton(UIButton *button) {
+    NSInteger token = [objc_getAssociatedObject(button, AntForestButtonCollapseTokenKey) integerValue] + 1;
+    objc_setAssociatedObject(button, AntForestButtonCollapseTokenKey, @(token), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (buttonIsCollapsed(button)) setButtonCollapsed(button, NO, YES);
+}
+
+static void dockButton(UIButton *button) {
+    UIView *view = button.superview;
+    BOOL left = button.center.x <= view.bounds.size.width / 2;
+    [[NSUserDefaults standardUserDefaults] setBool:left forKey:AntForestButtonSideKey];
+    setButtonCollapsed(button, NO, YES);
+    saveButtonPosition(button, left);
+    scheduleButtonCollapse(button);
+}
+
 static void handleButtonPan(id controller, SEL _cmd, UIPanGestureRecognizer *gesture) {
     UIButton *button = (UIButton *)gesture.view;
     UIView *view = button.superview;
+    if (!view) return;
     CGPoint translation = [gesture translationInView:view];
-    if (gesture.state == UIGestureRecognizerStateChanged || gesture.state == UIGestureRecognizerStateEnded) {
+    if (buttonIsCollapsed(button)) {
+        BOOL inward = buttonIsOnLeft(button) ? translation.x > 10 : translation.x < -10;
+        if (inward) {
+            expandButton(button);
+            [gesture setTranslation:CGPointZero inView:view];
+        } else if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled) {
+            scheduleButtonCollapse(button);
+        }
+        return;
+    }
+    if (gesture.state == UIGestureRecognizerStateBegan) expandButton(button);
+    if (gesture.state == UIGestureRecognizerStateChanged || gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled) {
         CGPoint center = CGPointMake(button.center.x + translation.x, button.center.y + translation.y);
         UIEdgeInsets safe = view.safeAreaInsets;
         center.x = MIN(MAX(center.x, safe.left + 24), view.bounds.size.width - safe.right - 24);
@@ -517,14 +632,18 @@ static void handleButtonPan(id controller, SEL _cmd, UIPanGestureRecognizer *ges
         button.center = center;
         [gesture setTranslation:CGPointZero inView:view];
     }
-    if (gesture.state == UIGestureRecognizerStateEnded) {
-        [[NSUserDefaults standardUserDefaults] setFloat:button.center.x / view.bounds.size.width forKey:AntForestButtonXKey];
-        [[NSUserDefaults standardUserDefaults] setFloat:button.center.y / view.bounds.size.height forKey:AntForestButtonYKey];
-    }
+    if (gesture.state == UIGestureRecognizerStateEnded || gesture.state == UIGestureRecognizerStateCancelled) dockButton(button);
 }
 
-static void addLogButton(UIViewController *controller) {
-    if ([controller.view viewWithTag:AntForestButtonTag]) return;
+static void addLogButton(UIViewController *controller, BOOL reveal) {
+    UIButton *existingButton = (UIButton *)[controller.view viewWithTag:AntForestButtonTag];
+    if (existingButton) {
+        if (reveal) {
+            expandButton(existingButton);
+            scheduleButtonCollapse(existingButton);
+        }
+        return;
+    }
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.tag = AntForestButtonTag;
     button.tintColor = UIColor.whiteColor;
@@ -538,12 +657,17 @@ static void addLogButton(UIViewController *controller) {
     UIImage *image = [UIImage systemImageNamed:@"leaf.fill"];
     [button setImage:image forState:UIControlStateNormal];
     [controller.view addSubview:button];
-    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) { showLogPanel(button); }] forControlEvents:UIControlEventTouchUpInside];
+    [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
+        if (buttonIsCollapsed(button)) { expandButton(button); scheduleButtonCollapse(button); }
+        else showLogPanel(button);
+    }] forControlEvents:UIControlEventTouchUpInside];
     CGFloat savedX = [[NSUserDefaults standardUserDefaults] floatForKey:AntForestButtonXKey];
     CGFloat savedY = [[NSUserDefaults standardUserDefaults] floatForKey:AntForestButtonYKey];
     if (savedX > 0 && savedY > 0) button.center = CGPointMake(savedX * controller.view.bounds.size.width, savedY * controller.view.bounds.size.height);
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:controller action:@selector(antforestHandlePan:)];
     [button addGestureRecognizer:pan];
+    if (reveal) scheduleButtonCollapse(button);
+    else setButtonCollapsed(button, YES, NO);
     NSLog(@"[AntForestPort] button added");
 }
 
@@ -588,12 +712,25 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
     AntForestManager *manager = [AntForestManager sharedInstance];
+    BOOL forestHome = isForestHomeURL(url);
+    BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
+    if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
+    if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (manager.jsBridge) [manager autoCollectBubbles];
+        });
+    }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installEnergyRainCollector(self);
         });
     }
-    addLogButton(self);
+#if ANTFOREST_EARN_PROBE
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        installEarnEnergyProbe(self);
+    });
+#endif
+    addLogButton(self, revealLeaf);
 }
 
 static id portTransformResponseData(id self, SEL _cmd, id value) {
@@ -612,6 +749,10 @@ static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original) 
 __attribute__((constructor))
 static void installHooks(void) {
     @autoreleasepool {
+        if (!class_addMethod(NSProcessInfo.class, sel_registerName("antforestPortHooksInstalled"), (IMP)portInstallMarker, "v@:")) return;
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+            shouldRevealLeafOnNextForestAppearance = YES;
+        }];
         Class webController = NSClassFromString(@"H5WebViewController");
         class_addMethod(webController, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
         BOOL viewHooked = hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
