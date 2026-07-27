@@ -45,30 +45,6 @@ static void installEnergyRainCollector(id controller) {
     });
 }
 
-#if ANTFOREST_EARN_PROBE
-static void installEarnEnergyProbe(id controller) {
-    static const void *probeKey = &probeKey;
-    if (objc_getAssociatedObject(controller, probeKey)) return;
-    objc_setAssociatedObject(controller, probeKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
-    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if (![webView respondsToSelector:evaluate]) return;
-    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-    NSString *install = @"(()=>{let p=window.__antForestEarnProbe;if(p)return JSON.stringify(p.summary);p={events:[],summary:{href:location.href,title:document.title,canvases:[...document.querySelectorAll('canvas')].map(c=>[c.width,c.height]),images:document.images.length},emit:(type,data)=>{if(p.events.length<80)p.events.push({type,...data})}};window.__antForestEarnProbe=p;const point=e=>{const t=e.touches&&e.touches[0]||e.changedTouches&&e.changedTouches[0]||e;const n=e.target||{};return{x:Math.round(t.clientX||0),y:Math.round(t.clientY||0),tag:n.tagName||'',id:n.id||'',class:String(n.className||'').slice(0,80)}};document.addEventListener('touchstart',e=>p.emit('touch',point(e)),true);document.addEventListener('click',e=>p.emit('click',point(e)),true);p.hook=()=>{const b=window.AlipayJSBridge;if(!b||!b.call||b.__afEarnProbe)return;b.__afEarnProbe=1;const f=b.call;b.call=function(handler,data){try{const r=data&&data.requestData&&data.requestData[0]||{};p.emit('bridge',{handler:String(handler),operation:String(data&&data.operationType||''),keys:Object.keys(data||{}).sort(),requestKeys:Object.keys(r).sort()})}catch(_){}return f.apply(this,arguments)}};p.hook();return JSON.stringify(p.summary)})()";
-    runJavaScript(webView, evaluate, install, ^(id result, NSError *error) {
-        NSLog(@"[AntForestEarnProbe] page=%@%@", result ?: @"", error ? [NSString stringWithFormat:@" error=%@", error.localizedDescription] : @"");
-    });
-    for (NSInteger tick = 1; tick <= 100; tick++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(tick * 500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-            NSString *drain = @"(()=>{const p=window.__antForestEarnProbe;if(!p)return '';p.hook&&p.hook();return p.events.length?JSON.stringify(p.events.splice(0,p.events.length)):''})()";
-            runJavaScript(webView, evaluate, drain, ^(id result, NSError *error) {
-                if ([result isKindOfClass:NSString.class] && [(NSString *)result length]) NSLog(@"[AntForestEarnProbe] events=%@", result);
-            });
-        });
-    }
-}
-#endif
-
 @interface AntForestLogPanel : UIViewController <UITableViewDataSource>
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UILabel *todayLabel;
@@ -725,11 +701,6 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             installEnergyRainCollector(self);
         });
     }
-#if ANTFOREST_EARN_PROBE
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        installEarnEnergyProbe(self);
-    });
-#endif
     addLogButton(self, revealLeaf);
 }
 
