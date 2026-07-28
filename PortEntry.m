@@ -203,6 +203,12 @@ static void installEnergyRainCollector(id controller) {
     [clearButton addTarget:self action:@selector(clearLogs) forControlEvents:UIControlEventTouchUpInside];
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
 
+    UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [copyButton setTitle:@"复制诊断" forState:UIControlStateNormal];
+    copyButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [copyButton addTarget:self action:@selector(copyDiagnosticLogs:) forControlEvents:UIControlEventTouchUpInside];
+    copyButton.translatesAutoresizingMaskIntoConstraints = NO;
+
     UIStackView *stats = [[UIStackView alloc] init];
     stats.axis = UILayoutConstraintAxisHorizontal;
     stats.distribution = UIStackViewDistributionFill;
@@ -317,6 +323,7 @@ static void installEnergyRainCollector(id controller) {
     [self.view addSubview:grabber];
     [self.view addSubview:titleIcon];
     [self.view addSubview:title];
+    [self.view addSubview:copyButton];
     [self.view addSubview:clearButton];
     [self.view addSubview:stats];
     [self.view addSubview:card];
@@ -336,6 +343,9 @@ static void installEnergyRainCollector(id controller) {
         [titleIcon.widthAnchor constraintEqualToConstant:34], [titleIcon.heightAnchor constraintEqualToConstant:34],
         [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:titleIcon.trailingAnchor constant:10],
+        [title.trailingAnchor constraintLessThanOrEqualToAnchor:copyButton.leadingAnchor constant:-8],
+        [copyButton.trailingAnchor constraintEqualToAnchor:clearButton.leadingAnchor constant:-10],
+        [copyButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [clearButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
         [clearButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [stats.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:18],
@@ -480,6 +490,19 @@ static void installEnergyRainCollector(id controller) {
     [((AntForestManager *)[AntForestManager sharedInstance]).logRecord removeAllObjects];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"logRecord"];
     [self.tableView reloadData];
+}
+
+- (void)copyDiagnosticLogs:(UIButton *)sender {
+    NSArray *logs = [AntForestManager sharedInstance].logRecord.reverseObjectEnumerator.allObjects;
+    NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(NSString *log, __unused NSDictionary *bindings) {
+        return [log containsString:@"诊断 ·"];
+    }];
+    NSArray *diagnostics = [logs filteredArrayUsingPredicate:predicate];
+    UIPasteboard.generalPasteboard.string = diagnostics.count ? [diagnostics componentsJoinedByString:@"\n\n"] : @"没有可复制的诊断记录";
+    [sender setTitle:@"已复制" forState:UIControlStateNormal];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [sender setTitle:@"复制诊断" forState:UIControlStateNormal];
+    });
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
