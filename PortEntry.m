@@ -28,6 +28,23 @@ static BOOL isEnergyRainURL(NSURL *url) {
     return [text containsString:@"energyrain"] || [text containsString:@"energy-rain"] || [text containsString:@"energy_rain"] || [text containsString:@"68687791.h5app.alipay.com"] || [text containsString:@"/p/c/18031y38qhq8"];
 }
 
+static id forestBridgeFromController(id controller) {
+    for (NSString *name in @[@"jsBridge", @"bridge"]) {
+        SEL selector = NSSelectorFromString(name);
+        if (![controller respondsToSelector:selector]) continue;
+        id bridge = ((id (*)(id, SEL))objc_msgSend)(controller, selector);
+        if ([bridge isKindOfClass:NSClassFromString(@"PSDJsBridge")]) return bridge;
+    }
+    return nil;
+}
+
+static BOOL isForestResponse(id value) {
+    if (![value isKindOfClass:NSDictionary.class]) return NO;
+    NSDictionary *response = value;
+    NSDictionary *data = [response[@"resData"] isKindOfClass:NSDictionary.class] ? response[@"resData"] : nil;
+    return (response[@"bubbles"] && response[@"userBaseInfo"]) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
+}
+
 static void installEnergyRainCollector(id controller) {
     static const void *collectorKey = &collectorKey;
     if (objc_getAssociatedObject(controller, collectorKey)) return;
@@ -718,6 +735,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
     AntForestManager *manager = [AntForestManager sharedInstance];
     BOOL forestHome = isForestHomeURL(url);
+    id pageBridge = forestHome ? forestBridgeFromController(self) : nil;
+    if (pageBridge && manager.jsBridge != pageBridge) {
+        manager.jsBridge = pageBridge;
+        [manager recordStage:@"诊断 · 已绑定森林首页 H5 Bridge"];
+    }
     if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
@@ -739,8 +761,10 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
 
 static id portTransformResponseData(id self, SEL _cmd, id value) {
     AntForestManager *manager = [AntForestManager sharedInstance];
-    if (manager.jsBridge != self) [manager recordStage:@"诊断 · H5 Bridge 已连接"];
-    manager.jsBridge = self;
+    if (isForestResponse(value) && manager.jsBridge != self) {
+        manager.jsBridge = self;
+        [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
+    }
     [manager matchFriendIdAndBubbles:value];
     return originalTransformResponseData(self, _cmd, value);
 }
