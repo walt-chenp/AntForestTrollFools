@@ -423,6 +423,7 @@ static void installEnergyRainCollector(id controller) {
     manager.enableAutoCollect = sender.on;
     self.statusLabel.text = sender.on ? @"运行中" : @"已关闭";
     [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"enableAutoCollect"];
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 自动收取开关：%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on) {
         [manager addLog:[NSString stringWithFormat:@"%@\n自动收集开始", getCurrentDateTimeString()]];
         if (manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300];
@@ -457,6 +458,7 @@ static void installEnergyRainCollector(id controller) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     manager.enableBackgroundLoop = sender.on;
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableBackgroundLoop"];
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 后台循环开关：%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on && manager.enableAutoCollect) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300]; else [manager stopAutoCollectTimer];
 }
 
@@ -674,6 +676,7 @@ static void initializeManager(void) {
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
     manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
     manager.collectInterval = MAX(1, [defaults integerForKey:@"backgroundIntervalMinutes"] ?: 5) * 60;
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 初始化：自动=%d，循环=%d", manager.enableAutoCollect, manager.enableBackgroundLoop]];
     if (manager.enableAutoCollect && manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval];
     if (manager.enableAutoCollect && manager.enableScheduledCollect) [manager startScheduledCollectTimer];
 }
@@ -689,11 +692,15 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
     AntForestManager *manager = [AntForestManager sharedInstance];
     BOOL forestHome = isForestHomeURL(url);
+    if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
     if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (manager.jsBridge) [manager autoCollectBubbles];
+            if (manager.jsBridge) {
+                [manager recordStage:@"诊断 · 首页桥接就绪，立即补跑"];
+                [manager autoCollectBubbles];
+            }
         });
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
@@ -705,8 +712,10 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
 }
 
 static id portTransformResponseData(id self, SEL _cmd, id value) {
-    ((AntForestManager *)[AntForestManager sharedInstance]).jsBridge = self;
-    [[AntForestManager sharedInstance] matchFriendIdAndBubbles:value];
+    AntForestManager *manager = [AntForestManager sharedInstance];
+    if (manager.jsBridge != self) [manager recordStage:@"诊断 · H5 Bridge 已连接"];
+    manager.jsBridge = self;
+    [manager matchFriendIdAndBubbles:value];
     return originalTransformResponseData(self, _cmd, value);
 }
 

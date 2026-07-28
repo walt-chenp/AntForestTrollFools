@@ -20,7 +20,9 @@ static NSString *takeLookCurrentFriendId = nil;
 static BOOL takeLookRunning = NO;
 static BOOL takeLookWaitingForFriend = NO;
 static NSUInteger takeLookRounds = 0;
-static const NSUInteger kTakeLookMaxRounds = 12;
+static const NSUInteger kTakeLookMaxRounds = 150;
+static BOOL rankScanPending = NO;
+static NSUInteger collectionCycle = 0;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -52,12 +54,18 @@ dispatch_queue_t globalSerialQueueTest;
     return sharedLock;
 }
 
+- (void)recordStage:(NSString *)stage {
+    NSLog(@"[AntForestPort] %@", stage);
+    if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), stage]];
+}
+
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
     // 如果已有定时器，先停止它
     [self.autoCollectTimer invalidate];
     self.autoCollectTimer = nil;
     self.collectInterval = interval;
     self.failedTimes = 0; //每次重新启动定时器时 失败次数均要置 0
+    [self recordStage:[NSString stringWithFormat:@"诊断 · 循环已启动（%ld 秒）", (long)interval]];
     
     // 创建新的定时器
     self.autoCollectTimer = [NSTimer scheduledTimerWithTimeInterval:interval
@@ -146,6 +154,7 @@ NSString* getCurrentDateTimeString() {
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
     
     if([self jsBridge]) {
+        [self recordStage:@"诊断 · 请求找能量续查"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook takeLook");
     }
@@ -161,15 +170,18 @@ NSString* getCurrentDateTimeString() {
         takeLookRounds = 0;
         [takeLookVisitedFriends removeAllObjects];
     }
+    [self recordStage:@"诊断 · 排行榜扫描结束，开始找能量续查"];
     [self requestNextTakeLook];
 }
 
 -(void)requestNextTakeLook {
     @synchronized (self) {
         if (!takeLookRunning || !self.enableAutoCollect || !self.jsBridge || takeLookRounds >= kTakeLookMaxRounds) {
+            NSString *reason = takeLookRounds >= kTakeLookMaxRounds ? @"达到安全上限" : @"任务已停止或桥接不可用";
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
             takeLookCurrentFriendId = nil;
+            [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量续查结束：%@", reason]];
             return;
         }
         takeLookRounds++;
@@ -192,10 +204,12 @@ NSString* getCurrentDateTimeString() {
         takeLookWaitingForFriend = NO;
         if ([takeLookVisitedFriends containsObject:friendId]) {
             takeLookRunning = NO;
+            [self recordStage:@"诊断 · 找能量续查结束：服务端重复返回候选"];
             return NO;
         }
         [takeLookVisitedFriends addObject:friendId];
         takeLookCurrentFriendId = friendId;
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量候选：第 %lu 位", (unsigned long)takeLookRounds]];
         return YES;
     }
 }
@@ -239,6 +253,7 @@ NSString* getCurrentDateTimeString() {
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK",friendId];
     
     if([self jsBridge]) {
+        [self recordStage:@"诊断 · 请求好友气泡"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook queryFriendsBubbles: %@",friendId);
     }
@@ -256,6 +271,7 @@ NSString* getCurrentDateTimeString() {
     NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"bizType\":\"\",\"fromAct\":\"TAKE_LOOK\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,bids,version,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK", uid];
     if([self jsBridge]) {
+        [self recordStage:@"诊断 · 请求收取能量"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook collectBubbles: %@ | [%@] ",uid,bids);
     }
@@ -321,6 +337,7 @@ NSString* getCurrentDateTimeString() {
     NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
     if([self jsBridge]) {
+        [self recordStage:@"诊断 · 请求好友排行榜"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook queryTotalRank");
     }
@@ -365,64 +382,56 @@ NSString* getCurrentDateTimeString() {
     return quotedIds;
 }
 
+- (void)scanRankedFriends:(NSArray *)friendIds cycle:(NSUInteger)cycle {
+    if (!friendIds.count || !self.enableAutoCollect || !self.jsBridge) {
+        [self recordStage:@"诊断 · 排行榜无可扫描好友，转入找能量续查"];
+        [self startTakeLookContinuation];
+        return;
+    }
+    [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜回包：%lu 位好友，开始分组扫描", (unsigned long)friendIds.count]];
+    [self queryAccount:[[self intArrToStr:friendIds] componentsJoinedByString:@","]];
+    NSMutableArray<NSString *> *groups = [NSMutableArray array];
+    for (NSUInteger index = 0; index < friendIds.count; index += 20) {
+        NSRange range = NSMakeRange(index, MIN((NSUInteger)20, friendIds.count - index));
+        [groups addObject:[[self intArrToStr:[friendIds subarrayWithRange:range]] componentsJoinedByString:@","]];
+    }
+    dispatch_async(globalSerialQueueTest, ^{
+        for (NSString *uids in groups) {
+            if (!self.enableAutoCollect || cycle != collectionCycle) break;
+            [self queryRobFlag:uids];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.enableAutoCollect && cycle == collectionCycle) [self startTakeLookContinuation];
+        });
+    });
+}
+
 // 每隔300秒一次
 -(void)autoCollectBubbles {
     @try {
-        if (!self.enableAutoCollect || !self.jsBridge) return;
-        if (lastCollectStartedAt && -[lastCollectStartedAt timeIntervalSinceNow] < 45) return;
+        if (!self.enableAutoCollect || !self.jsBridge) {
+            [self recordStage:[NSString stringWithFormat:@"诊断 · 收取未启动：自动收取=%d，桥接=%d", self.enableAutoCollect, self.jsBridge != nil]];
+            return;
+        }
+        if (lastCollectStartedAt && -[lastCollectStartedAt timeIntervalSinceNow] < 45) {
+            [self recordStage:@"诊断 · 收取跳过：45 秒冷却中"];
+            return;
+        }
         lastCollectStartedAt = NSDate.date;
-        
-        // 查询总排行 获取 AllFriendId MySelfUserId
-        [[AntForestManager sharedInstance] queryTotalRank];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self.enableAutoCollect && self.jsBridge) [self startTakeLookContinuation];
+        collectionCycle++;
+        NSUInteger cycle = collectionCycle;
+        rankScanPending = YES;
+        [self.friendsRank removeAllObjects];
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 收取轮次 %lu 开始", (unsigned long)cycle]];
+        [self queryTotalRank];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (rankScanPending && cycle == collectionCycle) {
+                rankScanPending = NO;
+                [self recordStage:@"诊断 · 排行榜回包超时，转入找能量续查"];
+                [self startTakeLookContinuation];
+            }
         });
-        
-        // 延时 2 秒，遍历 AllFrinedID 每 20 个一组
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            // 查询账户名称
-            NSArray *allFriendId = [[[AntForestManager sharedInstance] friendsRank] allKeys];
-            NSString *alluid = [[self intArrToStr:allFriendId] componentsJoinedByString:@","];
-            [[AntForestManager sharedInstance] queryAccount:alluid];
-            
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                NSInteger count = 0;
-                NSMutableArray *arrUid = [NSMutableArray array];  // 确保初始化 arrUid
-                
-                // 遍历所有好友 ID，每 20 个为一组
-                for (NSNumber *userId in allFriendId) {
-                    [arrUid addObject:userId];
-                    count++;
-                    //FileLog(@"count:%ld userId:%@", (long)count, userId);
-                    
-                    // 每 20 个为一组，开始延时执行
-                    if (count % 20 == 0) {
-                        // 创建 arrUid 的副本，并延迟执行任务
-                        NSMutableArray *groupArrUid = [arrUid mutableCopy];
-                        if (arrUid.count > 0) {
-                            NSString *uids = [[self intArrToStr:groupArrUid] componentsJoinedByString:@","];
-                            dispatch_async(globalSerialQueueTest, ^{
-                                [[AntForestManager sharedInstance] queryRobFlag:uids];
-                            });
-                        }
-                        
-                        // 清空 arrUid 数组
-                        [arrUid removeAllObjects];
-                    }
-                }
-                //最后一组
-                if([arrUid count] > 0) {
-                    NSString *uids = [[self intArrToStr:arrUid] componentsJoinedByString:@","];
-                    dispatch_async(globalSerialQueueTest, ^{
-                        [[AntForestManager sharedInstance] queryRobFlag:uids];
-                    });
-                    [arrUid removeAllObjects];
-                }
-                
-                // 主要是更新标题 失败次数与当前时间间隔
-                self.failedTimes++;
-            });
-        });
+        self.failedTimes++;
         
     } @catch (NSException *exception) {
         // 捕获异常的代码
@@ -615,6 +624,7 @@ NSString* getCurrentDateTimeString() {
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
         [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
         [defaults synchronize];
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 收取成功：%ld g", (long)energy.integerValue]];
         NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg", getCurrentDateTimeString(), (long)energy.integerValue];
         [self addLog:log];
     }
@@ -687,6 +697,9 @@ NSString* getCurrentDateTimeString() {
                     }
                 }
                 NSMutableDictionary *dictBubbles = [dict objectForKey:@"bubbles"];
+                NSUInteger available = 0;
+                for (NSDictionary *bubble in dictBubbles) if ([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"]) available++;
+                if (available) [self recordStage:[NSString stringWithFormat:@"诊断 · 好友气泡回包：可收 %lu 个", (unsigned long)available]];
                 // 初始化一个空的可变数组
                 NSMutableArray *bidArr = [NSMutableArray array];
                 for (NSDictionary *bubble in dictBubbles) {
@@ -752,6 +765,9 @@ NSString* getCurrentDateTimeString() {
             //匹配是否要查询这个人的首页
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"]) {
                 NSArray *rankArr = [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"];
+                NSUInteger collectable = 0;
+                for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
+                [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜首屏：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
                 for(NSDictionary *dictRank in rankArr) {
                     NSString *userId = [dictRank objectForKey:@"userId"];
                     NSNumber *canCollectEnergy = [dictRank objectForKey:@"canCollectEnergy"];
@@ -785,6 +801,10 @@ NSString* getCurrentDateTimeString() {
                     NSString *uid = [dictTotalRank objectForKey:@"userId"];
                     //FileLog(@"rankTotalArr: %@ => %@",uid,rank);
                     [fr setObject:rank forKey:uid];
+                }
+                if (rankScanPending) {
+                    rankScanPending = NO;
+                    [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
                 }
             }
             

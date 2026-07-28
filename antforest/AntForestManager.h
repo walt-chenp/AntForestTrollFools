@@ -58,6 +58,7 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)recordCollectedEnergyFromResponse:(id)args;
 -(NSString*)getUserName:(NSString*)uid;
 -(void)addLog:(NSString *)logMessage;
+-(void)recordStage:(NSString *)stage;
 
 @end
 
