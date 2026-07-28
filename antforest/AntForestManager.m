@@ -573,6 +573,12 @@ NSString* getCurrentDateTimeString() {
 }
 
 - (void)addLog:(NSString *)logMessage {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self addLog:logMessage];
+        });
+        return;
+    }
     //日志持久化
     @try {
         // 如果日志数量超过 50 条，移除最早的日志
