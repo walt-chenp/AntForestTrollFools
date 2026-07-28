@@ -252,8 +252,12 @@ NSString* getCurrentDateTimeString() {
         if (!takeLookRunning || ![takeLookCurrentFriendId isEqualToString:friendId]) return;
         takeLookCurrentFriendId = nil;
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self requestNextTakeLook];
+    // 收取请求在全局串行队列中发送；以该队列的栅栏作为下一位候选的起点，避免与前一位的多颗气泡请求重叠。
+    dispatch_async(globalSerialQueueCollect, ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            [self recordStage:@"诊断 · 当前候选收取队列已完成，继续下一位"];
+            [self requestNextTakeLook];
+        });
     });
 }
 
