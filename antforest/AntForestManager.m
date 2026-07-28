@@ -21,6 +21,7 @@ static NSString *takeLookCurrentFriendId = nil;
 static BOOL takeLookRunning = NO;
 static BOOL takeLookWaitingForFriend = NO;
 static NSUInteger takeLookRounds = 0;
+static NSUInteger takeLookRequestToken = 0;
 static const NSUInteger kTakeLookMaxRounds = 150;
 static BOOL rankScanPending = NO;
 static NSUInteger collectionCycle = 0;
@@ -178,6 +179,7 @@ NSString* getCurrentDateTimeString() {
         takeLookWaitingForFriend = NO;
         takeLookCurrentFriendId = nil;
         takeLookRounds = 0;
+        takeLookRequestToken++;
         [takeLookVisitedFriends removeAllObjects];
     }
     [self recordStage:@"诊断 · 排行榜扫描结束，开始找能量续查"];
@@ -185,6 +187,7 @@ NSString* getCurrentDateTimeString() {
 }
 
 -(void)requestNextTakeLook {
+    __block NSUInteger requestToken = 0;
     @synchronized (self) {
         if (!takeLookRunning || !self.enableAutoCollect || !self.jsBridge || takeLookRounds >= kTakeLookMaxRounds) {
             NSString *reason = takeLookRounds >= kTakeLookMaxRounds ? @"达到安全上限" : @"任务已停止或桥接不可用";
@@ -197,14 +200,15 @@ NSString* getCurrentDateTimeString() {
         takeLookRounds++;
         takeLookWaitingForFriend = YES;
         takeLookCurrentFriendId = nil;
+        requestToken = ++takeLookRequestToken;
     }
     [self takeLook];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         @synchronized (self) {
-            if (!takeLookRunning || !takeLookWaitingForFriend) return;
+            if (!takeLookRunning || !takeLookWaitingForFriend || requestToken != takeLookRequestToken) return;
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
-            [self recordStage:@"诊断 · 找能量续查结束：候选回包超时"];
+            [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量续查结束：第 %lu 位候选回包超时", (unsigned long)takeLookRounds]];
         }
     });
 }
