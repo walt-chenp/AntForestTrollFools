@@ -290,7 +290,7 @@ NSString* getCurrentDateTimeString() {
     NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"bizType\":\"\",\"fromAct\":\"TAKE_LOOK\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,bids,version,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK", uid];
     if([self jsBridge]) {
-        [self recordStage:@"诊断 · 请求收取能量"];
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 请求收取能量：第 %lu 轮，待确认 %lu 笔", (unsigned long)collectionCycle, (unsigned long)pendingCollectBubbles.count]];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook collectBubbles: %@ | [%@] ",uid,bids);
     }
@@ -301,7 +301,7 @@ NSString* getCurrentDateTimeString() {
             if (![pendingCollectBubbles containsObject:collectKey]) return;
             [pendingCollectBubbles removeObject:collectKey];
         }
-        [self recordStage:@"诊断 · 收取未确认：5 秒内未解析到成功能量"];
+        [self recordStage:@"诊断 · 收取结果待确认：请求后 5 秒内未从桥接回包解析到 collectedEnergy"];
     });
 }
 
@@ -414,7 +414,8 @@ NSString* getCurrentDateTimeString() {
         [self startTakeLookContinuation];
         return;
     }
-    [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜回包：%lu 位好友，开始分组扫描", (unsigned long)friendIds.count]];
+    NSUInteger groupCount = (friendIds.count + 19) / 20;
+    [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜全量回包：%lu 位好友，分 %lu 组校验", (unsigned long)friendIds.count, (unsigned long)groupCount]];
     [self queryAccount:[[self intArrToStr:friendIds] componentsJoinedByString:@","]];
     NSMutableArray<NSString *> *groups = [NSMutableArray array];
     for (NSUInteger index = 0; index < friendIds.count; index += 20) {
@@ -422,9 +423,10 @@ NSString* getCurrentDateTimeString() {
         [groups addObject:[[self intArrToStr:[friendIds subarrayWithRange:range]] componentsJoinedByString:@","]];
     }
     dispatch_async(globalSerialQueueTest, ^{
-        for (NSString *uids in groups) {
+        for (NSUInteger index = 0; index < groups.count; index++) {
             if (!self.enableAutoCollect || cycle != collectionCycle) break;
-            [self queryRobFlag:uids];
+            [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验：第 %lu/%lu 组", (unsigned long)(index + 1), (unsigned long)groups.count]];
+            [self queryRobFlag:groups[index]];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.enableAutoCollect && cycle == collectionCycle) [self startTakeLookContinuation];
@@ -662,7 +664,7 @@ NSString* getCurrentDateTimeString() {
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
         [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
         [defaults synchronize];
-        [self recordStage:[NSString stringWithFormat:@"诊断 · 收取成功：%ld g", (long)energy.integerValue]];
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 收取成功：%ld g（第 %lu 轮，今日累计 %ld g）", (long)energy.integerValue, (unsigned long)collectionCycle, (long)self.todayCollectedEnergy]];
         NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg", getCurrentDateTimeString(), (long)energy.integerValue];
         [self addLog:log];
     }
@@ -727,6 +729,7 @@ NSString* getCurrentDateTimeString() {
                         NSString *type = [dic objectForKey:@"type"];
                         NSString *myUserId = [[AntForestManager sharedInstance] myUserId]; //我自己的ID
                         if([type isEqualToString:@"energyShield"] && ![userId isEqualToString:myUserId]){
+                            [self recordStage:@"诊断 · 好友气泡回包：检测到保护罩，跳过该好友"];
                             NSString *log = [NSString stringWithFormat:@"%@\n检测到保护罩,跳过拾取",[[AntForestManager sharedInstance] getUserName:userId]];
                             [[AntForestManager sharedInstance] addLog:log];
                             [self advanceTakeLookForFriend:userId];
@@ -735,9 +738,13 @@ NSString* getCurrentDateTimeString() {
                     }
                 }
                 NSMutableDictionary *dictBubbles = [dict objectForKey:@"bubbles"];
-                NSUInteger available = 0;
-                for (NSDictionary *bubble in dictBubbles) if ([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"]) available++;
-                if (available) [self recordStage:[NSString stringWithFormat:@"诊断 · 好友气泡回包：可收 %lu 个", (unsigned long)available]];
+                NSUInteger available = 0, waiting = 0;
+                for (NSDictionary *bubble in dictBubbles) {
+                    if ([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"]) available++;
+                    if ([[bubble objectForKey:@"collectStatus"] isEqualToString:@"WAITING"]) waiting++;
+                }
+                BOOL mine = [userId isEqualToString:self.myUserId];
+                [self recordStage:[NSString stringWithFormat:@"诊断 · %@气泡回包：总 %lu 个，可收 %lu 个，等待 %lu 个", mine ? @"本人" : @"好友", (unsigned long)dictBubbles.count, (unsigned long)available, (unsigned long)waiting]];
                 // 初始化一个空的可变数组
                 NSMutableArray *bidArr = [NSMutableArray array];
                 for (NSDictionary *bubble in dictBubbles) {
@@ -805,7 +812,7 @@ NSString* getCurrentDateTimeString() {
                 NSArray *rankArr = [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"];
                 NSUInteger collectable = 0;
                 for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
-                [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜首屏：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
+                [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
                 for(NSDictionary *dictRank in rankArr) {
                     NSString *userId = [dictRank objectForKey:@"userId"];
                     NSNumber *canCollectEnergy = [dictRank objectForKey:@"canCollectEnergy"];
@@ -824,6 +831,7 @@ NSString* getCurrentDateTimeString() {
                 //FileLog(@"myUserId: %@",userIdMy);
                 [[AntForestManager sharedInstance] setMyUserId:userIdMy];
                 NSNumber *canCollectEnergy = [myDict objectForKey:@"canCollectEnergy"];
+                [self recordStage:[NSString stringWithFormat:@"诊断 · 本人能量状态：%@", [canCollectEnergy isEqualToNumber:@1] ? @"可收" : @"暂无成熟能量"]];
                 if([canCollectEnergy isEqualToNumber:@1]){
                     dispatch_async(globalSerialQueueQuery, ^{
                         [[AntForestManager sharedInstance] queryMyBubbles];

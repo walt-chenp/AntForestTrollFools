@@ -493,12 +493,15 @@ static void installEnergyRainCollector(id controller) {
 }
 
 - (void)copyDiagnosticLogs:(UIButton *)sender {
-    NSArray *logs = [AntForestManager sharedInstance].logRecord.reverseObjectEnumerator.allObjects;
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    NSArray *logs = manager.logRecord.reverseObjectEnumerator.allObjects;
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(NSString *log, __unused NSDictionary *bindings) {
         return [log containsString:@"诊断 ·"];
     }];
     NSArray *diagnostics = [logs filteredArrayUsingPredicate:predicate];
-    UIPasteboard.generalPasteboard.string = diagnostics.count ? [diagnostics componentsJoinedByString:@"\n\n"] : @"没有可复制的诊断记录";
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 诊断记录\n导出时间：%@\n配置：自动收取=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，桥接=%@\n统计：今日=%ld g，累计=%ld g，诊断条目=%lu\n隐私：已隐藏好友昵称、UID 与气泡 ID\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.jsBridge ? @"已连接" : @"未连接", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)diagnostics.count];
+    UIPasteboard.generalPasteboard.string = diagnostics.count ? [header stringByAppendingString:[diagnostics componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的诊断记录"];
     [sender setTitle:@"已复制" forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [sender setTitle:@"复制诊断" forState:UIControlStateNormal];
