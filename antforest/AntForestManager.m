@@ -15,6 +15,7 @@ static AntForestManager *afm = nil;
 static NSDate *lastCollectStartedAt = nil;
 static NSString *lastScheduledMinute = nil;
 static NSMutableSet<NSString *> *recordedCollectedBubbles = nil;
+static NSMutableSet<NSString *> *pendingCollectBubbles = nil;
 static NSMutableSet<NSString *> *takeLookVisitedFriends = nil;
 static NSString *takeLookCurrentFriendId = nil;
 static BOOL takeLookRunning = NO;
@@ -39,6 +40,7 @@ dispatch_queue_t globalSerialQueueTest;
         globalSerialQueueCollect = dispatch_queue_create("antforest_collect", DISPATCH_QUEUE_SERIAL);
         globalSerialQueueTest = dispatch_queue_create("antforest_test", DISPATCH_QUEUE_SERIAL);
         recordedCollectedBubbles = [NSMutableSet set];
+        pendingCollectBubbles = [NSMutableSet set];
         takeLookVisitedFriends = [NSMutableSet set];
         
     });
@@ -264,6 +266,14 @@ NSString* getCurrentDateTimeString() {
 
 //收集能量球
 -(void)collectBubbles:(NSString*)uid bubblesId:(NSString*)bids {
+    NSString *collectKey = [NSString stringWithFormat:@"%@:%@", uid ?: @"", bids ?: @""];
+    @synchronized (self) {
+        if ([pendingCollectBubbles containsObject:collectKey]) {
+            [self recordStage:@"诊断 · 收取跳过：重复气泡请求"];
+            return;
+        }
+        [pendingCollectBubbles addObject:collectKey];
+    }
     [[AntForestManager sharedLock] lock];
     NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
@@ -277,6 +287,13 @@ NSString* getCurrentDateTimeString() {
     }
     [NSThread sleepForTimeInterval:0.3];
     [[AntForestManager sharedLock] unlock];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        @synchronized (self) {
+            if (![pendingCollectBubbles containsObject:collectKey]) return;
+            [pendingCollectBubbles removeObject:collectKey];
+        }
+        [self recordStage:@"诊断 · 收取未确认：5 秒内未解析到成功能量"];
+    });
 }
 
 -(void)reportClickTime{
@@ -422,6 +439,7 @@ NSString* getCurrentDateTimeString() {
         NSUInteger cycle = collectionCycle;
         rankScanPending = YES;
         [self.friendsRank removeAllObjects];
+        @synchronized (self) { [pendingCollectBubbles removeAllObjects]; }
         [self recordStage:[NSString stringWithFormat:@"诊断 · 收取轮次 %lu 开始", (unsigned long)cycle]];
         [self queryTotalRank];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -620,6 +638,11 @@ NSString* getCurrentDateTimeString() {
         NSString *key = [NSString stringWithFormat:@"%@:%@:%ld", userId, bubbleId, (long)energy.integerValue];
         if (bubbleId.length && [recordedCollectedBubbles containsObject:key]) continue;
         if (bubbleId.length) { if (recordedCollectedBubbles.count > 1000) [recordedCollectedBubbles removeAllObjects]; [recordedCollectedBubbles addObject:key]; }
+        if (bubbleId.length) {
+            @synchronized (self) {
+                [pendingCollectBubbles removeObject:[NSString stringWithFormat:@"%@:%@", userId, bubbleId]];
+            }
+        }
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
             self.todayCollectedEnergy = 0;
