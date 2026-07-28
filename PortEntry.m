@@ -720,7 +720,11 @@ static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original) 
 __attribute__((constructor))
 static void installHooks(void) {
     @autoreleasepool {
-        if (!class_addMethod(NSProcessInfo.class, sel_registerName("antforestPortHooksInstalled"), (IMP)portInstallMarker, "v@:")) return;
+        BOOL shouldInstall = NO;
+        @synchronized (NSProcessInfo.class) {
+            shouldInstall = class_addMethod(NSProcessInfo.class, sel_registerName("antforestPortHooksInstalled"), (IMP)portInstallMarker, "v@:");
+        }
+        if (!shouldInstall) return;
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
             shouldRevealLeafOnNextForestAppearance = YES;
         }];

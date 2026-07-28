@@ -15,6 +15,12 @@ static AntForestManager *afm = nil;
 static NSDate *lastCollectStartedAt = nil;
 static NSString *lastScheduledMinute = nil;
 static NSMutableSet<NSString *> *recordedCollectedBubbles = nil;
+static NSMutableSet<NSString *> *takeLookVisitedFriends = nil;
+static NSString *takeLookCurrentFriendId = nil;
+static BOOL takeLookRunning = NO;
+static BOOL takeLookWaitingForFriend = NO;
+static NSUInteger takeLookRounds = 0;
+static const NSUInteger kTakeLookMaxRounds = 12;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -31,6 +37,7 @@ dispatch_queue_t globalSerialQueueTest;
         globalSerialQueueCollect = dispatch_queue_create("antforest_collect", DISPATCH_QUEUE_SERIAL);
         globalSerialQueueTest = dispatch_queue_create("antforest_test", DISPATCH_QUEUE_SERIAL);
         recordedCollectedBubbles = [NSMutableSet set];
+        takeLookVisitedFriends = [NSMutableSet set];
         
     });
     return afm;
@@ -142,6 +149,65 @@ NSString* getCurrentDateTimeString() {
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook takeLook");
     }
+}
+
+// 按“找能量”的候选顺序补扫，避免首页排行榜只返回局部好友时遗漏成熟能量。
+-(void)startTakeLookContinuation {
+    @synchronized (self) {
+        if (takeLookRunning) return;
+        takeLookRunning = YES;
+        takeLookWaitingForFriend = NO;
+        takeLookCurrentFriendId = nil;
+        takeLookRounds = 0;
+        [takeLookVisitedFriends removeAllObjects];
+    }
+    [self requestNextTakeLook];
+}
+
+-(void)requestNextTakeLook {
+    @synchronized (self) {
+        if (!takeLookRunning || !self.enableAutoCollect || !self.jsBridge || takeLookRounds >= kTakeLookMaxRounds) {
+            takeLookRunning = NO;
+            takeLookWaitingForFriend = NO;
+            takeLookCurrentFriendId = nil;
+            return;
+        }
+        takeLookRounds++;
+        takeLookWaitingForFriend = YES;
+        takeLookCurrentFriendId = nil;
+    }
+    [self takeLook];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        @synchronized (self) {
+            if (!takeLookRunning || !takeLookWaitingForFriend) return;
+            takeLookRunning = NO;
+            takeLookWaitingForFriend = NO;
+        }
+    });
+}
+
+-(BOOL)consumeTakeLookFriend:(NSString *)friendId {
+    @synchronized (self) {
+        if (!takeLookRunning || !takeLookWaitingForFriend) return YES;
+        takeLookWaitingForFriend = NO;
+        if ([takeLookVisitedFriends containsObject:friendId]) {
+            takeLookRunning = NO;
+            return NO;
+        }
+        [takeLookVisitedFriends addObject:friendId];
+        takeLookCurrentFriendId = friendId;
+        return YES;
+    }
+}
+
+-(void)advanceTakeLookForFriend:(NSString *)friendId {
+    @synchronized (self) {
+        if (!takeLookRunning || ![takeLookCurrentFriendId isEqualToString:friendId]) return;
+        takeLookCurrentFriendId = nil;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self requestNextTakeLook];
+    });
 }
 
 -(void)queryMyBubbles {
@@ -308,6 +374,9 @@ NSString* getCurrentDateTimeString() {
         
         // 查询总排行 获取 AllFriendId MySelfUserId
         [[AntForestManager sharedInstance] queryTotalRank];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.enableAutoCollect && self.jsBridge) [self startTakeLookContinuation];
+        });
         
         // 延时 2 秒，遍历 AllFrinedID 每 20 个一组
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -581,6 +650,7 @@ NSString* getCurrentDateTimeString() {
             // 匹配 takelook 返回的 friendID
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"friendId"]) {
                 NSString *friendId = [[dict objectForKey:@"resData"] objectForKey:@"friendId"];
+                if (![self consumeTakeLookFriend:friendId]) return;
                 NSMutableDictionary* fb = [[AntForestManager sharedInstance] friendsBubbles];
                 //如果字典树中没有
                 if(![fb objectForKey:friendId]){
@@ -611,6 +681,7 @@ NSString* getCurrentDateTimeString() {
                         if([type isEqualToString:@"energyShield"] && ![userId isEqualToString:myUserId]){
                             NSString *log = [NSString stringWithFormat:@"%@\n检测到保护罩,跳过拾取",[[AntForestManager sharedInstance] getUserName:userId]];
                             [[AntForestManager sharedInstance] addLog:log];
+                            [self advanceTakeLookForFriend:userId];
                             return;
                         }
                     }
@@ -656,6 +727,7 @@ NSString* getCurrentDateTimeString() {
                         [[AntForestManager sharedInstance] addLog:log];
                     }
                 }
+                [self advanceTakeLookForFriend:userId];
                 //                //一键收取 能量球多时 提示不合法
                 //                if([bidArr count] > 0 && userId) {
                 //                    NSString* bidStr = [bidArr componentsJoinedByString:@","];
