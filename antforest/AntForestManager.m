@@ -327,7 +327,6 @@ NSString* getCurrentDateTimeString() {
             if (![pendingCollectBubbles containsObject:collectKey]) return;
             [pendingCollectBubbles removeObject:collectKey];
         }
-        [self recordStage:@"诊断 · 收取结果待确认：请求后 5 秒内未从桥接回包解析到 collectedEnergy"];
     });
 }
 
