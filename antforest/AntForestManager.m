@@ -61,7 +61,7 @@ dispatch_queue_t globalSerialQueueTest;
 }
 
 - (void)recordStage:(NSString *)stage {
-    NSLog(@"[AntForestPort] %@", stage);
+    if (![stage hasPrefix:@"收取 ·"]) return;
     if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), stage]];
 }
 
@@ -71,7 +71,7 @@ dispatch_queue_t globalSerialQueueTest;
     self.autoCollectTimer = nil;
     self.collectInterval = interval;
     self.failedTimes = 0; //每次重新启动定时器时 失败次数均要置 0
-    [self recordStage:[NSString stringWithFormat:@"诊断 · 循环已启动（%ld 秒）", (long)interval]];
+    [self recordStage:[NSString stringWithFormat:@"收取 · 后台循环已启动（%ld 分钟）", (long)MAX(1, interval / 60)]];
     
     // 创建新的定时器
     self.autoCollectTimer = [NSTimer scheduledTimerWithTimeInterval:interval
@@ -107,7 +107,7 @@ dispatch_queue_t globalSerialQueueTest;
     NSString *minute = [formatter stringFromDate:NSDate.date];
     if ([lastScheduledMinute isEqualToString:minute]) return;
     lastScheduledMinute = minute;
-    [self addLog:[NSString stringWithFormat:@"%@\n定时收取开始", getCurrentDateTimeString()]];
+    [self recordStage:@"收取 · 定时收取开始"];
     [self autoCollectBubbles];
 }
 
@@ -199,7 +199,7 @@ NSString* getCurrentDateTimeString() {
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
             takeLookCurrentFriendId = nil;
-            [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量续查结束：%@", reason]];
+            [self recordStage:[NSString stringWithFormat:@"收取 · 本轮扫描结束：%@", reason]];
             return;
         }
         takeLookRounds++;
@@ -214,7 +214,7 @@ NSString* getCurrentDateTimeString() {
             if (!takeLookRunning || !takeLookWaitingForFriend || requestToken != takeLookRequestToken) return;
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
-            [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量续查结束：第 %lu 位候选回包超时", (unsigned long)takeLookRounds]];
+            [self recordStage:@"收取 · 本轮扫描结束：好友信息暂未返回"];
         }
     });
 }
@@ -237,7 +237,7 @@ NSString* getCurrentDateTimeString() {
                 return NO;
             }
             takeLookRunning = NO;
-            [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量续查结束：服务端重复返回候选（已完成 %lu 轮）", (unsigned long)takeLookPass]];
+            [self recordStage:@"收取 · 本轮扫描完成"];
             return NO;
         }
         [takeLookVisitedFriends addObject:friendId];
@@ -476,7 +476,7 @@ NSString* getCurrentDateTimeString() {
         rankScanPending = YES;
         [self.friendsRank removeAllObjects];
         @synchronized (self) { [pendingCollectBubbles removeAllObjects]; }
-        [self recordStage:[NSString stringWithFormat:@"诊断 · 收取轮次 %lu 开始", (unsigned long)cycle]];
+        [self recordStage:@"收取 · 本轮扫描开始"];
         [self queryTotalRank];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (rankScanPending && cycle == collectionCycle) {
@@ -627,6 +627,7 @@ NSString* getCurrentDateTimeString() {
 }
 
 - (void)addLog:(NSString *)logMessage {
+    if (![logMessage containsString:@"收取 ·"]) return;
     if (!NSThread.isMainThread) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [self addLog:logMessage];
@@ -689,7 +690,7 @@ NSString* getCurrentDateTimeString() {
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
         [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
         [defaults synchronize];
-        [self recordStage:[NSString stringWithFormat:@"诊断 · 收取成功：%ld g（第 %lu 轮，今日累计 %ld g）", (long)energy.integerValue, (unsigned long)collectionCycle, (long)self.todayCollectedEnergy]];
+        [self recordStage:[NSString stringWithFormat:@"收取 · 成功收取能量：%ld g（今日累计 %ld g）", (long)energy.integerValue, (long)self.todayCollectedEnergy]];
         NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg", getCurrentDateTimeString(), (long)energy.integerValue];
         [self addLog:log];
     }

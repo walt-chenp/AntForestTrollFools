@@ -221,7 +221,7 @@ static void installEnergyRainCollector(id controller) {
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
 
     UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [copyButton setTitle:@"复制诊断" forState:UIControlStateNormal];
+    [copyButton setTitle:@"复制日志" forState:UIControlStateNormal];
     copyButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
     [copyButton addTarget:self action:@selector(copyDiagnosticLogs:) forControlEvents:UIControlEventTouchUpInside];
     copyButton.translatesAutoresizingMaskIntoConstraints = NO;
@@ -450,16 +450,14 @@ static void installEnergyRainCollector(id controller) {
     manager.enableAutoCollect = sender.on;
     self.statusLabel.text = sender.on ? @"运行中" : @"已关闭";
     [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"enableAutoCollect"];
-    [manager recordStage:[NSString stringWithFormat:@"诊断 · 自动收取开关：%@", sender.on ? @"开启" : @"关闭"]];
+    [manager recordStage:[NSString stringWithFormat:@"收取 · 自动收取已%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on) {
-        [manager addLog:[NSString stringWithFormat:@"%@\n自动收集开始", getCurrentDateTimeString()]];
         if (manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300];
         if (manager.enableScheduledCollect) [manager startScheduledCollectTimer];
     } else {
         [manager stopAutoCollectTimer];
         [manager.scheduledCollectTimer invalidate];
         manager.scheduledCollectTimer = nil;
-        [manager addLog:[NSString stringWithFormat:@"%@\n自动收集关闭", getCurrentDateTimeString()]];
     }
 }
 
@@ -485,7 +483,7 @@ static void installEnergyRainCollector(id controller) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     manager.enableBackgroundLoop = sender.on;
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableBackgroundLoop"];
-    [manager recordStage:[NSString stringWithFormat:@"诊断 · 后台循环开关：%@", sender.on ? @"开启" : @"关闭"]];
+    [manager recordStage:[NSString stringWithFormat:@"收取 · 后台循环已%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on && manager.enableAutoCollect) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300]; else [manager stopAutoCollectTimer];
 }
 
@@ -513,15 +511,15 @@ static void installEnergyRainCollector(id controller) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     NSArray *logs = manager.logRecord.reverseObjectEnumerator.allObjects;
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(NSString *log, __unused NSDictionary *bindings) {
-        return [log containsString:@"诊断 ·"];
+        return [log containsString:@"收取 ·"];
     }];
-    NSArray *diagnostics = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 诊断记录\n导出时间：%@\n配置：自动收取=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，桥接=%@\n统计：今日=%ld g，累计=%ld g，诊断条目=%lu\n隐私：已隐藏好友昵称、UID 与气泡 ID\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.jsBridge ? @"已连接" : @"未连接", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)diagnostics.count];
-    UIPasteboard.generalPasteboard.string = diagnostics.count ? [header stringByAppendingString:[diagnostics componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的诊断记录"];
+    NSArray *records = [logs filteredArrayUsingPredicate:predicate];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
     [sender setTitle:@"已复制" forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [sender setTitle:@"复制诊断" forState:UIControlStateNormal];
+        [sender setTitle:@"复制日志" forState:UIControlStateNormal];
     });
 }
 
