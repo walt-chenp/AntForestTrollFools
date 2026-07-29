@@ -40,7 +40,7 @@
 
 - iOS 14 请使用独立包 `AntForestPort-v2.5-iOS14.dylib`；它不替代 iOS 15+ 的 `AntForestPort-v2.5.dylib`。
 - 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
-- 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.8、TrollFools 环境完成注入与功能验证。
+- 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.10、TrollFools 环境完成注入与功能验证。
 
 ## 使用说明
 
@@ -113,16 +113,16 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 设备 | iPhone 14 Pro（A16，`arm64e`） |
 | 系统 | iOS 16.2 |
 | 安装环境 | 非越狱：巨魔商店 TrollStore + 巨魔注入器 TrollFools |
-| 支付宝 | 12.12.6、12.12.8 |
+| 支付宝 | 12.12.6、12.12.8、12.12.10 |
 | 探针结果 | `H5WebViewController` 与 `PSDJsBridge` Hook 成功 |
 | 森林首页 | 新版顶层 `bubbles`、`userBaseInfo` 已确认 |
 | 好友气泡 | `id`、`userId`、`collectStatus`、`overTime` 等字段已确认 |
 | 好友排行榜 | `friendRanking`、`myself`、`totalDatas` 已确认 |
 | 自动能量雨 | 已确认能识别下降中的能量并自动收取 |
-| 12.12.8 验证 | 森林收取、能量雨自动收取正常，无闪退或功能失效 |
-| iOS 15.7 验证 | iPhone 13 Pro Max、支付宝 12.12.8；叶子面板可打开，自动收取的排行与好友状态查询正常 |
+| 12.12.10 验证 | 森林收取、能量雨自动收取正常，无闪退或功能失效 |
+| iOS 15.7 验证 | iPhone 13 Pro Max、支付宝 12.12.10；叶子面板可打开，自动收取的排行与好友状态查询正常 |
 | iOS 15.0.1 验证 | iPhone X（A11，`arm64`）；通用 dylib 可通过 TrollFools 注入并正常使用 |
-| iOS 14.2.1 验证 | iPhone 12 Pro Max（A14，`arm64e`）、支付宝 12.12.8；iOS 14 独立包注入及功能正常 |
+| iOS 14.2.1 验证 | iPhone 12 Pro Max（A14，`arm64e`）、支付宝 12.12.10；iOS 14 独立包注入及功能正常 |
 | 巨魔真后台 | iOS 16.2 下配合 ImmortalizerJailed：后台可维持周期定时器与请求发起，但 H5/RPC 回包及实际收取不保证；切回森林首页后可恢复补跑 |
 
 ## 构建
