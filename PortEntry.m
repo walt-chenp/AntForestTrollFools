@@ -475,7 +475,6 @@ static void installEnergyRainCollector(id controller) {
 - (void)showIntervalSettings {
     AntForestIntervalPanel *settings = [[AntForestIntervalPanel alloc] init];
     settings.modalPresentationStyle = UIModalPresentationPageSheet;
-    if (@available(iOS 15.0, *)) settings.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.mediumDetent];
     [self presentViewController:settings animated:YES completion:nil];
 }
 
@@ -550,11 +549,6 @@ static void showLogPanel(UIButton *button) {
     if (!presenter || presenter.presentedViewController) return;
     AntForestLogPanel *panel = [[AntForestLogPanel alloc] init];
     panel.modalPresentationStyle = UIModalPresentationPageSheet;
-    if (@available(iOS 16.0, *)) {
-        panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent customDetentWithIdentifier:@"log" resolver:^CGFloat(id<UISheetPresentationControllerDetentResolutionContext> context) { return 600; }]];
-    } else if (@available(iOS 15.0, *)) {
-        panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent mediumDetent]];
-    }
     [presenter presentViewController:panel animated:YES completion:nil];
 }
 
