@@ -36,6 +36,12 @@
 - 后台限制说明：退到桌面后不保证 H5/RPC 回包及实际收取；回到蚂蚁森林首页时会立即尝试补跑一次。
 - 本版本不包含“赚能量”实验代码；该玩法保留在独立开发分支继续测试，不影响正式版。
 
+## iOS 14 独立版本
+
+- iOS 14 请使用独立包 `AntForestPort-v2.5-iOS14.dylib`；它不替代 iOS 15+ 的 `AntForestPort-v2.5.dylib`。
+- 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
+- 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.8、TrollFools 环境完成注入与功能验证。
+
 ## 使用说明
 
 1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.5.dylib`](build/AntForestPort-v2.5.dylib) 到支付宝。
@@ -84,12 +90,12 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 
 ## 当前兼容范围
 
-当前发布产物为 `arm64 + arm64e` 通用 dylib，最低构建目标为 iOS 15：
+发布产物均为 `arm64 + arm64e` 通用 dylib：
 
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | iOS 15 及以上 |
+| iOS | 常规包支持 iOS 15 及以上；iOS 14 使用独立 `AntForestPort-v2.5-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -116,6 +122,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 12.12.8 验证 | 森林收取、能量雨自动收取正常，无闪退或功能失效 |
 | iOS 15.7 验证 | iPhone 13 Pro Max、支付宝 12.12.8；叶子面板可打开，自动收取的排行与好友状态查询正常 |
 | iOS 15.0.1 验证 | iPhone X（A11，`arm64`）；通用 dylib 可通过 TrollFools 注入并正常使用 |
+| iOS 14.2.1 验证 | iPhone 12 Pro Max（A14，`arm64e`）、支付宝 12.12.8；iOS 14 独立包注入及功能正常 |
 | 巨魔真后台 | iOS 16.2 下配合 ImmortalizerJailed：后台可维持周期定时器与请求发起，但 H5/RPC 回包及实际收取不保证；切回森林首页后可恢复补跑 |
 
 ## 构建
@@ -130,9 +137,18 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntFo
 
 GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
+在 `feature/ios14-compat` 分支构建 iOS 14 独立包：
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make
+```
+
+产物为 `build/AntForestPort-v2.5-iOS14.dylib`。
+
 ## 开发分支约定
 
 - `release/v2.5-home-edge`：v2.5 正式版，包含已验证的首页自动收取、好友续查修复与叶子贴边优化。
+- `feature/ios14-compat`：iOS 14 独立兼容版，单独构建与发布，不影响 iOS 15+ 正式包。
 - `feature/earn-energy-probe`：仅用于“赚能量”玩法的实验与诊断，不合入 v2.5。
 - 后续每项新功能或缺陷修复均从独立 `feature/...` 或 `fix/...` 分支开发；真机验证后再合入新的 `release/...` 分支，避免实验代码影响稳定版。
 
