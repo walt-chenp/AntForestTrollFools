@@ -28,6 +28,23 @@ static BOOL isEnergyRainURL(NSURL *url) {
     return [text containsString:@"energyrain"] || [text containsString:@"energy-rain"] || [text containsString:@"energy_rain"] || [text containsString:@"68687791.h5app.alipay.com"] || [text containsString:@"/p/c/18031y38qhq8"];
 }
 
+static id forestBridgeFromController(id controller) {
+    for (NSString *name in @[@"jsBridge", @"bridge"]) {
+        SEL selector = NSSelectorFromString(name);
+        if (![controller respondsToSelector:selector]) continue;
+        id bridge = ((id (*)(id, SEL))objc_msgSend)(controller, selector);
+        if ([bridge isKindOfClass:NSClassFromString(@"PSDJsBridge")]) return bridge;
+    }
+    return nil;
+}
+
+static BOOL isForestResponse(id value) {
+    if (![value isKindOfClass:NSDictionary.class]) return NO;
+    NSDictionary *response = value;
+    NSDictionary *data = [response[@"resData"] isKindOfClass:NSDictionary.class] ? response[@"resData"] : nil;
+    return (response[@"bubbles"] && response[@"userBaseInfo"]) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
+}
+
 static void installEnergyRainCollector(id controller) {
     static const void *collectorKey = &collectorKey;
     if (objc_getAssociatedObject(controller, collectorKey)) return;
@@ -203,6 +220,12 @@ static void installEnergyRainCollector(id controller) {
     [clearButton addTarget:self action:@selector(clearLogs) forControlEvents:UIControlEventTouchUpInside];
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
 
+    UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [copyButton setTitle:@"复制诊断" forState:UIControlStateNormal];
+    copyButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [copyButton addTarget:self action:@selector(copyDiagnosticLogs:) forControlEvents:UIControlEventTouchUpInside];
+    copyButton.translatesAutoresizingMaskIntoConstraints = NO;
+
     UIStackView *stats = [[UIStackView alloc] init];
     stats.axis = UILayoutConstraintAxisHorizontal;
     stats.distribution = UIStackViewDistributionFill;
@@ -317,6 +340,7 @@ static void installEnergyRainCollector(id controller) {
     [self.view addSubview:grabber];
     [self.view addSubview:titleIcon];
     [self.view addSubview:title];
+    [self.view addSubview:copyButton];
     [self.view addSubview:clearButton];
     [self.view addSubview:stats];
     [self.view addSubview:card];
@@ -336,6 +360,9 @@ static void installEnergyRainCollector(id controller) {
         [titleIcon.widthAnchor constraintEqualToConstant:34], [titleIcon.heightAnchor constraintEqualToConstant:34],
         [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:titleIcon.trailingAnchor constant:10],
+        [title.trailingAnchor constraintLessThanOrEqualToAnchor:copyButton.leadingAnchor constant:-8],
+        [copyButton.trailingAnchor constraintEqualToAnchor:clearButton.leadingAnchor constant:-10],
+        [copyButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [clearButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
         [clearButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [stats.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:18],
@@ -423,6 +450,7 @@ static void installEnergyRainCollector(id controller) {
     manager.enableAutoCollect = sender.on;
     self.statusLabel.text = sender.on ? @"运行中" : @"已关闭";
     [[NSUserDefaults standardUserDefaults] setBool:sender.on forKey:@"enableAutoCollect"];
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 自动收取开关：%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on) {
         [manager addLog:[NSString stringWithFormat:@"%@\n自动收集开始", getCurrentDateTimeString()]];
         if (manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300];
@@ -457,6 +485,7 @@ static void installEnergyRainCollector(id controller) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     manager.enableBackgroundLoop = sender.on;
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableBackgroundLoop"];
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 后台循环开关：%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on && manager.enableAutoCollect) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300]; else [manager stopAutoCollectTimer];
 }
 
@@ -478,6 +507,22 @@ static void installEnergyRainCollector(id controller) {
     [((AntForestManager *)[AntForestManager sharedInstance]).logRecord removeAllObjects];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"logRecord"];
     [self.tableView reloadData];
+}
+
+- (void)copyDiagnosticLogs:(UIButton *)sender {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    NSArray *logs = manager.logRecord.reverseObjectEnumerator.allObjects;
+    NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(NSString *log, __unused NSDictionary *bindings) {
+        return [log containsString:@"诊断 ·"];
+    }];
+    NSArray *diagnostics = [logs filteredArrayUsingPredicate:predicate];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 诊断记录\n导出时间：%@\n配置：自动收取=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，桥接=%@\n统计：今日=%ld g，累计=%ld g，诊断条目=%lu\n隐私：已隐藏好友昵称、UID 与气泡 ID\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.jsBridge ? @"已连接" : @"未连接", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)diagnostics.count];
+    UIPasteboard.generalPasteboard.string = diagnostics.count ? [header stringByAppendingString:[diagnostics componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的诊断记录"];
+    [sender setTitle:@"已复制" forState:UIControlStateNormal];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [sender setTitle:@"复制诊断" forState:UIControlStateNormal];
+    });
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -674,6 +719,7 @@ static void initializeManager(void) {
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
     manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
     manager.collectInterval = MAX(1, [defaults integerForKey:@"backgroundIntervalMinutes"] ?: 5) * 60;
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 初始化：自动=%d，循环=%d", manager.enableAutoCollect, manager.enableBackgroundLoop]];
     if (manager.enableAutoCollect && manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval];
     if (manager.enableAutoCollect && manager.enableScheduledCollect) [manager startScheduledCollectTimer];
 }
@@ -689,11 +735,20 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
     AntForestManager *manager = [AntForestManager sharedInstance];
     BOOL forestHome = isForestHomeURL(url);
+    id pageBridge = forestHome ? forestBridgeFromController(self) : nil;
+    if (pageBridge && manager.jsBridge != pageBridge) {
+        manager.jsBridge = pageBridge;
+        [manager recordStage:@"诊断 · 已绑定森林首页 H5 Bridge"];
+    }
+    if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
     if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (manager.jsBridge) [manager autoCollectBubbles];
+            if (manager.jsBridge) {
+                [manager recordStage:@"诊断 · 首页桥接就绪，立即补跑"];
+                [manager autoCollectBubbles];
+            }
         });
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
@@ -705,8 +760,12 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
 }
 
 static id portTransformResponseData(id self, SEL _cmd, id value) {
-    ((AntForestManager *)[AntForestManager sharedInstance]).jsBridge = self;
-    [[AntForestManager sharedInstance] matchFriendIdAndBubbles:value];
+    AntForestManager *manager = [AntForestManager sharedInstance];
+    if (isForestResponse(value) && manager.jsBridge != self) {
+        manager.jsBridge = self;
+        [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
+    }
+    [manager matchFriendIdAndBubbles:value];
     return originalTransformResponseData(self, _cmd, value);
 }
 
@@ -720,7 +779,11 @@ static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original) 
 __attribute__((constructor))
 static void installHooks(void) {
     @autoreleasepool {
-        if (!class_addMethod(NSProcessInfo.class, sel_registerName("antforestPortHooksInstalled"), (IMP)portInstallMarker, "v@:")) return;
+        BOOL shouldInstall = NO;
+        @synchronized (NSProcessInfo.class) {
+            shouldInstall = class_addMethod(NSProcessInfo.class, sel_registerName("antforestPortHooksInstalled"), (IMP)portInstallMarker, "v@:");
+        }
+        if (!shouldInstall) return;
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
             shouldRevealLeafOnNextForestAppearance = YES;
         }];
