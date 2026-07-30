@@ -4,7 +4,7 @@ LIPO := $(shell xcrun --sdk iphoneos --find lipo)
 TARGET := build/AntForestPort.dylib
 ARM64_TARGET := build/AntForestPort-arm64.dylib
 ARM64E_TARGET := build/AntForestPort-arm64e.dylib
-SOURCES := PortEntry.m antforest/AntForestManager.m antforest/DebugTool/Tool.m antforest/DebugTool/UIView+Toast.m
+SOURCES := PortEntry.m antforest/AntForestManager.m antforest/StepSimulator.m antforest/DebugTool/Tool.m antforest/DebugTool/UIView+Toast.m
 
 .PHONY: all clean
 
