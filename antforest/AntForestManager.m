@@ -720,8 +720,9 @@ NSString* getCurrentDateTimeString() {
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
         [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
         [defaults synchronize];
-        [self recordStage:[NSString stringWithFormat:@"收取 · 成功收取能量：%ld g（今日累计 %ld g）", (long)energy.integerValue, (long)self.todayCollectedEnergy]];
-        NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg", getCurrentDateTimeString(), (long)energy.integerValue];
+        NSString *source = [userId isEqualToString:self.myUserId] ? @"自己" : @"好友";
+        [self recordStage:[NSString stringWithFormat:@"收取 · 成功收取%@能量：%ld g（今日累计 %ld g）", source, (long)energy.integerValue, (long)self.todayCollectedEnergy]];
+        NSString *log = [NSString stringWithFormat:@"%@\n成功收取%@能量:%ldg", getCurrentDateTimeString(), source, (long)energy.integerValue];
         [self addLog:log];
     }
 }
