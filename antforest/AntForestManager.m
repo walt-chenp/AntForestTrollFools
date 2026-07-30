@@ -28,6 +28,10 @@ static const NSUInteger kTakeLookMaxRounds = 150;
 static const NSUInteger kTakeLookMaxPasses = 3;
 static BOOL rankScanPending = NO;
 static NSUInteger collectionCycle = 0;
+static BOOL selfPriorityPending = NO;
+static NSUInteger selfPriorityCycle = 0;
+static NSMutableArray<NSString *> *deferredFriendRankIds = nil;
+static NSArray<NSString *> *deferredRankedFriendIds = nil;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -46,9 +50,26 @@ dispatch_queue_t globalSerialQueueTest;
         recordedCollectedBubbles = [NSMutableSet set];
         pendingCollectBubbles = [NSMutableSet set];
         takeLookVisitedFriends = [NSMutableSet set];
+        deferredFriendRankIds = [NSMutableArray array];
         
     });
     return afm;
+}
+
+- (void)releaseSelfPriorityForCycle:(NSUInteger)cycle reason:(NSString *)reason {
+    if (!selfPriorityPending || selfPriorityCycle != cycle) return;
+    selfPriorityPending = NO;
+    NSArray<NSString *> *friendIds = deferredFriendRankIds.copy;
+    NSArray<NSString *> *rankedIds = deferredRankedFriendIds;
+    [deferredFriendRankIds removeAllObjects];
+    deferredRankedFriendIds = nil;
+    [self recordStage:[NSString stringWithFormat:@"收取 · 本人优先完成，开始好友扫描（%@）", reason]];
+    for (NSString *friendId in friendIds) {
+        dispatch_async(globalSerialQueueQuery, ^{
+            [self queryFriendsBubbles:friendId];
+        });
+    }
+    if (rankedIds.count) [self scanRankedFriends:rankedIds cycle:cycle];
 }
 
 + (NSLock*)sharedLock {
@@ -473,11 +494,20 @@ NSString* getCurrentDateTimeString() {
         lastCollectStartedAt = NSDate.date;
         collectionCycle++;
         NSUInteger cycle = collectionCycle;
+        selfPriorityPending = self.enableSelfCollect;
+        selfPriorityCycle = cycle;
+        [deferredFriendRankIds removeAllObjects];
+        deferredRankedFriendIds = nil;
         rankScanPending = YES;
         [self.friendsRank removeAllObjects];
         @synchronized (self) { [pendingCollectBubbles removeAllObjects]; }
         [self recordStage:@"收取 · 本轮扫描开始"];
         [self queryTotalRank];
+        if (selfPriorityPending) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self releaseSelfPriorityForCycle:cycle reason:@"本人首页回包超时"];
+            });
+        }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (rankScanPending && cycle == collectionCycle) {
                 rankScanPending = NO;
@@ -690,8 +720,9 @@ NSString* getCurrentDateTimeString() {
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
         [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
         [defaults synchronize];
-        [self recordStage:[NSString stringWithFormat:@"收取 · 成功收取能量：%ld g（今日累计 %ld g）", (long)energy.integerValue, (long)self.todayCollectedEnergy]];
-        NSString *log = [NSString stringWithFormat:@"%@\n成功收取能量:%ldg", getCurrentDateTimeString(), (long)energy.integerValue];
+        NSString *source = [userId isEqualToString:self.myUserId] ? @"自己" : @"好友";
+        [self recordStage:[NSString stringWithFormat:@"收取 · 成功收取%@能量：%ld g（今日累计 %ld g）", source, (long)energy.integerValue, (long)self.todayCollectedEnergy]];
+        NSString *log = [NSString stringWithFormat:@"%@\n成功收取%@能量:%ldg", getCurrentDateTimeString(), source, (long)energy.integerValue];
         [self addLog:log];
     }
 }
@@ -774,6 +805,7 @@ NSString* getCurrentDateTimeString() {
                 if (mine) [self recordStage:[NSString stringWithFormat:@"收取 · 本人首页回包：总 %lu 个，可收 %lu 个，等待 %lu 个", (unsigned long)dictBubbles.count, (unsigned long)available, (unsigned long)waiting]];
                 if (mine && !self.enableSelfCollect) {
                     [self recordStage:@"收取 · 已跳过本人能量"];
+                    [self releaseSelfPriorityForCycle:collectionCycle reason:@"本人收取已关闭"];
                     return;
                 }
                 // 初始化一个空的可变数组
@@ -815,6 +847,15 @@ NSString* getCurrentDateTimeString() {
                         NSString *log = [NSString stringWithFormat:@"%@\n找到帮助能量球(%@g) 帮助, %@",[[AntForestManager sharedInstance] getUserName:userId],remainEnergy,bid];
                         [[AntForestManager sharedInstance] addLog:log];
                     }
+                }
+                if (mine && selfPriorityPending) {
+                    // 这个串行队列中的屏障排在本人的 collect 请求之后，好友请求只能在此后入队。
+                    NSUInteger cycle = selfPriorityCycle;
+                    dispatch_async(globalSerialQueueCollect, ^{
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            [self releaseSelfPriorityForCycle:cycle reason:@"本人收取请求已提交"];
+                        });
+                    });
                 }
                 [self advanceTakeLookForFriend:userId];
                 //                //一键收取 能量球多时 提示不合法
@@ -867,9 +908,13 @@ NSString* getCurrentDateTimeString() {
                     NSNumber *canCollectEnergy = [dictRank objectForKey:@"canCollectEnergy"];
                     //FileLog(@"canCollectEnergy: %@ | %@",canCollectEnergy,userId);
                     if([canCollectEnergy isEqualToNumber:@1]){
-                        dispatch_async(globalSerialQueueQuery, ^{
-                            [[AntForestManager sharedInstance] queryFriendsBubbles:userId];
-                        });
+                        if (selfPriorityPending) {
+                            [deferredFriendRankIds addObject:userId];
+                        } else {
+                            dispatch_async(globalSerialQueueQuery, ^{
+                                [[AntForestManager sharedInstance] queryFriendsBubbles:userId];
+                            });
+                        }
                     }
                 }
             }
@@ -885,7 +930,11 @@ NSString* getCurrentDateTimeString() {
                 }
                 if (rankScanPending) {
                     rankScanPending = NO;
-                    [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
+                    if (selfPriorityPending) {
+                        deferredRankedFriendIds = fr.allKeys;
+                    } else {
+                        [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
+                    }
                 }
             }
             
