@@ -10,6 +10,7 @@ static NSString * const AFStepSimulatorModeKey = @"afStepSimulatorMode";
 
 static const uint32_t AFStepSimulatorFNVOffset = 2166136261u;
 static const uint32_t AFStepSimulatorFNVPrime = 16777619u;
+static const NSTimeInterval AFStepSimulatorRandomReuseWindow = 1.0;
 
 static NSInteger (*originalAPStepInfoNumberOfSteps)(id, SEL);
 static id (*originalCMPedometerDataNumberOfSteps)(id, SEL);
@@ -65,6 +66,8 @@ static id stepSimulatorHKStatisticsSumQuantity(id self, SEL _cmd) {
 @property (nonatomic) NSInteger minStep;
 @property (nonatomic) NSInteger maxStep;
 @property (nonatomic) AFStepSimulatorMode mode;
+@property (nonatomic) NSInteger recentRandomStep;
+@property (nonatomic) NSTimeInterval recentRandomStepTime;
 @property (nonatomic, strong) NSMutableSet<NSString *> *hookedAPIs;
 @property (nonatomic, strong) NSMutableSet<NSString *> *reportedAPIs;
 - (void)reportReadFrom:(NSString *)api realStep:(NSInteger)realStep simulatedStep:(NSInteger)simulatedStep;
@@ -100,6 +103,8 @@ static id stepSimulatorHKStatisticsSumQuantity(id self, SEL _cmd) {
     self.minStep = minStep;
     self.maxStep = maxStep;
     self.mode = mode;
+    self.recentRandomStep = 0;
+    self.recentRandomStepTime = 0;
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     [defaults setBool:enabled forKey:AFStepSimulatorEnabledKey];
     [defaults setInteger:minStep forKey:AFStepSimulatorMinKey];
@@ -112,7 +117,16 @@ static id stepSimulatorHKStatisticsSumQuantity(id self, SEL _cmd) {
 - (NSInteger)simulatedStepForRealStep:(NSInteger)realStep {
     if (!self.enabled || self.minStep < 1 || self.maxStep < self.minStep || self.maxStep > 1000000) return realStep;
     uint32_t range = (uint32_t)(self.maxStep - self.minStep + 1);
-    if (self.mode == AFStepSimulatorModeRandomOnRead) return self.minStep + (NSInteger)arc4random_uniform(range);
+    if (self.mode == AFStepSimulatorModeRandomOnRead) {
+        @synchronized (self) {
+            NSTimeInterval now = NSDate.timeIntervalSinceReferenceDate;
+            // ponytail: time-window chain detection; use an explicit page-refresh signal if one becomes available.
+            if (self.recentRandomStep && now - self.recentRandomStepTime < AFStepSimulatorRandomReuseWindow) return self.recentRandomStep;
+            self.recentRandomStep = self.minStep + (NSInteger)arc4random_uniform(range);
+            self.recentRandomStepTime = now;
+            return self.recentRandomStep;
+        }
+    }
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateFormat = @"yyyy-MM-dd";
     formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
