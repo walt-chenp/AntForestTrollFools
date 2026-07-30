@@ -136,7 +136,7 @@ static id stepSimulatorHKStatisticsSumQuantity(id self, SEL _cmd) {
 
 - (void)installAvailableHooks {
     @synchronized (self) {
-        if ([self installHookForClass:NSClassFromString(@"APStepInfo") selector:@selector(numberOfSteps) replacement:(IMP)stepSimulatorAPStepInfoNumberOfSteps original:(IMP *)&originalAPStepInfoNumberOfSteps name:@"APStepInfo.numberOfSteps"]) return;
+        [self installHookForClass:NSClassFromString(@"APStepInfo") selector:@selector(numberOfSteps) replacement:(IMP)stepSimulatorAPStepInfoNumberOfSteps original:(IMP *)&originalAPStepInfoNumberOfSteps name:@"APStepInfo.numberOfSteps"];
         [self installHookForClass:NSClassFromString(@"CMPedometerData") selector:@selector(numberOfSteps) replacement:(IMP)stepSimulatorCMPedometerDataNumberOfSteps original:(IMP *)&originalCMPedometerDataNumberOfSteps name:@"CMPedometerData.numberOfSteps"];
         [self installHookForClass:NSClassFromString(@"HKStatistics") selector:@selector(sumQuantity) replacement:(IMP)stepSimulatorHKStatisticsSumQuantity original:(IMP *)&originalHKStatisticsSumQuantity name:@"HKStatistics.sumQuantity"];
     }
