@@ -9,6 +9,13 @@
 static void (*originalViewDidLoad)(id, SEL);
 static void (*originalViewDidAppear)(id, SEL, BOOL);
 static id (*originalTransformResponseData)(id, SEL, id);
+static NSTimeInterval lastWaterGiftTapAt;
+static const void *GiftFullProbeKey = &GiftFullProbeKey;
+static __weak id giftProbeWebView;
+
+static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original);
+static void tryAutoCollectWaterGift(void);
+static void reportWaterGiftTapResult(void);
 
 static void portInstallMarker(id self, SEL _cmd) {}
 static NSInteger const AntForestButtonTag = 941204;
@@ -43,6 +50,53 @@ static BOOL isForestResponse(id value) {
     NSDictionary *response = value;
     NSDictionary *data = [response[@"resData"] isKindOfClass:NSDictionary.class] ? response[@"resData"] : nil;
     return (response[@"bubbles"] && response[@"userBaseInfo"]) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
+}
+
+static void tryAutoCollectWaterGift(void) {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    if (!manager.enableAutoCollect || !manager.enableSelfCollect || !giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt < 45) return;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![giftProbeWebView respondsToSelector:evaluate]) return;
+    // ponytail: 60 is only a runaway guard; each accepted H5 collect request decides whether to continue.
+    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';const x=Math.round(r.left+r.width*.242),y=Math.round(r.top+r.height*.218);if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}const tap=()=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};let attempts=0;window.__afGiftAutoHits=0;window.__afGiftAutoRunning=1;window.__afGiftAutoTapUntil=Date.now()+95000;const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};const step=()=>{if(attempts>=60)return done();const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;tap();setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before)step();else done()},1500)};step();return 'started:'+x+','+y})()";
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(giftProbeWebView, evaluate, script, ^(id result, NSError *error) {
+        if (error || ![(NSString *)result hasPrefix:@"started:"]) return;
+        lastWaterGiftTapAt = NSDate.date.timeIntervalSince1970;
+        [manager recordStage:@"收取 · 浇水赠能：开始智能连续领取"];
+        reportWaterGiftTapResult();
+    });
+}
+
+static void reportWaterGiftTapResult(void) {
+    if (!giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt > 65) return;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![giftProbeWebView respondsToSelector:evaluate]) return;
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(giftProbeWebView, evaluate, @"String(window.__afGiftAutoTapResult||'running')", ^(id result, NSError *error) {
+        NSString *status = [result isKindOfClass:NSString.class] ? result : @"";
+        if (!error && [status hasPrefix:@"done:"]) {
+            NSArray<NSString *> *parts = [[status substringFromIndex:5] componentsSeparatedByString:@":"];
+            NSString *attempts = parts.count > 0 ? parts[0] : @"0";
+            NSString *hits = parts.count > 1 ? parts[1] : @"0";
+            [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"收取 · 浇水赠能：智能领取结束（命中 %@ 个，点击 %@ 次）", hits, attempts]];
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ reportWaterGiftTapResult(); });
+    });
+}
+
+static void installGiftFullProbe(id controller) {
+    if (objc_getAssociatedObject(controller, GiftFullProbeKey)) return;
+    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) {
+        NSLog(@"[AntForestWaterGiftProbe] fullProbe webView unavailable");
+        return;
+    }
+    objc_setAssociatedObject(controller, GiftFullProbeKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    giftProbeWebView = webView;
+    tryAutoCollectWaterGift();
 }
 
 static void installEnergyRainCollector(id controller) {
@@ -206,17 +260,17 @@ static void installEnergyRainCollector(id controller) {
     grabber.layer.cornerRadius = 3;
     grabber.translatesAutoresizingMaskIntoConstraints = NO;
 
-    UIView *titleIcon = [self iconWithName:@"leaf.fill" size:24];
+    UIView *titleIcon = [self iconWithName:@"leaf.fill" size:22];
     titleIcon.translatesAutoresizingMaskIntoConstraints = NO;
     UILabel *title = [[UILabel alloc] init];
     title.text = @"收取记录";
-    title.font = [UIFont boldSystemFontOfSize:24];
+    title.font = [UIFont boldSystemFontOfSize:22];
     title.textColor = [UIColor colorWithRed:0.09 green:0.23 blue:0.16 alpha:1.0];
     title.translatesAutoresizingMaskIntoConstraints = NO;
 
     UIButton *clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [clearButton setTitle:@"清空日志" forState:UIControlStateNormal];
-    clearButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    clearButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     [clearButton addTarget:self action:@selector(clearLogs) forControlEvents:UIControlEventTouchUpInside];
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
 
@@ -235,6 +289,8 @@ static void installEnergyRainCollector(id controller) {
     self.totalLabel = [self statLabelWithPrefix:@"累计\n"];
     UIStackView *todayStat = [self statWithIcon:@"tray.full.fill" label:self.todayLabel];
     UIStackView *totalStat = [self statWithIcon:@"house.fill" label:self.totalLabel];
+    totalStat.layoutMargins = UIEdgeInsetsMake(0, 20, 0, 0);
+    totalStat.layoutMarginsRelativeArrangement = YES;
     UIView *divider = [[UIView alloc] init];
     divider.backgroundColor = [UIColor systemGray5Color];
     [divider.widthAnchor constraintEqualToConstant:1].active = YES;
@@ -247,12 +303,12 @@ static void installEnergyRainCollector(id controller) {
     UIView *autoIcon = [self iconWithName:@"bag.fill" size:24];
     UILabel *autoLabel = [[UILabel alloc] init];
     autoLabel.text = @"自动收取";
-    autoLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    autoLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
     UISwitch *autoSwitch = [[UISwitch alloc] init];
     autoSwitch.on = ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoCollect;
     [autoSwitch addTarget:self action:@selector(toggleAutoCollect:) forControlEvents:UIControlEventValueChanged];
     UIStackView *autoLeading = [[UIStackView alloc] initWithArrangedSubviews:@[autoIcon, autoLabel]];
-    autoLeading.spacing = 12;
+    autoLeading.spacing = 10;
     autoLeading.alignment = UIStackViewAlignmentCenter;
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.text = autoSwitch.on ? @"运行中" : @"已关闭";
@@ -267,15 +323,27 @@ static void installEnergyRainCollector(id controller) {
     autoRow.distribution = UIStackViewDistributionEqualSpacing;
     autoRow.translatesAutoresizingMaskIntoConstraints = NO;
 
+    UIView *selfIcon = [self iconWithName:@"person.fill" size:24];
+    UILabel *selfLabel = [[UILabel alloc] init];
+    selfLabel.text = @"收取自己能量";
+    selfLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    UISwitch *selfSwitch = [[UISwitch alloc] init];
+    selfSwitch.on = [AntForestManager sharedInstance].enableSelfCollect;
+    [selfSwitch addTarget:self action:@selector(toggleSelfCollect:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *selfLeading = [[UIStackView alloc] initWithArrangedSubviews:@[selfIcon, selfLabel]];
+    selfLeading.spacing = 10; selfLeading.alignment = UIStackViewAlignmentCenter;
+    UIStackView *selfRow = [[UIStackView alloc] initWithArrangedSubviews:@[selfLeading, selfSwitch]];
+    selfRow.alignment = UIStackViewAlignmentCenter; selfRow.distribution = UIStackViewDistributionEqualSpacing; selfRow.translatesAutoresizingMaskIntoConstraints = NO;
+
     UIView *rainIcon = [self iconWithName:@"cloud.rain.fill" size:24];
     UILabel *rainLabel = [[UILabel alloc] init];
     rainLabel.text = @"自动能量雨";
-    rainLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    rainLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
     UISwitch *rainSwitch = [[UISwitch alloc] init];
     rainSwitch.on = ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoRain;
     [rainSwitch addTarget:self action:@selector(toggleAutoRain:) forControlEvents:UIControlEventValueChanged];
     UIStackView *rainLeading = [[UIStackView alloc] initWithArrangedSubviews:@[rainIcon, rainLabel]];
-    rainLeading.spacing = 12;
+    rainLeading.spacing = 10;
     rainLeading.alignment = UIStackViewAlignmentCenter;
     UIStackView *rainRow = [[UIStackView alloc] initWithArrangedSubviews:@[rainLeading, rainSwitch]];
     rainRow.alignment = UIStackViewAlignmentCenter;
@@ -285,10 +353,10 @@ static void installEnergyRainCollector(id controller) {
     UIView *loopIcon = [self iconWithName:@"clock.arrow.circlepath" size:24];
     UILabel *loopLabel = [[UILabel alloc] init];
     loopLabel.text = @"后台循环";
-    loopLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightSemibold];
+    loopLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
     UIButton *intervalButton = [UIButton buttonWithType:UIButtonTypeSystem];
     intervalButton.layer.borderWidth = 1; intervalButton.layer.borderColor = UIColor.systemGray5Color.CGColor; intervalButton.layer.cornerRadius = 10;
-    intervalButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    intervalButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
     [intervalButton addTarget:self action:@selector(showIntervalSettings) forControlEvents:UIControlEventTouchUpInside];
     self.intervalButton = intervalButton;
     [self updateIntervalLabel];
@@ -296,7 +364,7 @@ static void installEnergyRainCollector(id controller) {
     loopSwitch.on = [AntForestManager sharedInstance].enableBackgroundLoop;
     [loopSwitch addTarget:self action:@selector(toggleBackgroundLoop:) forControlEvents:UIControlEventValueChanged];
     UIStackView *loopLeading = [[UIStackView alloc] initWithArrangedSubviews:@[loopIcon, loopLabel]];
-    loopLeading.spacing = 12; loopLeading.alignment = UIStackViewAlignmentCenter;
+    loopLeading.spacing = 10; loopLeading.alignment = UIStackViewAlignmentCenter;
     [intervalButton.widthAnchor constraintEqualToConstant:70].active = YES;
     UIStackView *loopControls = [[UIStackView alloc] initWithArrangedSubviews:@[intervalButton, loopSwitch]];
     loopControls.spacing = 8; loopControls.alignment = UIStackViewAlignmentCenter;
@@ -307,7 +375,7 @@ static void installEnergyRainCollector(id controller) {
     [scheduleButton setTitle:@"定时收取设置" forState:UIControlStateNormal];
     [scheduleButton setImage:[UIImage systemImageNamed:@"calendar"] forState:UIControlStateNormal];
     scheduleButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    scheduleButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    scheduleButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
     scheduleButton.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
     scheduleButton.imageEdgeInsets = UIEdgeInsetsMake(0, 0, 0, 10);
     [scheduleButton addTarget:self action:@selector(showScheduleSettings) forControlEvents:UIControlEventTouchUpInside];
@@ -320,7 +388,8 @@ static void installEnergyRainCollector(id controller) {
 
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.dataSource = self;
-    self.tableView.rowHeight = 52;
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 60;
     self.tableView.backgroundColor = [UIColor clearColor];
     self.tableView.separatorColor = [UIColor systemGray5Color];
     self.tableView.separatorInset = UIEdgeInsetsMake(0, 20, 0, 20);
@@ -334,6 +403,7 @@ static void installEnergyRainCollector(id controller) {
     card.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *scheduleCard = [[UIView alloc] init];
     scheduleCard.backgroundColor = UIColor.whiteColor; scheduleCard.layer.cornerRadius = 16; scheduleCard.layer.borderWidth = 1; scheduleCard.layer.borderColor = UIColor.systemGray5Color.CGColor; scheduleCard.translatesAutoresizingMaskIntoConstraints = NO;
+    UIView *divider0 = [[UIView alloc] init]; divider0.backgroundColor = UIColor.systemGray5Color; divider0.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *divider1 = [[UIView alloc] init]; divider1.backgroundColor = UIColor.systemGray5Color; divider1.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *divider2 = [[UIView alloc] init]; divider2.backgroundColor = UIColor.systemGray5Color; divider2.translatesAutoresizingMaskIntoConstraints = NO;
 
@@ -347,9 +417,10 @@ static void installEnergyRainCollector(id controller) {
     [self.view addSubview:scheduleCard];
     [self.view addSubview:self.tableView];
     [card addSubview:autoRow];
+    [card addSubview:selfRow];
     [card addSubview:rainRow];
     [card addSubview:loopRow];
-    [card addSubview:divider1]; [card addSubview:divider2];
+    [card addSubview:divider0]; [card addSubview:divider1]; [card addSubview:divider2];
     [scheduleCard addSubview:scheduleRow];
     [NSLayoutConstraint activateConstraints:@[
         [grabber.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:10],
@@ -357,7 +428,7 @@ static void installEnergyRainCollector(id controller) {
         [grabber.widthAnchor constraintEqualToConstant:44], [grabber.heightAnchor constraintEqualToConstant:6],
         [titleIcon.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
         [titleIcon.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [titleIcon.widthAnchor constraintEqualToConstant:34], [titleIcon.heightAnchor constraintEqualToConstant:34],
+        [titleIcon.widthAnchor constraintEqualToConstant:30], [titleIcon.heightAnchor constraintEqualToConstant:30],
         [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:titleIcon.trailingAnchor constant:10],
         [title.trailingAnchor constraintLessThanOrEqualToAnchor:copyButton.leadingAnchor constant:-8],
@@ -374,7 +445,12 @@ static void installEnergyRainCollector(id controller) {
         [autoRow.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
         [autoRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
         [autoRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
-        [rainRow.topAnchor constraintEqualToAnchor:autoRow.bottomAnchor constant:10],
+        [selfRow.topAnchor constraintEqualToAnchor:autoRow.bottomAnchor constant:10],
+        [selfRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
+        [selfRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
+        [divider0.topAnchor constraintEqualToAnchor:selfRow.topAnchor constant:-5],
+        [divider0.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider0.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider0.heightAnchor constraintEqualToConstant:1],
+        [rainRow.topAnchor constraintEqualToAnchor:selfRow.bottomAnchor constant:10],
         [rainRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
         [rainRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
         [divider1.topAnchor constraintEqualToAnchor:rainRow.topAnchor constant:-5],
@@ -406,13 +482,13 @@ static void installEnergyRainCollector(id controller) {
     imageView.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
     imageView.contentMode = UIViewContentModeScaleAspectFit;
     if (size <= 26) {
-        UIView *badge = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 34, 34)];
+        UIView *badge = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 30, 30)];
         badge.backgroundColor = [UIColor colorWithRed:0.90 green:0.95 blue:0.91 alpha:1.0];
-        badge.layer.cornerRadius = 17;
-        imageView.frame = CGRectMake(9, 9, 16, 16);
+        badge.layer.cornerRadius = 15;
+        imageView.frame = CGRectMake(8, 8, 14, 14);
         [badge addSubview:imageView];
-        [badge.widthAnchor constraintEqualToConstant:34].active = YES;
-        [badge.heightAnchor constraintEqualToConstant:34].active = YES;
+        [badge.widthAnchor constraintEqualToConstant:30].active = YES;
+        [badge.heightAnchor constraintEqualToConstant:30].active = YES;
         return badge;
     }
     return imageView;
@@ -421,7 +497,9 @@ static void installEnergyRainCollector(id controller) {
 - (UILabel *)statLabelWithPrefix:(NSString *)prefix {
     UILabel *label = [[UILabel alloc] init];
     label.numberOfLines = 2;
-    label.font = [UIFont monospacedDigitSystemFontOfSize:20 weight:UIFontWeightBold];
+    label.font = [UIFont monospacedDigitSystemFontOfSize:18 weight:UIFontWeightBold];
+    label.adjustsFontSizeToFitWidth = YES;
+    label.minimumScaleFactor = 0.72;
     label.textColor = [UIColor colorWithRed:0.09 green:0.23 blue:0.16 alpha:1.0];
     return label;
 }
@@ -429,7 +507,7 @@ static void installEnergyRainCollector(id controller) {
 - (UIStackView *)statWithIcon:(NSString *)icon label:(UILabel *)label {
     UIView *badge = [self iconWithName:icon size:24];
     UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[badge, label]];
-    stack.spacing = 10;
+    stack.spacing = 8;
     stack.alignment = UIStackViewAlignmentCenter;
     return stack;
 }
@@ -454,11 +532,24 @@ static void installEnergyRainCollector(id controller) {
     if (sender.on) {
         if (manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300];
         if (manager.enableScheduledCollect) [manager startScheduledCollectTimer];
+        if (!manager.enableBackgroundLoop && manager.jsBridge) [manager autoCollectBubbles];
     } else {
         [manager stopAutoCollectTimer];
         [manager.scheduledCollectTimer invalidate];
         manager.scheduledCollectTimer = nil;
     }
+}
+
+- (void)toggleSelfCollect:(UISwitch *)sender {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    manager.enableSelfCollect = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableSelfCollect"];
+    [manager recordStage:[NSString stringWithFormat:@"收取 · 收取自己能量已%@", sender.on ? @"开启" : @"关闭"]];
+    if (sender.on && manager.enableAutoCollect && manager.jsBridge && manager.myUserId.length) {
+        [manager recordStage:@"收取 · 请求本人首页（含赠能）"];
+        [manager queryMyBubbles];
+    }
+    if (sender.on) tryAutoCollectWaterGift();
 }
 
 - (void)toggleAutoRain:(UISwitch *)sender {
@@ -514,8 +605,8 @@ static void installEnergyRainCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
     [sender setTitle:@"已复制" forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -530,13 +621,38 @@ static void installEnergyRainCollector(id controller) {
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *identifier = @"LogCell";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:identifier];
-    if (!cell) cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
-    cell.imageView.image = [UIImage systemImageNamed:@"checkmark.circle.fill"];
-    cell.imageView.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    UIImageView *icon;
+    UILabel *label;
+    if (!cell) {
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:identifier];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        icon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"checkmark.circle.fill"]];
+        icon.tag = 1;
+        icon.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+        icon.translatesAutoresizingMaskIntoConstraints = NO;
+        label = [[UILabel alloc] init];
+        label.tag = 2;
+        label.font = [UIFont systemFontOfSize:14];
+        label.numberOfLines = 0;
+        label.lineBreakMode = NSLineBreakByWordWrapping;
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        [cell.contentView addSubview:icon];
+        [cell.contentView addSubview:label];
+        [NSLayoutConstraint activateConstraints:@[
+            [icon.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:20],
+            [icon.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            [icon.widthAnchor constraintEqualToConstant:24], [icon.heightAnchor constraintEqualToConstant:24],
+            [label.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:12],
+            [label.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
+            [label.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-20],
+            [label.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8],
+        ]];
+    } else {
+        icon = [cell.contentView viewWithTag:1];
+        label = [cell.contentView viewWithTag:2];
+    }
     NSArray *logs = ((AntForestManager *)[AntForestManager sharedInstance]).logRecord;
-    cell.textLabel.text = logs[logs.count - indexPath.row - 1];
-    cell.textLabel.font = [UIFont systemFontOfSize:14];
-    cell.textLabel.numberOfLines = 2;
+    label.text = logs[logs.count - indexPath.row - 1];
     cell.backgroundColor = [UIColor clearColor];
     return cell;
 }
@@ -712,6 +828,7 @@ static void initializeManager(void) {
         [defaults setObject:today forKey:@"todayCollectedEnergyDate"];
     }
     manager.enableAutoCollect = [defaults boolForKey:@"enableAutoCollect"];
+    manager.enableSelfCollect = [defaults objectForKey:@"enableSelfCollect"] ? [defaults boolForKey:@"enableSelfCollect"] : YES;
     manager.enableAutoRain = [defaults objectForKey:@"enableAutoRain"] ? [defaults boolForKey:@"enableAutoRain"] : manager.enableAutoCollect;
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
@@ -749,6 +866,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             }
         });
     }
+    if (forestHome) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            installGiftFullProbe(self);
+        });
+    }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installEnergyRainCollector(self);
@@ -759,9 +881,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
 
 static id portTransformResponseData(id self, SEL _cmd, id value) {
     AntForestManager *manager = [AntForestManager sharedInstance];
-    if (isForestResponse(value) && manager.jsBridge != self) {
-        manager.jsBridge = self;
-        [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
+    if (isForestResponse(value)) {
+        if (manager.jsBridge != self) {
+            manager.jsBridge = self;
+            [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
+        }
     }
     [manager matchFriendIdAndBubbles:value];
     return originalTransformResponseData(self, _cmd, value);
