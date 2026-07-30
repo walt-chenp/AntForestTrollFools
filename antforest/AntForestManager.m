@@ -636,9 +636,9 @@ NSString* getCurrentDateTimeString() {
     }
     //日志持久化
     @try {
-        // 如果日志数量超过 50 条，移除最早的日志
+        // 保留足够的一轮扫描记录，面板仍只显示最近几条。
         NSMutableArray *arrLog = [[AntForestManager sharedInstance] logRecord];
-        while(arrLog.count > 50) {
+        while(arrLog.count > 200) {
             [arrLog removeObjectAtIndex:0];
         }
         // 添加日志信息到数组中
@@ -771,6 +771,11 @@ NSString* getCurrentDateTimeString() {
                 }
                 BOOL mine = [userId isEqualToString:self.myUserId];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · %@气泡回包：总 %lu 个，可收 %lu 个，等待 %lu 个", mine ? @"本人" : @"好友", (unsigned long)dictBubbles.count, (unsigned long)available, (unsigned long)waiting]];
+                if (mine) [self recordStage:[NSString stringWithFormat:@"收取 · 本人首页回包：总 %lu 个，可收 %lu 个，等待 %lu 个", (unsigned long)dictBubbles.count, (unsigned long)available, (unsigned long)waiting]];
+                if (mine && !self.enableSelfCollect) {
+                    [self recordStage:@"收取 · 已跳过本人能量"];
+                    return;
+                }
                 // 初始化一个空的可变数组
                 NSMutableArray *bidArr = [NSMutableArray array];
                 for (NSDictionary *bubble in dictBubbles) {
@@ -833,6 +838,24 @@ NSString* getCurrentDateTimeString() {
                 [[NSUserDefaults standardUserDefaults] synchronize];
                 
             }
+            // 先查询本人首页；严格的“本人收取完成后再查好友”由独立修复处理。
+            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"myself"]) {
+                NSDictionary *myDict = [[dict objectForKey:@"resData"] objectForKey:@"myself"];
+                NSString *userIdMy = [myDict objectForKey:@"userId"];
+                if (userIdMy.length) {
+                    [[AntForestManager sharedInstance] setMyUserId:userIdMy];
+                    [self recordStage:@"收取 · 本人账户已识别"];
+                }
+                NSNumber *canCollectEnergy = [myDict objectForKey:@"canCollectEnergy"];
+                [self recordStage:[NSString stringWithFormat:@"诊断 · 本人能量状态：%@", [canCollectEnergy isEqualToNumber:@1] ? @"可收" : @"暂无成熟能量"]];
+                // 本人首页除成熟能量外还可能返回浇水赠能；该状态不一定反映在排行榜的 canCollectEnergy 中。
+                if(self.enableSelfCollect) {
+                    dispatch_async(globalSerialQueueQuery, ^{
+                        [self recordStage:@"收取 · 请求本人首页（含赠能）"];
+                        [[AntForestManager sharedInstance] queryMyBubbles];
+                    });
+                }
+            }
             //匹配是否要查询这个人的首页
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"]) {
                 NSArray *rankArr = [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"];
@@ -848,20 +871,6 @@ NSString* getCurrentDateTimeString() {
                             [[AntForestManager sharedInstance] queryFriendsBubbles:userId];
                         });
                     }
-                }
-            }
-            //匹配我自己的
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"myself"] && [[dict objectForKey:@"resData"] objectForKey:@"totalDatas"]) {
-                NSDictionary *myDict = [[dict objectForKey:@"resData"] objectForKey:@"myself"];
-                NSString *userIdMy = [myDict objectForKey:@"userId"];
-                //FileLog(@"myUserId: %@",userIdMy);
-                [[AntForestManager sharedInstance] setMyUserId:userIdMy];
-                NSNumber *canCollectEnergy = [myDict objectForKey:@"canCollectEnergy"];
-                [self recordStage:[NSString stringWithFormat:@"诊断 · 本人能量状态：%@", [canCollectEnergy isEqualToNumber:@1] ? @"可收" : @"暂无成熟能量"]];
-                if([canCollectEnergy isEqualToNumber:@1]){
-                    dispatch_async(globalSerialQueueQuery, ^{
-                        [[AntForestManager sharedInstance] queryMyBubbles];
-                    });
                 }
             }
             //匹配排行

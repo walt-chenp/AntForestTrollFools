@@ -28,6 +28,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSTimer *scheduledCollectTimer;
 
 @property (assign, nonatomic) BOOL enableAutoCollect; //允许自动收集则自动开启后台模式
+@property (assign, nonatomic) BOOL enableSelfCollect;
 @property (assign, nonatomic) BOOL enableAutoRain;
 @property (assign, nonatomic) BOOL enableBackgroundLoop;
 @property (assign, nonatomic) BOOL enableScheduledCollect;
@@ -51,6 +52,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 -(void)takeLook;
 -(void)queryFriendsBubbles:(NSString*)friendId;
+-(void)queryMyBubbles;
 -(void)collectBubbles:(NSString*)uid bubblesId:(NSString*)bids;
 -(void)reviveEnergy:(NSString*)uid signId:(NSString*)signId; //貌似查询
 -(void)autoCollectBubbles;
