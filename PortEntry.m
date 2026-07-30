@@ -5,6 +5,7 @@
 #import <math.h>
 
 #import "antforest/AntForestManager.h"
+#import "antforest/StepSimulator.h"
 
 static void (*originalViewDidLoad)(id, SEL);
 static void (*originalViewDidAppear)(id, SEL, BOOL);
@@ -135,6 +136,17 @@ static void installEnergyRainCollector(id controller) {
 @interface AntForestIntervalPanel : UIViewController
 @end
 
+@interface AntForestStepSimulatorPanel : UIViewController
+@property (nonatomic, strong) UISwitch *enabledSwitch;
+@property (nonatomic, strong) UITextField *minField;
+@property (nonatomic, strong) UITextField *maxField;
+@property (nonatomic, strong) UISegmentedControl *modeControl;
+@property (nonatomic, strong) UILabel *statusLabel;
+@end
+
+@interface AntForestSettingsPanel : UIViewController
+@end
+
 @implementation AntForestIntervalPanel
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -206,7 +218,10 @@ static void installEnergyRainCollector(id controller) {
     [self updateEmptyState];
 }
 
-- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+- (void)close {
+    if (self.navigationController.viewControllers.count > 1) [self.navigationController popViewControllerAnimated:YES];
+    else [self dismissViewControllerAnimated:YES completion:nil];
+}
 - (void)updateEmptyState { self.emptyLabel.hidden = [AntForestManager sharedInstance].scheduledTimes.count > 0; }
 - (void)toggle:(UISwitch *)sender {
     AntForestManager *manager = AntForestManager.sharedInstance;
@@ -249,6 +264,111 @@ static void installEnergyRainCollector(id controller) {
 }
 @end
 
+@implementation AntForestStepSimulatorPanel
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"步数模拟设置（测试）";
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    AFStepSimulator *simulator = AFStepSimulator.shared;
+    [simulator installAvailableHooks];
+    UIView *card = [[UIView alloc] init]; card.backgroundColor = UIColor.systemBackgroundColor; card.layer.cornerRadius = 16; card.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledTitle = [[UILabel alloc] init]; enabledTitle.text = @"启用步数模拟"; enabledTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; enabledTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledDetail = [[UILabel alloc] init]; enabledDetail.text = @"关闭后立即恢复支付宝读取到的真实步数"; enabledDetail.font = [UIFont systemFontOfSize:13]; enabledDetail.textColor = UIColor.secondaryLabelColor; enabledDetail.translatesAutoresizingMaskIntoConstraints = NO;
+    self.enabledSwitch = [[UISwitch alloc] init]; self.enabledSwitch.on = simulator.enabled; self.enabledSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.enabledSwitch addTarget:self action:@selector(toggleEnabled:) forControlEvents:UIControlEventValueChanged];
+    UIView *rangeCard = [[UIView alloc] init]; rangeCard.backgroundColor = UIColor.systemBackgroundColor; rangeCard.layer.cornerRadius = 16; rangeCard.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *rangeTitle = [[UILabel alloc] init]; rangeTitle.text = @"步数范围"; rangeTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; rangeTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    self.minField = [self numberFieldWithText:[NSString stringWithFormat:@"%ld", (long)simulator.minStep] placeholder:@"最小值"];
+    self.maxField = [self numberFieldWithText:[NSString stringWithFormat:@"%ld", (long)simulator.maxStep] placeholder:@"最大值"];
+    UILabel *separator = [[UILabel alloc] init]; separator.text = @"至"; separator.textColor = UIColor.secondaryLabelColor; separator.translatesAutoresizingMaskIntoConstraints = NO;
+    UIStackView *range = [[UIStackView alloc] initWithArrangedSubviews:@[self.minField, separator, self.maxField]]; range.axis = UILayoutConstraintAxisHorizontal; range.spacing = 10; range.alignment = UIStackViewAlignmentCenter; range.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.minField.widthAnchor constraintEqualToConstant:112].active = YES; [self.maxField.widthAnchor constraintEqualToConstant:112].active = YES;
+    UILabel *modeTitle = [[UILabel alloc] init]; modeTitle.text = @"生成方式"; modeTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; modeTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"日稳定", @"每次随机"]]; self.modeControl.selectedSegmentIndex = simulator.mode; self.modeControl.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *hint = [[UILabel alloc] init]; hint.text = @"日稳定：同一天读数一致；随机：每次读取变化。"; hint.font = [UIFont systemFontOfSize:13]; hint.textColor = UIColor.secondaryLabelColor; hint.numberOfLines = 0; hint.translatesAutoresizingMaskIntoConstraints = NO;
+    self.statusLabel = [[UILabel alloc] init]; self.statusLabel.font = [UIFont systemFontOfSize:13]; self.statusLabel.textColor = UIColor.secondaryLabelColor; self.statusLabel.numberOfLines = 0; self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self refreshStatus];
+    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem]; [save setTitle:@"保存设置" forState:UIControlStateNormal]; save.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; [save addTarget:self action:@selector(save) forControlEvents:UIControlEventTouchUpInside]; save.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:card]; [self.view addSubview:rangeCard]; [card addSubview:enabledTitle]; [card addSubview:enabledDetail]; [card addSubview:self.enabledSwitch]; [rangeCard addSubview:rangeTitle]; [rangeCard addSubview:range]; [rangeCard addSubview:modeTitle]; [rangeCard addSubview:self.modeControl]; [rangeCard addSubview:hint]; [rangeCard addSubview:self.statusLabel]; [self.view addSubview:save];
+    [NSLayoutConstraint activateConstraints:@[
+        [card.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [card.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [card.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [card.heightAnchor constraintEqualToConstant:76],
+        [enabledTitle.topAnchor constraintEqualToAnchor:card.topAnchor constant:15], [enabledTitle.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [enabledDetail.topAnchor constraintEqualToAnchor:enabledTitle.bottomAnchor constant:5], [enabledDetail.leadingAnchor constraintEqualToAnchor:enabledTitle.leadingAnchor], [self.enabledSwitch.centerYAnchor constraintEqualToAnchor:card.centerYAnchor], [self.enabledSwitch.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [rangeCard.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:12], [rangeCard.leadingAnchor constraintEqualToAnchor:card.leadingAnchor], [rangeCard.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
+        [rangeTitle.topAnchor constraintEqualToAnchor:rangeCard.topAnchor constant:16], [rangeTitle.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [range.topAnchor constraintEqualToAnchor:rangeTitle.bottomAnchor constant:12], [range.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16],
+        [modeTitle.topAnchor constraintEqualToAnchor:range.bottomAnchor constant:20], [modeTitle.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [self.modeControl.topAnchor constraintEqualToAnchor:modeTitle.bottomAnchor constant:10], [self.modeControl.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [self.modeControl.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16],
+        [hint.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:12], [hint.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [hint.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16],
+        [self.statusLabel.topAnchor constraintEqualToAnchor:hint.bottomAnchor constant:10], [self.statusLabel.leadingAnchor constraintEqualToAnchor:hint.leadingAnchor], [self.statusLabel.trailingAnchor constraintEqualToAnchor:hint.trailingAnchor], [self.statusLabel.bottomAnchor constraintEqualToAnchor:rangeCard.bottomAnchor constant:-16],
+        [save.topAnchor constraintEqualToAnchor:rangeCard.bottomAnchor constant:22], [save.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+    ]];
+}
+
+- (UITextField *)numberFieldWithText:(NSString *)text placeholder:(NSString *)placeholder {
+    UITextField *field = [[UITextField alloc] init]; field.text = text; field.placeholder = placeholder; field.keyboardType = UIKeyboardTypeNumberPad; field.textAlignment = NSTextAlignmentCenter; field.borderStyle = UITextBorderStyleRoundedRect; field.translatesAutoresizingMaskIntoConstraints = NO; return field;
+}
+
+- (void)refreshStatus { self.statusLabel.text = [NSString stringWithFormat:@"Hook 状态：%@", AFStepSimulator.shared.hookStatusText]; }
+- (void)close { [self.navigationController popViewControllerAnimated:YES]; }
+- (void)toggleEnabled:(UISwitch *)sender {
+    AFStepSimulator *simulator = AFStepSimulator.shared;
+    [simulator updateEnabled:sender.on minStep:simulator.minStep maxStep:simulator.maxStep mode:simulator.mode];
+    [self refreshStatus];
+}
+- (void)save {
+    NSInteger minStep = self.minField.text.integerValue;
+    NSInteger maxStep = self.maxField.text.integerValue;
+    if (minStep < 1 || maxStep < minStep || maxStep > 1000000) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"范围无效" message:@"请输入 1 至 1,000,000 之间、且最大值不小于最小值的步数范围。" preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    AFStepSimulator *simulator = AFStepSimulator.shared;
+    [simulator updateEnabled:simulator.enabled minStep:minStep maxStep:maxStep mode:(AFStepSimulatorMode)self.modeControl.selectedSegmentIndex];
+    [self refreshStatus];
+}
+
+@end
+
+@implementation AntForestSettingsPanel
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"功能设置";
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(close)];
+    UIButton *schedule = [self settingsButtonWithTitle:@"定时收取设置" detail:@"管理每日固定收取时刻" icon:@"calendar" action:@selector(showSchedule)];
+    UIButton *step = [self settingsButtonWithTitle:@"步数模拟设置（测试）" detail:@"独立配置支付宝可见步数" icon:@"figure.walk" action:@selector(showStepSimulator)];
+    [self.view addSubview:schedule]; [self.view addSubview:step];
+    [NSLayoutConstraint activateConstraints:@[
+        [schedule.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [schedule.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [schedule.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [schedule.heightAnchor constraintEqualToConstant:70],
+        [step.topAnchor constraintEqualToAnchor:schedule.bottomAnchor constant:12], [step.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [step.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [step.heightAnchor constraintEqualToConstant:70],
+    ]];
+}
+
+- (UIButton *)settingsButtonWithTitle:(NSString *)title detail:(NSString *)detail icon:(NSString *)icon action:(SEL)action {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem]; button.backgroundColor = UIColor.systemBackgroundColor; button.layer.cornerRadius = 16; button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft; button.translatesAutoresizingMaskIntoConstraints = NO; [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:icon]]; image.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0]; image.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *titleLabel = [[UILabel alloc] init]; titleLabel.text = title; titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; titleLabel.textColor = UIColor.labelColor; titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *detailLabel = [[UILabel alloc] init]; detailLabel.text = detail; detailLabel.font = [UIFont systemFontOfSize:13]; detailLabel.textColor = UIColor.secondaryLabelColor; detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]]; chevron.tintColor = UIColor.systemGray3Color; chevron.translatesAutoresizingMaskIntoConstraints = NO;
+    [button addSubview:image]; [button addSubview:titleLabel]; [button addSubview:detailLabel]; [button addSubview:chevron];
+    [NSLayoutConstraint activateConstraints:@[
+        [image.leadingAnchor constraintEqualToAnchor:button.leadingAnchor constant:18], [image.centerYAnchor constraintEqualToAnchor:button.centerYAnchor], [image.widthAnchor constraintEqualToConstant:22], [image.heightAnchor constraintEqualToConstant:22],
+        [titleLabel.topAnchor constraintEqualToAnchor:button.topAnchor constant:14], [titleLabel.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:12],
+        [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:5], [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [chevron.trailingAnchor constraintEqualToAnchor:button.trailingAnchor constant:-18], [chevron.centerYAnchor constraintEqualToAnchor:button.centerYAnchor],
+    ]];
+    return button;
+}
+
+- (void)showSchedule { [self.navigationController pushViewController:[[AntForestSchedulePanel alloc] init] animated:YES]; }
+- (void)showStepSimulator { [self.navigationController pushViewController:[[AntForestStepSimulatorPanel alloc] init] animated:YES]; }
+- (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
+
+@end
+
 @implementation AntForestLogPanel
 
 - (void)viewDidLoad {
@@ -275,10 +395,16 @@ static void installEnergyRainCollector(id controller) {
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
 
     UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [copyButton setTitle:@"复制日志" forState:UIControlStateNormal];
-    copyButton.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    [copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
+    copyButton.accessibilityLabel = @"复制日志";
     [copyButton addTarget:self action:@selector(copyDiagnosticLogs:) forControlEvents:UIControlEventTouchUpInside];
     copyButton.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UIButton *settingsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [settingsButton setImage:[UIImage systemImageNamed:@"gearshape"] forState:UIControlStateNormal];
+    settingsButton.accessibilityLabel = @"功能设置";
+    [settingsButton addTarget:self action:@selector(showSettings) forControlEvents:UIControlEventTouchUpInside];
+    settingsButton.translatesAutoresizingMaskIntoConstraints = NO;
 
     UIStackView *stats = [[UIStackView alloc] init];
     stats.axis = UILayoutConstraintAxisHorizontal;
@@ -371,21 +497,6 @@ static void installEnergyRainCollector(id controller) {
     UIStackView *loopRow = [[UIStackView alloc] initWithArrangedSubviews:@[loopLeading, loopControls]];
     loopRow.alignment = UIStackViewAlignmentCenter; loopRow.distribution = UIStackViewDistributionEqualSpacing; loopRow.translatesAutoresizingMaskIntoConstraints = NO;
 
-    UIButton *scheduleButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [scheduleButton setTitle:@"定时收取设置" forState:UIControlStateNormal];
-    [scheduleButton setImage:[UIImage systemImageNamed:@"calendar"] forState:UIControlStateNormal];
-    scheduleButton.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-    scheduleButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    scheduleButton.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
-    scheduleButton.imageEdgeInsets = UIEdgeInsetsMake(0, 0, 0, 10);
-    [scheduleButton addTarget:self action:@selector(showScheduleSettings) forControlEvents:UIControlEventTouchUpInside];
-    scheduleButton.translatesAutoresizingMaskIntoConstraints = NO;
-    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
-    chevron.tintColor = UIColor.systemGray3Color;
-    UIStackView *scheduleRow = [[UIStackView alloc] initWithArrangedSubviews:@[scheduleButton, chevron]];
-    scheduleRow.alignment = UIStackViewAlignmentCenter;
-    scheduleRow.translatesAutoresizingMaskIntoConstraints = NO;
-
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStylePlain];
     self.tableView.dataSource = self;
     self.tableView.rowHeight = UITableViewAutomaticDimension;
@@ -401,8 +512,6 @@ static void installEnergyRainCollector(id controller) {
     card.layer.borderWidth = 1;
     card.layer.borderColor = [UIColor systemGray5Color].CGColor;
     card.translatesAutoresizingMaskIntoConstraints = NO;
-    UIView *scheduleCard = [[UIView alloc] init];
-    scheduleCard.backgroundColor = UIColor.whiteColor; scheduleCard.layer.cornerRadius = 16; scheduleCard.layer.borderWidth = 1; scheduleCard.layer.borderColor = UIColor.systemGray5Color.CGColor; scheduleCard.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *divider0 = [[UIView alloc] init]; divider0.backgroundColor = UIColor.systemGray5Color; divider0.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *divider1 = [[UIView alloc] init]; divider1.backgroundColor = UIColor.systemGray5Color; divider1.translatesAutoresizingMaskIntoConstraints = NO;
     UIView *divider2 = [[UIView alloc] init]; divider2.backgroundColor = UIColor.systemGray5Color; divider2.translatesAutoresizingMaskIntoConstraints = NO;
@@ -410,18 +519,17 @@ static void installEnergyRainCollector(id controller) {
     [self.view addSubview:grabber];
     [self.view addSubview:titleIcon];
     [self.view addSubview:title];
+    [self.view addSubview:settingsButton];
     [self.view addSubview:copyButton];
     [self.view addSubview:clearButton];
     [self.view addSubview:stats];
     [self.view addSubview:card];
-    [self.view addSubview:scheduleCard];
     [self.view addSubview:self.tableView];
     [card addSubview:autoRow];
     [card addSubview:selfRow];
     [card addSubview:rainRow];
     [card addSubview:loopRow];
     [card addSubview:divider0]; [card addSubview:divider1]; [card addSubview:divider2];
-    [scheduleCard addSubview:scheduleRow];
     [NSLayoutConstraint activateConstraints:@[
         [grabber.topAnchor constraintEqualToAnchor:self.view.topAnchor constant:10],
         [grabber.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
@@ -431,7 +539,9 @@ static void installEnergyRainCollector(id controller) {
         [titleIcon.widthAnchor constraintEqualToConstant:30], [titleIcon.heightAnchor constraintEqualToConstant:30],
         [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:titleIcon.trailingAnchor constant:10],
-        [title.trailingAnchor constraintLessThanOrEqualToAnchor:copyButton.leadingAnchor constant:-8],
+        [title.trailingAnchor constraintLessThanOrEqualToAnchor:settingsButton.leadingAnchor constant:-8],
+        [settingsButton.trailingAnchor constraintEqualToAnchor:copyButton.leadingAnchor constant:-10],
+        [settingsButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [copyButton.trailingAnchor constraintEqualToAnchor:clearButton.leadingAnchor constant:-10],
         [copyButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [clearButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
@@ -461,14 +571,7 @@ static void installEnergyRainCollector(id controller) {
         [divider2.topAnchor constraintEqualToAnchor:loopRow.topAnchor constant:-5],
         [divider2.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider2.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider2.heightAnchor constraintEqualToConstant:1],
         [card.bottomAnchor constraintEqualToAnchor:loopRow.bottomAnchor constant:16],
-        [scheduleCard.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:12],
-        [scheduleCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [scheduleCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [scheduleRow.topAnchor constraintEqualToAnchor:scheduleCard.topAnchor constant:12],
-        [scheduleRow.leadingAnchor constraintEqualToAnchor:scheduleCard.leadingAnchor constant:20],
-        [scheduleRow.trailingAnchor constraintEqualToAnchor:scheduleCard.trailingAnchor constant:-20],
-        [scheduleRow.heightAnchor constraintEqualToConstant:34],
-        [scheduleCard.bottomAnchor constraintEqualToAnchor:scheduleRow.bottomAnchor constant:12],
-        [self.tableView.topAnchor constraintEqualToAnchor:scheduleCard.bottomAnchor constant:8],
+        [self.tableView.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:8],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
         [self.tableView.heightAnchor constraintEqualToConstant:156],
@@ -585,8 +688,8 @@ static void installEnergyRainCollector(id controller) {
     if (sender.on && manager.enableAutoCollect) [manager startScheduledCollectTimer]; else { [manager.scheduledCollectTimer invalidate]; manager.scheduledCollectTimer = nil; }
 }
 
-- (void)showScheduleSettings {
-    AntForestSchedulePanel *settings = [[AntForestSchedulePanel alloc] init];
+- (void)showSettings {
+    AntForestSettingsPanel *settings = [[AntForestSettingsPanel alloc] init];
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:settings];
     navigation.modalPresentationStyle = UIModalPresentationPageSheet;
     [self presentViewController:navigation animated:YES completion:nil];
@@ -608,9 +711,9 @@ static void installEnergyRainCollector(id controller) {
     NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
                       getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
-    [sender setTitle:@"已复制" forState:UIControlStateNormal];
+    [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [sender setTitle:@"复制日志" forState:UIControlStateNormal];
+        [sender setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
     });
 }
 
@@ -847,6 +950,7 @@ static void portViewDidLoad(id self, SEL _cmd) {
 
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
+    [[AFStepSimulator shared] installAvailableHooks];
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
     AntForestManager *manager = [AntForestManager sharedInstance];
     BOOL forestHome = isForestHomeURL(url);
@@ -908,7 +1012,10 @@ static void installHooks(void) {
         if (!shouldInstall) return;
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
             shouldRevealLeafOnNextForestAppearance = YES;
+            [[AFStepSimulator shared] installAvailableHooks];
         }];
+        [[AFStepSimulator shared] installAvailableHooks];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [[AFStepSimulator shared] installAvailableHooks]; });
         Class webController = NSClassFromString(@"H5WebViewController");
         class_addMethod(webController, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
         BOOL viewHooked = hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
