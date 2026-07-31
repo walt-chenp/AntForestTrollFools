@@ -53,13 +53,19 @@ static BOOL isForestResponse(id value) {
     return (response[@"bubbles"] && response[@"userBaseInfo"]) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
 }
 
+static BOOL isMyHomeResponse(id value, AntForestManager *manager) {
+    NSDictionary *response = [value isKindOfClass:NSDictionary.class] ? value : nil;
+    NSDictionary *base = [response[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"userBaseInfo"] : nil;
+    return manager.myUserId.length && [base[@"userId"] isEqualToString:manager.myUserId];
+}
+
 static void tryAutoCollectWaterGift(void) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     if (!manager.enableAutoCollect || !manager.enableSelfCollect || !giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt < 45) return;
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![giftProbeWebView respondsToSelector:evaluate]) return;
-    // ponytail: 60 is only a runaway guard; each accepted H5 collect request decides whether to continue.
-    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';const x=Math.round(r.left+r.width*.242),y=Math.round(r.top+r.height*.218);if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}const tap=()=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};let attempts=0;window.__afGiftAutoHits=0;window.__afGiftAutoRunning=1;window.__afGiftAutoTapUntil=Date.now()+95000;const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};const step=()=>{if(attempts>=60)return done();const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;tap();setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before)step();else done()},1500)};step();return 'started:'+x+','+y})()";
+    // ponytail: three empty taps absorb canvas render latency; any accepted gift request keeps the same fixed-point run going.
+    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';const x=Math.round(r.left+r.width*.242),y=Math.round(r.top+r.height*.218);if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}const tap=()=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};let attempts=0,misses=0;window.__afGiftAutoHits=0;window.__afGiftAutoRunning=1;const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};const step=()=>{if(attempts>=60||misses>=3)return done();const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;tap();setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before){misses=0;step()}else{misses++;step()}},1800)};step();return 'started:'+x+','+y})()";
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
     runJavaScript(giftProbeWebView, evaluate, script, ^(id result, NSError *error) {
         if (error || ![(NSString *)result hasPrefix:@"started:"]) return;
@@ -97,7 +103,6 @@ static void installGiftFullProbe(id controller) {
     }
     objc_setAssociatedObject(controller, GiftFullProbeKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     giftProbeWebView = webView;
-    tryAutoCollectWaterGift();
 }
 
 static void installEnergyRainCollector(id controller) {
@@ -652,7 +657,6 @@ static void installEnergyRainCollector(id controller) {
         [manager recordStage:@"收取 · 请求本人首页（含赠能）"];
         [manager queryMyBubbles];
     }
-    if (sender.on) tryAutoCollectWaterGift();
 }
 
 - (void)toggleAutoRain:(UISwitch *)sender {
@@ -992,6 +996,10 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
         }
     }
     [manager matchFriendIdAndBubbles:value];
+    if (manager.enableAutoCollect && manager.enableSelfCollect && isMyHomeResponse(value, manager)) {
+        // The canvas may still be drawing when the native home response arrives.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(700 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{ tryAutoCollectWaterGift(); });
+    }
     return originalTransformResponseData(self, _cmd, value);
 }
 
