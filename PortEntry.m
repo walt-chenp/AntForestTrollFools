@@ -36,6 +36,10 @@ static BOOL isEnergyRainURL(NSURL *url) {
     return [text containsString:@"energyrain"] || [text containsString:@"energy-rain"] || [text containsString:@"energy_rain"] || [text containsString:@"68687791.h5app.alipay.com"] || [text containsString:@"/p/c/18031y38qhq8"];
 }
 
+static BOOL isEarnEnergyURL(NSURL *url) {
+    return [url.absoluteString containsString:@"forceWhackMole=Y"];
+}
+
 static id forestBridgeFromController(id controller) {
     for (NSString *name in @[@"jsBridge", @"bridge"]) {
         SEL selector = NSSelectorFromString(name);
@@ -119,6 +123,22 @@ static void installEnergyRainCollector(id controller) {
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
     runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
         NSLog(@"[AntForestRain] collector: %@%@", result ?: @"", error ? [NSString stringWithFormat:@" error=%@", error] : @"");
+    });
+}
+
+static void installEarnEnergyCollector(id controller) {
+    static const void *collectorKey = &collectorKey;
+    if (objc_getAssociatedObject(controller, collectorKey)) return;
+    objc_setAssociatedObject(controller, collectorKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) return;
+    NSString *script = @"(()=>{let p=window.__antForestEarnCollector;if(p)return 'installed';const c=document.getElementById('J_treeCanvas');if(!c)return 'no-canvas';p={active:/[?&]forceWhackMole=Y(?:&|$)/.test(location.href),hits:[]};window.__antForestEarnCollector=p;const tap=r=>{if(!p.active)return;const now=Date.now(),x=r.x+r.w/2,y=r.y+r.h/2,old=p.hits.find(q=>Math.abs(q.x-x)<55&&Math.abs(q.y-y)<80&&now-q.t<850);if(old)return;p.hits=p.hits.filter(q=>now-q.t<850);p.hits.push({x,y,t:now});const b=c.getBoundingClientRect(),cx=b.left+x*b.width/c.width,cy=b.top+y*b.height/c.height,t={identifier:now%1000000,target:c,clientX:cx,clientY:cy,pageX:cx,pageY:cy,screenX:cx,screenY:cy};try{const q=new Touch(t);c.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[q],targetTouches:[q],changedTouches:[q]}));setTimeout(()=>c.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[q]})),12)}catch(_){}};const rect=d=>{try{if(!d||d.byteLength!==192)return null;const f=new Float32Array(d.buffer||d,d.byteOffset||0,24),xs=[f[0],f[6],f[12],f[18]],ys=[f[1],f[7],f[13],f[19]];if(!xs.every(Number.isFinite)||!ys.every(Number.isFinite))return null;const x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y;return w>=70&&w<=130&&h>=70&&h<=130?{x,y,w,h}:null}catch(_){return null}};const b=window.AlipayJSBridge;if(b&&b.call&&!b.__afEarnCollector){b.__afEarnCollector=1;const f=b.call;b.call=function(handler,data){if(/settlementWhackMole/.test(String(data&&data.operationType||'')))p.active=false;return f.apply(this,arguments)}}const hook=P=>{if(!P||P.__afEarnCollector)return;P.__afEarnCollector=1;const f=P.bufferSubData;if(f)P.bufferSubData=function(target,offset,data,...a){const r=this.canvas===c&&rect(data);if(r)tap(r);return f.call(this,target,offset,data,...a)}};hook(window.WebGLRenderingContext&&WebGLRenderingContext.prototype);hook(window.WebGL2RenderingContext&&WebGL2RenderingContext.prototype);return 'installed'})()";
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
+        if (error || ![result isEqual:@"no-canvas"]) return;
+        objc_setAssociatedObject(controller, collectorKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ installEarnEnergyCollector(controller); });
     });
 }
 
@@ -957,7 +977,8 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     [[AFStepSimulator shared] installAvailableHooks];
     NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
     AntForestManager *manager = [AntForestManager sharedInstance];
-    BOOL forestHome = isForestHomeURL(url);
+    BOOL earnEnergy = isEarnEnergyURL(url);
+    BOOL forestHome = isForestHomeURL(url) && !earnEnergy;
     id pageBridge = forestHome ? forestBridgeFromController(self) : nil;
     if (pageBridge && manager.jsBridge != pageBridge) {
         manager.jsBridge = pageBridge;
@@ -982,6 +1003,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installEnergyRainCollector(self);
+        });
+    }
+    if (earnEnergy) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            installEarnEnergyCollector(self);
         });
     }
     addLogButton(self, revealLeaf);
