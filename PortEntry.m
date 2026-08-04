@@ -172,6 +172,20 @@ static void installEarnEnergyCollector(id controller) {
 @interface AntForestSettingsPanel : UIViewController
 @end
 
+@interface AntForestWaterPanel : UIViewController <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) NSArray<NSString *> *friendIds;
+@property (nonatomic, strong) NSArray<NSString *> *filteredFriendIds;
+@property (nonatomic, strong) UISearchController *searchController;
+@end
+
+@interface AntForestWaterSchedulePanel : UIViewController <UITableViewDataSource, UITableViewDelegate>
+@property (nonatomic, strong) UITableView *tableView;
+@property (nonatomic, strong) UIDatePicker *picker;
+@property (nonatomic, strong) UIButton *saveButton;
+@property (nonatomic) NSInteger editingIndex;
+@end
+
 @implementation AntForestIntervalPanel
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -289,6 +303,123 @@ static void installEarnEnergyCollector(id controller) {
 }
 @end
 
+@implementation AntForestWaterSchedulePanel
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"定时浇水";
+    self.editingIndex = NSNotFound;
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
+    self.picker = [[UIDatePicker alloc] init]; self.picker.datePickerMode = UIDatePickerModeTime; self.picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
+    self.saveButton = [UIButton buttonWithType:UIButtonTypeSystem]; [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal]; self.saveButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; [self.saveButton addTarget:self action:@selector(addTime) forControlEvents:UIControlEventTouchUpInside];
+    UIStackView *add = [[UIStackView alloc] initWithArrangedSubviews:@[self.picker, self.saveButton]]; add.spacing = 16; add.alignment = UIStackViewAlignmentCenter; add.translatesAutoresizingMaskIntoConstraints = NO;
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:add]; [self.view addSubview:self.tableView];
+    [NSLayoutConstraint activateConstraints:@[
+        [add.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [add.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [self.tableView.topAnchor constraintEqualToAnchor:add.bottomAnchor constant:12], [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+    ]];
+}
+
+- (void)close { [self.navigationController popViewControllerAnimated:YES]; }
+- (void)addTime {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
+    NSString *time = [formatter stringFromDate:self.picker.date];
+    NSMutableArray *times = [AntForestManager.sharedInstance.waterScheduledTimes mutableCopy] ?: NSMutableArray.array;
+    if (self.editingIndex != NSNotFound) [times removeObjectAtIndex:self.editingIndex];
+    if (![times containsObject:time]) [times addObject:time];
+    [times sortUsingSelector:@selector(compare:)];
+    AntForestManager.sharedInstance.waterScheduledTimes = times;
+    [NSUserDefaults.standardUserDefaults setObject:times forKey:@"waterScheduledTimes"];
+    self.editingIndex = NSNotFound; [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal]; [self.tableView reloadData];
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return AntForestManager.sharedInstance.waterScheduledTimes.count; }
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"waterTime"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"waterTime"];
+    cell.textLabel.text = AntForestManager.sharedInstance.waterScheduledTimes[indexPath.row]; cell.textLabel.font = [UIFont monospacedDigitSystemFontOfSize:20 weight:UIFontWeightSemibold]; return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
+    self.picker.date = [formatter dateFromString:AntForestManager.sharedInstance.waterScheduledTimes[indexPath.row]] ?: NSDate.date;
+    self.editingIndex = indexPath.row; [self.saveButton setTitle:@"保存修改" forState:UIControlStateNormal]; [tableView deselectRowAtIndexPath:indexPath animated:YES];
+}
+- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (style != UITableViewCellEditingStyleDelete) return;
+    NSMutableArray *times = [AntForestManager.sharedInstance.waterScheduledTimes mutableCopy]; [times removeObjectAtIndex:indexPath.row]; AntForestManager.sharedInstance.waterScheduledTimes = times; [NSUserDefaults.standardUserDefaults setObject:times forKey:@"waterScheduledTimes"]; [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationAutomatic];
+}
+@end
+
+@implementation AntForestWaterPanel
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"好友浇水设置";
+    self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"开始浇水" style:UIBarButtonItemStyleDone target:self action:@selector(confirmStart)];
+    self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil]; self.searchController.searchResultsUpdater = self; self.searchController.obscuresBackgroundDuringPresentation = NO; self.searchController.searchBar.placeholder = @"搜索好友"; self.navigationItem.searchController = self.searchController;
+    UIView *options = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 224)];
+    UILabel *launchLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 12, 260, 25)]; launchLabel.text = @"打开蚂蚁森林自动浇水"; launchLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    UISwitch *launchSwitch = [[UISwitch alloc] initWithFrame:CGRectZero]; launchSwitch.on = AntForestManager.sharedInstance.enableWaterOnLaunch; launchSwitch.center = CGPointMake(options.bounds.size.width - 46, 24); launchSwitch.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [launchSwitch addTarget:self action:@selector(toggleWaterOnLaunch:) forControlEvents:UIControlEventValueChanged];
+    UILabel *autoLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 50, 180, 25)]; autoLabel.text = @"启用定时自动浇水"; autoLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    UISwitch *autoSwitch = [[UISwitch alloc] initWithFrame:CGRectZero]; autoSwitch.on = AntForestManager.sharedInstance.enableAutoWater; autoSwitch.center = CGPointMake(options.bounds.size.width - 46, 62); autoSwitch.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [autoSwitch addTarget:self action:@selector(toggleAutoWater:) forControlEvents:UIControlEventValueChanged];
+    UISegmentedControl *amount = [[UISegmentedControl alloc] initWithItems:@[@"10g", @"18g", @"33g", @"66g"]]; NSInteger index = MAX(0, MIN(3, AntForestManager.sharedInstance.waterEnergyId - 39)); amount.selectedSegmentIndex = index; amount.frame = CGRectMake(20, 87, options.bounds.size.width - 40, 32); amount.autoresizingMask = UIViewAutoresizingFlexibleWidth; [amount addTarget:self action:@selector(changeAmount:) forControlEvents:UIControlEventValueChanged];
+    UILabel *reminderLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 130, 220, 25)]; reminderLabel.text = @"提醒 TA 来收（7 天未收退回）"; reminderLabel.font = [UIFont systemFontOfSize:15];
+    UISwitch *reminder = [[UISwitch alloc] initWithFrame:CGRectZero]; reminder.on = AntForestManager.sharedInstance.waterReminderEnabled; reminder.center = CGPointMake(options.bounds.size.width - 46, 142); reminder.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [reminder addTarget:self action:@selector(toggleReminder:) forControlEvents:UIControlEventValueChanged];
+    UIButton *schedule = [UIButton buttonWithType:UIButtonTypeSystem]; [schedule setTitle:@"定时浇水设置" forState:UIControlStateNormal]; schedule.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; schedule.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft; schedule.frame = CGRectMake(20, 166, options.bounds.size.width - 40, 40); schedule.autoresizingMask = UIViewAutoresizingFlexibleWidth; [schedule addTarget:self action:@selector(showSchedule) forControlEvents:UIControlEventTouchUpInside];
+    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(220, 166, options.bounds.size.width - 240, 40)]; hint.text = @"每位好友每日最多 3 次"; hint.textAlignment = NSTextAlignmentRight; hint.textColor = UIColor.secondaryLabelColor; hint.font = [UIFont systemFontOfSize:13]; hint.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [options addSubview:launchLabel]; [options addSubview:launchSwitch]; [options addSubview:autoLabel]; [options addSubview:autoSwitch]; [options addSubview:amount]; [options addSubview:reminderLabel]; [options addSubview:reminder]; [options addSubview:schedule]; [options addSubview:hint];
+    self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped]; self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.tableHeaderView = options; self.tableView.allowsMultipleSelection = YES; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.tableView]; [NSLayoutConstraint activateConstraints:@[[self.tableView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor], [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadFriends) name:@"WaterFriendListUpdated" object:nil];
+    [self reloadFriends];
+}
+
+- (void)viewWillAppear:(BOOL)animated { [super viewWillAppear:animated]; [self reloadFriends]; }
+- (void)reloadFriends {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    self.friendIds = [[manager.friendsRank allKeys] filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { return uid.length > 0 && ![uid isEqualToString:manager.myUserId]; }]];
+    self.friendIds = [self.friendIds sortedArrayUsingComparator:^NSComparisonResult(NSString *left, NSString *right) { return [manager.friendsRank[left] integerValue] < [manager.friendsRank[right] integerValue] ? NSOrderedAscending : NSOrderedDescending; }];
+    [self updateSearchResultsForSearchController:self.searchController];
+}
+- (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
+    NSString *query = searchController.searchBar.text.lowercaseString;
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    self.filteredFriendIds = query.length ? [self.friendIds filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { NSDictionary *c = manager.friendsName[uid]; NSString *name = [c[@"displayName"] description] ?: [c[@"name"] description] ?: @""; return [name.lowercaseString containsString:query]; }]] : self.friendIds;
+    [self.tableView reloadData];
+}
+- (void)refreshFriends { [AntForestManager.sharedInstance refreshWaterFriends]; }
+- (void)toggleWaterOnLaunch:(UISwitch *)sender { AntForestManager.sharedInstance.enableWaterOnLaunch = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableWaterOnLaunch"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 打开蚂蚁森林自动浇水已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoWater:(UISwitch *)sender { AntForestManager *m = AntForestManager.sharedInstance; m.enableAutoWater = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoWater"]; if (sender.on) [m startScheduledWaterTimer]; else { [m.scheduledWaterTimer invalidate]; m.scheduledWaterTimer = nil; } }
+- (void)changeAmount:(UISegmentedControl *)sender { AntForestManager.sharedInstance.waterEnergyId = 39 + sender.selectedSegmentIndex; [NSUserDefaults.standardUserDefaults setInteger:AntForestManager.sharedInstance.waterEnergyId forKey:@"waterEnergyId"]; }
+- (void)toggleReminder:(UISwitch *)sender { AntForestManager.sharedInstance.waterReminderEnabled = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"waterReminderEnabled"]; }
+- (void)showSchedule { [self.navigationController pushViewController:[[AntForestWaterSchedulePanel alloc] init] animated:YES]; }
+- (void)confirmStart {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    NSUInteger count = manager.waterFriendIds.count; NSInteger grams = manager.waterGrams;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"确认开始浇水？" message:[NSString stringWithFormat:@"已选 %lu 位好友，按每人最多 3 次、每次 %ld g 计算，最多消耗 %ld g。", (unsigned long)count, (long)grams, (long)(count * 3 * grams)] preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"开始浇水" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) { [manager startWateringSelectedFriendsWithReason:@"手动浇水"]; }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return self.filteredFriendIds.count; }
+- (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46; }
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 46)];
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 7, header.bounds.size.width - 110, 32)]; title.autoresizingMask = UIViewAutoresizingFlexibleWidth; title.text = [NSString stringWithFormat:@"好友列表（已选 %lu 位）", (unsigned long)AntForestManager.sharedInstance.waterFriendIds.count]; title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; title.textColor = UIColor.secondaryLabelColor;
+    UIButton *refresh = [UIButton buttonWithType:UIButtonTypeSystem]; refresh.frame = CGRectMake(header.bounds.size.width - 84, 4, 68, 36); refresh.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [refresh setTitle:@"刷新" forState:UIControlStateNormal]; refresh.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; [refresh addTarget:self action:@selector(refreshFriends) forControlEvents:UIControlEventTouchUpInside];
+    [header addSubview:title]; [header addSubview:refresh]; return header;
+}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"waterFriend"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"waterFriend"];
+    NSString *uid = self.filteredFriendIds[indexPath.row]; NSDictionary *contact = AntForestManager.sharedInstance.friendsName[uid]; cell.textLabel.text = [contact[@"displayName"] description] ?: [contact[@"name"] description] ?: @"好友"; cell.accessoryType = [AntForestManager.sharedInstance.waterFriendIds containsObject:uid] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone; return cell;
+}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    NSString *uid = self.filteredFriendIds[indexPath.row]; NSMutableArray *selected = [AntForestManager.sharedInstance.waterFriendIds mutableCopy] ?: NSMutableArray.array; if ([selected containsObject:uid]) [selected removeObject:uid]; else [selected addObject:uid]; AntForestManager.sharedInstance.waterFriendIds = selected; [NSUserDefaults.standardUserDefaults setObject:selected forKey:@"waterFriendIds"]; [tableView deselectRowAtIndexPath:indexPath animated:YES]; [self.tableView reloadData];
+}
+@end
+
 @implementation AntForestStepSimulatorPanel
 
 - (void)viewDidLoad {
@@ -365,10 +496,12 @@ static void installEarnEnergyCollector(id controller) {
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(close)];
     UIButton *schedule = [self settingsButtonWithTitle:@"定时收取设置" detail:@"管理每日固定收取时刻" icon:@"calendar" action:@selector(showSchedule)];
     UIButton *step = [self settingsButtonWithTitle:@"步数模拟设置（测试）" detail:@"独立配置支付宝可见步数" icon:@"figure.walk" action:@selector(showStepSimulator)];
-    [self.view addSubview:schedule]; [self.view addSubview:step];
+    UIButton *water = [self settingsButtonWithTitle:@"好友浇水设置" detail:@"选择好友、克数与定时任务" icon:@"drop.fill" action:@selector(showWater)];
+    [self.view addSubview:schedule]; [self.view addSubview:step]; [self.view addSubview:water];
     [NSLayoutConstraint activateConstraints:@[
         [schedule.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [schedule.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [schedule.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [schedule.heightAnchor constraintEqualToConstant:70],
         [step.topAnchor constraintEqualToAnchor:schedule.bottomAnchor constant:12], [step.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [step.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [step.heightAnchor constraintEqualToConstant:70],
+        [water.topAnchor constraintEqualToAnchor:step.bottomAnchor constant:12], [water.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [water.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [water.heightAnchor constraintEqualToConstant:70],
     ]];
 }
 
@@ -390,6 +523,7 @@ static void installEarnEnergyCollector(id controller) {
 
 - (void)showSchedule { [self.navigationController pushViewController:[[AntForestSchedulePanel alloc] init] animated:YES]; }
 - (void)showStepSimulator { [self.navigationController pushViewController:[[AntForestStepSimulatorPanel alloc] init] animated:YES]; }
+- (void)showWater { [self.navigationController pushViewController:[[AntForestWaterPanel alloc] init] animated:YES]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 @end
@@ -732,8 +866,8 @@ static void installEarnEnergyCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
     [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -960,10 +1094,18 @@ static void initializeManager(void) {
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
     manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
+    manager.enableAutoWater = [defaults boolForKey:@"enableAutoWater"];
+    manager.enableWaterOnLaunch = [defaults boolForKey:@"enableWaterOnLaunch"];
+    manager.waterReminderEnabled = [defaults objectForKey:@"waterReminderEnabled"] ? [defaults boolForKey:@"waterReminderEnabled"] : YES;
+    NSInteger waterEnergyId = [defaults integerForKey:@"waterEnergyId"];
+    manager.waterEnergyId = (waterEnergyId >= 39 && waterEnergyId <= 42) ? waterEnergyId : 39;
+    manager.waterFriendIds = [defaults arrayForKey:@"waterFriendIds"] ?: @[];
+    manager.waterScheduledTimes = [defaults arrayForKey:@"waterScheduledTimes"] ?: @[];
     manager.collectInterval = MAX(1, [defaults integerForKey:@"backgroundIntervalMinutes"] ?: 5) * 60;
     [manager recordStage:[NSString stringWithFormat:@"诊断 · 初始化：自动=%d，循环=%d", manager.enableAutoCollect, manager.enableBackgroundLoop]];
     if (manager.enableAutoCollect && manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval];
     if (manager.enableAutoCollect && manager.enableScheduledCollect) [manager startScheduledCollectTimer];
+    if (manager.enableAutoWater) [manager startScheduledWaterTimer];
 }
 
 static void portViewDidLoad(id self, SEL _cmd) {
@@ -987,7 +1129,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
-    if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
+    if (forestHome && manager.enableWaterOnLaunch) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (manager.jsBridge) [manager startLaunchWateringThenCollect];
+        });
+    } else if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (manager.jsBridge) {
                 [manager recordStage:@"诊断 · 首页桥接就绪，立即补跑"];
