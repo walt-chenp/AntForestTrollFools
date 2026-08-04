@@ -29,7 +29,7 @@
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v2.7 正式版：iOS 15 及以上使用 `AntForestPort-v2.7.dylib` 通用包（`arm64 + arm64e`）；iOS 14 仍请使用 v2.6 独立兼容包。
+> v2.7 正式版：iOS 15 及以上使用 `AntForestPort-v2.7.dylib`；iOS 14 使用 `AntForestPort-v2.7-iOS14.dylib`。两个包均为 `arm64 + arm64e` 通用 dylib。
 
 ## v2.7 更新说明
 
@@ -50,7 +50,7 @@
 
 ## iOS 14 独立版本
 
-- iOS 14 请继续使用独立包 `AntForestPort-v2.6-iOS14.dylib`；v2.7 好友浇水等新功能当前仅随 iOS 15+ 通用包发布。
+- iOS 14 请使用独立包 `AntForestPort-v2.7-iOS14.dylib`；该兼容包包含 v2.7 正式功能，不替代 iOS 15+ 的标准包。
 - 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
 - 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.10、TrollFools 环境完成注入与功能验证。
 
@@ -108,7 +108,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | 常规 v2.7 包支持 iOS 15 及以上；iOS 14 使用独立 `AntForestPort-v2.6-iOS14.dylib` |
+| iOS | 标准 v2.7 包支持 iOS 15 及以上；iOS 14 使用独立 `AntForestPort-v2.7-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -154,16 +154,16 @@ GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 在 iOS 14 独立兼容分支构建 iOS 14 包：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.6-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.7-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
 ```
 
-产物为 `build/AntForestPort-v2.6-iOS14.dylib`。
+产物为 `build/AntForestPort-v2.7-iOS14.dylib`。
 
 ## 开发分支约定
 
 - `release/v2.7`：正式维护线；包含首页自动收取、本人优先、浇水赠能、步数模拟、自动赚能量与好友浇水。
 - `release/v2.6`：上一正式维护线。
-- `release/v2.6-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
+- `release/v2.7-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
 - `feature/earn-energy-probe`：保留“赚能量”玩法的实验与诊断记录；已验证的自动点击逻辑已合入正式开发线。
 - 后续每项新功能或缺陷修复均从独立 `feature/...` 或 `fix/...` 分支开发；真机验证后再合入新的 `release/...` 分支，避免实验代码影响稳定版。
 
