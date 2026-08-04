@@ -26,6 +26,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, strong) NSTimer *autoCollectTimer; //后台任务定时器
 @property (nonatomic, strong) NSTimer *scheduledCollectTimer;
+@property (nonatomic, strong) NSTimer *scheduledWaterTimer;
 
 @property (assign, nonatomic) BOOL enableAutoCollect; //允许自动收集则自动开启后台模式
 @property (assign, nonatomic) BOOL enableSelfCollect;
@@ -33,6 +34,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (assign, nonatomic) BOOL enableBackgroundLoop;
 @property (assign, nonatomic) BOOL enableScheduledCollect;
 @property (nonatomic, strong) NSArray<NSString *> *scheduledTimes;
+@property (assign, nonatomic) BOOL enableAutoWater;
+@property (assign, nonatomic) BOOL enableWaterOnLaunch;
+@property (assign, nonatomic) BOOL waterReminderEnabled;
+@property (nonatomic) NSInteger waterEnergyId;
+@property (nonatomic, strong) NSArray<NSString *> *waterFriendIds;
+@property (nonatomic, strong) NSArray<NSString *> *waterScheduledTimes;
 
 @property (assign, nonatomic) int failedTimes; //未成功收取能量的次数
 @property(atomic) NSTimeInterval collectInterval; //takeLook时间间隔
@@ -41,6 +48,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval;
 -(void)startScheduledCollectTimer;
+-(void)startScheduledWaterTimer;
 -(void)stopAutoCollectTimer;
 
 -(void)cleanFriendsOcean:(NSString*)uid;
@@ -61,6 +69,14 @@ NS_ASSUME_NONNULL_BEGIN
 -(NSString*)getUserName:(NSString*)uid;
 -(void)addLog:(NSString *)logMessage;
 -(void)recordStage:(NSString *)stage;
+
+// 好友浇水：仅由“好友浇水设置”手动或定时触发，与自动收取独立。
+-(void)refreshWaterFriends;
+-(void)startWateringSelectedFriendsWithReason:(NSString *)reason;
+-(void)startLaunchWateringThenCollect;
+-(void)handleWaterResponse:(id)args;
+-(NSString *)waterDisplayNameForUser:(NSString *)uid;
+-(NSInteger)waterGrams;
 
 @end
 

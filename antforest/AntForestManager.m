@@ -32,6 +32,25 @@ static BOOL selfPriorityPending = NO;
 static NSUInteger selfPriorityCycle = 0;
 static NSMutableArray<NSString *> *deferredFriendRankIds = nil;
 static NSArray<NSString *> *deferredRankedFriendIds = nil;
+static NSString *lastWaterScheduledMinute = nil;
+static BOOL waterRunning = NO;
+static BOOL waterAwaitingHome = NO;
+static BOOL waterAwaitingLimit = NO;
+static BOOL waterAwaitingTransfer = NO;
+static NSUInteger waterRequestToken = 0;
+static NSUInteger waterRetryCount = 0;
+static NSUInteger waterTransferRetryCount = 0;
+static const NSTimeInterval kWaterTransferCooldown = 1.5;
+static NSUInteger waterTargetCount = 0;
+static NSUInteger waterSucceededCount = 0;
+static NSUInteger waterQueueIndex = 0;
+static NSArray<NSString *> *waterQueue = nil;
+static NSString *waterCurrentUserId = nil;
+static NSString *waterCurrentBizNo = nil;
+static NSString *waterRunReason = nil;
+static BOOL waterFriendRefreshPending = NO;
+static BOOL waterLaunchAttempted = NO;
+static BOOL collectAfterLaunchWater = NO;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -54,6 +73,346 @@ dispatch_queue_t globalSerialQueueTest;
         
     });
     return afm;
+}
+
+- (NSInteger)waterGrams {
+    switch (self.waterEnergyId) {
+        case 40: return 18;
+        case 41: return 33;
+        case 42: return 66;
+        default: return 10;
+    }
+}
+
+- (NSString *)waterDisplayNameForUser:(NSString *)uid {
+    NSDictionary *contact = [self.friendsName[uid] isKindOfClass:NSDictionary.class] ? self.friendsName[uid] : nil;
+    NSString *name = [contact[@"displayName"] isKindOfClass:NSString.class] ? contact[@"displayName"] : nil;
+    if (!name.length) name = [contact[@"name"] isKindOfClass:NSString.class] ? contact[@"name"] : nil;
+    if (!name.length) return @"好友";
+    return name.length == 1 ? [name stringByAppendingString:@"***"] : [[name substringToIndex:MIN((NSUInteger)2, name.length)] stringByAppendingString:@"***"];
+}
+
+static NSString *waterTodayKey(void) {
+    return getCurrentDateString();
+}
+
+static NSMutableDictionary<NSString *, NSNumber *> *waterDailyCounts(void) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *today = waterTodayKey();
+    if (![[defaults stringForKey:@"waterDailyDate"] isEqualToString:today]) {
+        [defaults setObject:today forKey:@"waterDailyDate"];
+        [defaults setObject:@{} forKey:@"waterDailyCounts"];
+    }
+    NSDictionary *saved = [defaults dictionaryForKey:@"waterDailyCounts"] ?: @{};
+    return [saved mutableCopy];
+}
+
+static void saveWaterDailyCounts(NSDictionary *counts) {
+    [NSUserDefaults.standardUserDefaults setObject:counts forKey:@"waterDailyCounts"];
+}
+
+static NSString *waterJSONString(id value) {
+    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+    return data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+}
+
+static id waterFindValue(id value, NSString *key, NSUInteger depth) {
+    if (depth > 8) return nil;
+    if ([value isKindOfClass:NSDictionary.class]) {
+        id direct = value[key];
+        if (direct) return direct;
+        for (id child in [(NSDictionary *)value allValues]) {
+            id found = waterFindValue(child, key, depth + 1);
+            if (found) return found;
+        }
+    } else if ([value isKindOfClass:NSArray.class]) {
+        for (id child in (NSArray *)value) {
+            id found = waterFindValue(child, key, depth + 1);
+            if (found) return found;
+        }
+    }
+    return nil;
+}
+
+static BOOL waterResponseSucceeded(id value) {
+    id success = waterFindValue(value, @"success", 0);
+    if ([success respondsToSelector:@selector(boolValue)] && [success boolValue]) return YES;
+    id result = waterFindValue(value, @"resultCode", 0);
+    if ([result isKindOfClass:NSString.class] && [result caseInsensitiveCompare:@"SUCCESS"] == NSOrderedSame) return YES;
+    result = waterFindValue(value, @"result", 0);
+    return [result respondsToSelector:@selector(integerValue)] && [result integerValue] == 1;
+}
+
+static NSString *waterResponseCode(id value) {
+    id code = waterFindValue(value, @"resultCode", 0);
+    return [code isKindOfClass:NSString.class] ? [(NSString *)code uppercaseString] : @"";
+}
+
+static BOOL waterResponseInsufficient(id value) {
+    for (NSString *key in @[ @"resultCode", @"resultDesc", @"resultMessage", @"errorCode", @"errorMsg", @"message", @"memo", @"desc" ]) {
+        id candidate = waterFindValue(value, key, 0);
+        if (![candidate isKindOfClass:NSString.class]) continue;
+        NSString *text = [(NSString *)candidate lowercaseString];
+        if ([text containsString:@"insufficient"] || [text containsString:@"not enough"] || [text containsString:@"能量不足"] || [text containsString:@"能量不够"]) return YES;
+    }
+    return NO;
+}
+
+static NSString *waterResponseSummary(id value) {
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *key in @[ @"success", @"result", @"resultCode", @"resultDesc", @"resultMessage", @"errorCode", @"errorMsg", @"message", @"memo", @"desc", @"waterLimit" ]) {
+        id candidate = waterFindValue(value, key, 0);
+        if (!candidate || candidate == NSNull.null) continue;
+        NSString *text = [candidate isKindOfClass:NSString.class] ? candidate : [candidate description];
+        if (text.length > 80) text = [[text substringToIndex:80] stringByAppendingString:@"…"];
+        [parts addObject:[NSString stringWithFormat:@"%@=%@", key, text]];
+    }
+    return parts.count ? [parts componentsJoinedByString:@"，"] : @"未发现状态字段";
+}
+
+- (void)waterFinishCurrentFriendWithStatus:(NSString *)status {
+    NSString *name = [self waterDisplayNameForUser:waterCurrentUserId];
+    if (status.length) [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · %@：%@", name, status]];
+    waterQueueIndex++;
+    waterCurrentUserId = nil;
+    waterCurrentBizNo = nil;
+    waterTargetCount = 0;
+    waterSucceededCount = 0;
+    waterRetryCount = 0;
+    waterAwaitingHome = waterAwaitingLimit = waterAwaitingTransfer = NO;
+    waterRequestToken++;
+    [self performSelector:@selector(waterStartNextFriend) withObject:nil afterDelay:kWaterTransferCooldown];
+}
+
+- (void)waterStopWithReason:(NSString *)reason {
+    if (!waterRunning) return;
+    waterRunning = NO;
+    waterAwaitingHome = waterAwaitingLimit = waterAwaitingTransfer = NO;
+    waterRequestToken++;
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · 任务结束：%@", reason]];
+    waterQueue = nil;
+    waterCurrentUserId = nil;
+    waterCurrentBizNo = nil;
+    if (!collectAfterLaunchWater) return;
+    collectAfterLaunchWater = NO;
+    if (!self.enableAutoCollect || !self.enableBackgroundLoop || !self.jsBridge) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self recordStage:@"收取 · 蚂蚁森林自动浇水结束，开始自动收取"];
+        [self autoCollectBubbles];
+    });
+}
+
+- (void)waterSendRPC:(NSString *)operation body:(NSDictionary *)body {
+    if (!self.jsBridge) { [self waterStopWithReason:@"H5 Bridge 未连接"]; return; }
+    NSString *timestamp = [NSString stringWithFormat:@"%ld", (long)(NSDate.date.timeIntervalSince1970 * 1000)];
+    NSString *callback = [NSString stringWithFormat:@"water_%@.%@", timestamp, [AntForestManager getNumberRandom:12]];
+    NSDictionary *data = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": operation, @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": callback };
+    NSString *queue = waterJSONString(@[data]);
+    if (!queue.length) { [self waterStopWithReason:@"请求编码失败"]; return; }
+    NSString *url = waterCurrentUserId.length ? [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK", waterCurrentUserId] : @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+    [self.jsBridge _doFlushMessageQueue:queue url:url];
+}
+
+- (void)waterRequestFriendHome {
+    NSUInteger requestToken = ++waterRequestToken;
+    waterAwaitingHome = YES;
+    waterAwaitingLimit = waterAwaitingTransfer = NO;
+    NSDictionary *body = @{ @"userId": waterCurrentUserId, @"version": @"20241025", @"source": @"chInfo_ch_appcenter__chsub_9patch", @"fromAct": @"TAKE_LOOK", @"configVersionMap": @{ @"wateringBubbleConfig": @"0" }, @"skipWhackMole": @NO, @"activityParam": @{}, @"currentEnergy": @99999999, @"currentVitalityAmount": @8888888 };
+    [self waterSendRPC:@"alipay.antforest.forest.h5.queryFriendHomePage" body:body];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!waterRunning || requestToken != waterRequestToken || !waterAwaitingHome) return;
+        if (waterRetryCount++ == 0) { [self waterRequestFriendHome]; return; }
+        [self waterFinishCurrentFriendWithStatus:@"好友主页回包超时，已跳过"];
+    });
+}
+
+- (void)waterRequestLimit {
+    NSUInteger requestToken = ++waterRequestToken;
+    waterAwaitingHome = NO;
+    waterAwaitingLimit = YES;
+    waterRetryCount = 0;
+    [self waterSendRPC:@"alipay.antforest.forest.h5.queryMiscInfo" body:@{ @"queryBizType": @"waterLimit", @"source": @"SELF_HOME", @"targetUserId": waterCurrentUserId, @"version": @"20230501" }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!waterRunning || requestToken != waterRequestToken || !waterAwaitingLimit) return;
+        if (waterRetryCount++ == 0) { [self waterRequestLimit]; return; }
+        [self waterFinishCurrentFriendWithStatus:@"浇水限额回包超时，已跳过"];
+    });
+}
+
+- (void)waterTransferOnce {
+    NSUInteger requestToken = ++waterRequestToken;
+    waterAwaitingLimit = NO;
+    waterAwaitingTransfer = YES;
+    NSDictionary *body = @{ @"bizNo": waterCurrentBizNo, @"energyId": @(self.waterEnergyId), @"extInfo": @{ @"sendChat": self.waterReminderEnabled ? @"true" : @"false" }, @"from": @"", @"source": @"chInfo_ch_appcenter__chsub_9patch", @"targetUser": waterCurrentUserId, @"transferType": @"WATERING", @"version": @"20230501" };
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · 诊断：请求第 %lu/%lu 次浇水", (unsigned long)(waterSucceededCount + 1), (unsigned long)waterTargetCount]];
+    [self waterSendRPC:@"alipay.antmember.forest.h5.transferEnergy" body:body];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!waterRunning || requestToken != waterRequestToken || !waterAwaitingTransfer) return;
+        if (waterTransferRetryCount++ == 0) {
+            waterAwaitingTransfer = NO;
+            waterRetryCount = 0;
+            [self recordStage:@"收取 · 浇水 · 收取回包超时，重新获取好友凭据后重试"];
+            [self waterRequestFriendHome];
+            return;
+        }
+        [self waterFinishCurrentFriendWithStatus:[NSString stringWithFormat:@"第 %lu 次浇水未确认，已跳过", (unsigned long)(waterSucceededCount + 1)]];
+    });
+}
+
+- (void)waterStartNextFriend {
+    if (!waterRunning) return;
+    if (waterQueueIndex >= waterQueue.count) { [self waterStopWithReason:[NSString stringWithFormat:@"%@完成", waterRunReason ?: @"浇水"]]; return; }
+    waterCurrentUserId = waterQueue[waterQueueIndex];
+    if (!waterCurrentUserId.length || [waterCurrentUserId isEqualToString:self.myUserId]) { [self waterFinishCurrentFriendWithStatus:@"无效好友，已跳过"]; return; }
+    NSInteger done = [waterDailyCounts()[waterCurrentUserId] integerValue];
+    NSInteger remaining = MAX(0, 3 - done);
+    if (!remaining) { [self waterFinishCurrentFriendWithStatus:@"今日已浇满 3 次，已跳过"]; return; }
+    waterTargetCount = (NSUInteger)remaining;
+    waterSucceededCount = 0;
+    waterRetryCount = 0;
+    waterTransferRetryCount = 0;
+    [self waterRequestFriendHome];
+}
+
+- (void)startWateringSelectedFriendsWithReason:(NSString *)reason {
+    if (waterRunning) { [self recordStage:@"收取 · 浇水 · 当前任务仍在执行"]; return; }
+    NSArray *friends = [[NSOrderedSet orderedSetWithArray:self.waterFriendIds ?: @[]].array filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { return uid.length > 0; }]];
+    if (!friends.count) { [self recordStage:@"收取 · 浇水 · 未选择好友"]; return; }
+    if (!self.jsBridge) { [self recordStage:@"收取 · 浇水 · H5 Bridge 未连接"]; return; }
+    waterRunning = YES;
+    waterQueue = friends;
+    waterQueueIndex = 0;
+    waterRunReason = reason ?: @"手动浇水";
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · %@开始：%lu 位好友，%ld g，每人补足至每日 3 次", waterRunReason, (unsigned long)friends.count, (long)self.waterGrams]];
+    [self waterStartNextFriend];
+}
+
+- (void)startLaunchWateringThenCollect {
+    if (waterLaunchAttempted) return;
+    waterLaunchAttempted = YES;
+    BOOL shouldCollect = self.enableAutoCollect && self.enableBackgroundLoop;
+    if (waterRunning) {
+        [self recordStage:@"收取 · 蚂蚁森林自动浇水跳过：已有浇水任务运行中"];
+        if (shouldCollect) [self autoCollectBubbles];
+        return;
+    }
+    if (!self.waterFriendIds.count) {
+        [self recordStage:@"收取 · 蚂蚁森林自动浇水跳过：未选择好友"];
+        if (shouldCollect) [self autoCollectBubbles];
+        return;
+    }
+    collectAfterLaunchWater = shouldCollect;
+    [self startWateringSelectedFriendsWithReason:@"蚂蚁森林自动浇水"];
+}
+
+- (void)handleWaterResponse:(id)args {
+    if (!waterRunning || ![args isKindOfClass:NSDictionary.class]) return;
+    if (waterAwaitingHome) {
+        NSString *bizNo = [waterFindValue(args, @"bizNo", 0) isKindOfClass:NSString.class] ? waterFindValue(args, @"bizNo", 0) : nil;
+        if (!bizNo.length) return;
+        waterCurrentBizNo = bizNo;
+        [self recordStage:@"收取 · 浇水 · 已获取好友主页凭据"];
+        [self waterRequestLimit];
+        return;
+    }
+    if (waterAwaitingLimit) {
+        if (!waterFindValue(args, @"waterLimit", 0)) return;
+        [self recordStage:@"收取 · 浇水 · 已通过浇水限额校验"];
+        [self waterTransferOnce];
+        return;
+    }
+    if (!waterAwaitingTransfer) return;
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · 诊断：收取回包 %@", waterResponseSummary(args)]];
+    if (!waterResponseSucceeded(args)) {
+        NSString *code = waterResponseCode(args);
+        if ([code isEqualToString:@"WATERING_TIMES_LIMIT"]) {
+            NSMutableDictionary *counts = waterDailyCounts();
+            counts[waterCurrentUserId] = @3;
+            saveWaterDailyCounts(counts);
+            [self waterFinishCurrentFriendWithStatus:@"服务端确认今日已浇满 3 次，已跳过"];
+            return;
+        }
+        if ([code isEqualToString:@"WATER_NOT_GET_LOCK"] || [code isEqualToString:@"PARAM_ILLEGAL"]) {
+            waterAwaitingTransfer = NO;
+            waterRequestToken++;
+            if (waterTransferRetryCount++ == 0) {
+                NSTimeInterval delay = [code isEqualToString:@"WATER_NOT_GET_LOCK"] ? 2.0 : kWaterTransferCooldown;
+                [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · %@，%.0f 秒后重新获取凭据重试", [code isEqualToString:@"WATER_NOT_GET_LOCK"] ? @"服务端限流" : @"服务端参数异常", delay]];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (waterRunning && !waterAwaitingHome && !waterAwaitingLimit && !waterAwaitingTransfer) [self waterRequestFriendHome];
+                });
+                return;
+            }
+            [self waterFinishCurrentFriendWithStatus:[NSString stringWithFormat:@"第 %lu 次浇水被服务端拒绝（%@），已跳过", (unsigned long)(waterSucceededCount + 1), code]];
+            return;
+        }
+        if (waterResponseInsufficient(args)) [self waterStopWithReason:@"能量不足"];
+        return;
+    }
+    waterAwaitingTransfer = NO;
+    waterRetryCount = 0;
+    waterTransferRetryCount = 0;
+    waterSucceededCount++;
+    NSMutableDictionary *counts = waterDailyCounts();
+    counts[waterCurrentUserId] = @([counts[waterCurrentUserId] integerValue] + 1);
+    saveWaterDailyCounts(counts);
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · %@：成功 %lu/%lu，%ld g", [self waterDisplayNameForUser:waterCurrentUserId], (unsigned long)waterSucceededCount, (unsigned long)waterTargetCount, (long)self.waterGrams]];
+    if (waterSucceededCount >= waterTargetCount) [self waterFinishCurrentFriendWithStatus:@"本次完成"];
+    else dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kWaterTransferCooldown * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (waterRunning) [self waterRequestFriendHome]; });
+}
+
+- (void)refreshWaterFriends {
+    // 好友浇水列表只认本次总能量榜快照，不能混入历史昵称缓存。
+    [self.friendsRank removeAllObjects];
+    waterFriendRefreshPending = YES;
+    [self queryTotalRank];
+    [self recordStage:@"收取 · 浇水 · 已请求刷新好友列表"];
+}
+
+- (void)startScheduledWaterTimer {
+    [self.scheduledWaterTimer invalidate];
+    self.scheduledWaterTimer = [NSTimer scheduledTimerWithTimeInterval:15 target:self selector:@selector(checkScheduledWater) userInfo:nil repeats:YES];
+    [self checkScheduledWater];
+}
+
+- (void)checkScheduledWater {
+    if (!self.enableAutoWater) return;
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
+    NSString *time = [formatter stringFromDate:NSDate.date];
+    if (![self.waterScheduledTimes containsObject:time]) return;
+    formatter.dateFormat = @"yyyy-MM-dd HH:mm";
+    NSString *minute = [formatter stringFromDate:NSDate.date];
+    if ([lastWaterScheduledMinute isEqualToString:minute]) return;
+    lastWaterScheduledMinute = minute;
+    [self startWateringSelectedFriendsWithReason:@"定时浇水"];
+}
+
+- (void)updateWaterFriendListFromResponse:(NSDictionary *)dict {
+    if (!waterFriendRefreshPending) return;
+    NSArray *contacts = [dict[@"contactsDicArray"] isKindOfClass:NSArray.class] ? dict[@"contactsDicArray"] : nil;
+    if (contacts.count) {
+        for (NSDictionary *contact in contacts) {
+            NSString *uid = contact[@"userID"];
+            if (uid.length) self.friendsName[uid] = contact;
+        }
+    }
+    NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+    NSArray *rankings = [resData[@"totalDatas"] isKindOfClass:NSArray.class] ? resData[@"totalDatas"] : nil;
+    if (!rankings.count) return;
+    [self.friendsRank removeAllObjects];
+    for (NSDictionary *ranking in rankings) {
+        NSString *uid = ranking[@"userId"];
+        if (uid.length) self.friendsRank[uid] = ranking[@"rank"] ?: @0;
+    }
+    waterFriendRefreshPending = NO;
+    NSArray *kept = [self.waterFriendIds filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { return self.friendsRank[uid] != nil; }]];
+    if (kept.count != self.waterFriendIds.count) {
+        self.waterFriendIds = kept;
+        [[NSUserDefaults standardUserDefaults] setObject:kept forKey:@"waterFriendIds"];
+        [self recordStage:@"收取 · 浇水 · 已移除不在总榜内的好友选择"];
+    }
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · 好友列表刷新完成：%lu 位", (unsigned long)self.friendsRank.count]];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"WaterFriendListUpdated" object:nil];
 }
 
 - (void)releaseSelfPriorityForCycle:(NSUInteger)cycle reason:(NSString *)reason {
@@ -729,6 +1088,9 @@ NSString* getCurrentDateTimeString() {
 
 -(void)matchFriendIdAndBubbles:(id)args {
     @try {
+        // 浇水可独立于自动收取手动执行，必须先处理它的回包。
+        [self handleWaterResponse:args];
+        if ([args isKindOfClass:NSDictionary.class]) [self updateWaterFriendListFromResponse:args];
         [self recordCollectedEnergyFromResponse:args];
         if (!self.enableAutoCollect) return;
         if (args != nil && [args isKindOfClass:[NSDictionary class]]) {
@@ -877,7 +1239,6 @@ NSString* getCurrentDateTimeString() {
                 NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fn requiringSecureCoding:NO error:nil];
                 [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsName"];
                 [[NSUserDefaults standardUserDefaults] synchronize];
-                
             }
             // 先查询本人首页；严格的“本人收取完成后再查好友”由独立修复处理。
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"myself"]) {
