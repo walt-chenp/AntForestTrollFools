@@ -31,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (assign, nonatomic) BOOL enableAutoCollect; //允许自动收集则自动开启后台模式
 @property (assign, nonatomic) BOOL enableSelfCollect;
 @property (assign, nonatomic) BOOL enableAutoRain;
+@property (assign, nonatomic) BOOL enableAutoEarn;
 @property (assign, nonatomic) BOOL enableBackgroundLoop;
 @property (assign, nonatomic) BOOL enableScheduledCollect;
 @property (nonatomic, strong) NSArray<NSString *> *scheduledTimes;
