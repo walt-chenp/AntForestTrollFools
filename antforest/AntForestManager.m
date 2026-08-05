@@ -864,7 +864,6 @@ NSString* getCurrentDateTimeString() {
         lastCollectStartedAt = NSDate.date;
         collectionCycle++;
         NSUInteger cycle = collectionCycle;
-        self.myUserId = @"";
         selfPriorityPending = self.enableSelfCollect;
         selfPriorityCycle = cycle;
         [deferredFriendRankIds removeAllObjects];
