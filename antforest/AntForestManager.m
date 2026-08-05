@@ -681,7 +681,18 @@ NSString* getCurrentDateTimeString() {
 
 //收集能量球
 -(void)collectBubbles:(NSString*)uid bubblesId:(NSString*)bids {
-    NSString *collectKey = [NSString stringWithFormat:@"%@:%@", uid ?: @"", bids ?: @""];
+    NSString *userId = [uid isKindOfClass:NSString.class] ? uid : [uid description];
+    NSString *bubbleIds = [bids isKindOfClass:NSString.class] ? bids : [bids description];
+    if (!self.enableAutoCollect || !userId.length || !bubbleIds.length) return;
+    if (!self.myUserId.length) {
+        [self recordStage:@"诊断 · 收取跳过：本人账户尚未识别"];
+        return;
+    }
+    if ([userId isEqualToString:self.myUserId] && !self.enableSelfCollect) {
+        [self recordStage:@"收取 · 已跳过本人能量"];
+        return;
+    }
+    NSString *collectKey = [NSString stringWithFormat:@"%@:%@", userId, bubbleIds];
     @synchronized (self) {
         if ([pendingCollectBubbles containsObject:collectKey]) {
             [self recordStage:@"诊断 · 收取跳过：重复气泡请求"];
@@ -693,8 +704,8 @@ NSString* getCurrentDateTimeString() {
     NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"bizType\":\"\",\"fromAct\":\"TAKE_LOOK\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,bids,version,timeStamp,randNum];
-    NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK", uid];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"bizType\":\"\",\"fromAct\":\"TAKE_LOOK\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",userId,bubbleIds,version,timeStamp,randNum];
+    NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK", userId];
     if([self jsBridge]) {
         [self recordStage:[NSString stringWithFormat:@"诊断 · 请求收取能量：第 %lu 轮，待确认 %lu 笔", (unsigned long)collectionCycle, (unsigned long)pendingCollectBubbles.count]];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
@@ -853,6 +864,7 @@ NSString* getCurrentDateTimeString() {
         lastCollectStartedAt = NSDate.date;
         collectionCycle++;
         NSUInteger cycle = collectionCycle;
+        self.myUserId = @"";
         selfPriorityPending = self.enableSelfCollect;
         selfPriorityCycle = cycle;
         [deferredFriendRankIds removeAllObjects];
@@ -1079,9 +1091,19 @@ NSString* getCurrentDateTimeString() {
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
         [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
         [defaults synchronize];
-        NSString *source = [userId isEqualToString:self.myUserId] ? @"自己" : @"好友";
-        [self recordStage:[NSString stringWithFormat:@"收取 · 成功收取%@能量：%ld g（今日累计 %ld g）", source, (long)energy.integerValue, (long)self.todayCollectedEnergy]];
-        NSString *log = [NSString stringWithFormat:@"%@\n成功收取%@能量:%ldg", getCurrentDateTimeString(), source, (long)energy.integerValue];
+        BOOL isSelf = [userId isEqualToString:self.myUserId];
+        NSString *source = @"自己";
+        if (!isSelf) {
+            NSDictionary *contact = [self.friendsName[userId] isKindOfClass:NSDictionary.class] ? self.friendsName[userId] : nil;
+            NSString *name = [contact[@"displayName"] isKindOfClass:NSString.class] ? contact[@"displayName"] : nil;
+            if (!name.length) name = [contact[@"name"] isKindOfClass:NSString.class] ? contact[@"name"] : nil;
+            source = name.length ? [NSString stringWithFormat:@"好友\u201c%@\u201d", name] : @"好友";
+        }
+        NSString *message = isSelf
+            ? [NSString stringWithFormat:@"成功收取自己能量：%ld g（今日累计 %ld g）", (long)energy.integerValue, (long)self.todayCollectedEnergy]
+            : [NSString stringWithFormat:@"成功收取%@的能量：%ld g（今日累计 %ld g）", source, (long)energy.integerValue, (long)self.todayCollectedEnergy];
+        [self recordStage:[@"收取 · " stringByAppendingString:message]];
+        NSString *log = [NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), message];
         [self addLog:log];
     }
 }
@@ -1139,6 +1161,10 @@ NSString* getCurrentDateTimeString() {
                 if([dict objectForKey:@"userBaseInfo"]) {
                     NSDictionary *pDic =[dict objectForKey:@"userBaseInfo"];
                     userId = [pDic objectForKey:@"userId"];
+                }
+                if (!userId.length || !self.myUserId.length) {
+                    [self recordStage:@"诊断 · 气泡回包跳过：本人账户尚未识别"];
+                    return;
                 }
                 
                 //判断是否有能量保护罩
