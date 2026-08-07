@@ -25,6 +25,7 @@ static NSString * const AntForestButtonYKey = @"AntForestButtonY";
 static NSString * const AntForestButtonSideKey = @"AntForestButtonSide";
 static const void *AntForestButtonCollapsedKey = &AntForestButtonCollapsedKey;
 static const void *AntForestButtonCollapseTokenKey = &AntForestButtonCollapseTokenKey;
+static const void *ForestHomeStartKey = &ForestHomeStartKey;
 static BOOL shouldRevealLeafOnNextForestAppearance = YES;
 
 static BOOL isForestHomeURL(NSURL *url) {
@@ -48,6 +49,42 @@ static id forestBridgeFromController(id controller) {
         if ([bridge isKindOfClass:NSClassFromString(@"PSDJsBridge")]) return bridge;
     }
     return nil;
+}
+
+static void startForestHomeWhenBridgeReady(id controller) {
+    if (objc_getAssociatedObject(controller, ForestHomeStartKey)) return;
+    objc_setAssociatedObject(controller, ForestHomeStartKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    __weak id weakController = controller;
+    __block NSUInteger attempts = 0;
+    __block void (^waitForBridge)(void);
+    waitForBridge = ^{
+        id currentController = weakController;
+        NSURL *url = [currentController respondsToSelector:@selector(url)] ? [currentController url] : nil;
+        if (!currentController || !isForestHomeURL(url) || isEarnEnergyURL(url)) { waitForBridge = nil; return; }
+        AntForestManager *manager = AntForestManager.sharedInstance;
+        id bridge = forestBridgeFromController(currentController);
+        if (bridge) {
+            if (manager.jsBridge != bridge) {
+                manager.jsBridge = bridge;
+                [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
+            }
+            if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
+            else if (manager.enableAutoCollect && manager.enableBackgroundLoop) {
+                [manager recordStage:@"收取 · 首页桥接就绪，立即补跑"];
+                [manager autoCollectBubbles];
+            }
+            waitForBridge = nil;
+            return;
+        }
+        if (++attempts >= 10) {
+            objc_setAssociatedObject(currentController, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [manager recordStage:@"收取 · 森林首页 H5 Bridge 等待超时"];
+            waitForBridge = nil;
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), waitForBridge);
+    };
+    waitForBridge();
 }
 
 static BOOL isForestResponse(id value) {
@@ -1135,18 +1172,7 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
-    if (forestHome && manager.enableWaterOnLaunch) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (manager.jsBridge) [manager startLaunchWateringThenCollect];
-        });
-    } else if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (manager.jsBridge) {
-                [manager recordStage:@"诊断 · 首页桥接就绪，立即补跑"];
-                [manager autoCollectBubbles];
-            }
-        });
-    }
+    if (forestHome && (manager.enableWaterOnLaunch || (manager.enableAutoCollect && manager.enableBackgroundLoop))) startForestHomeWhenBridgeReady(self);
     if (forestHome) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
