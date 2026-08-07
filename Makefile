@@ -6,9 +6,12 @@ ARM64_TARGET := build/AntForestPort-arm64.dylib
 ARM64E_TARGET := build/AntForestPort-arm64e.dylib
 SOURCES := PortEntry.m antforest/AntForestManager.m antforest/StepSimulator.m antforest/DebugTool/Tool.m antforest/DebugTool/UIView+Toast.m
 
-.PHONY: all clean
+.PHONY: all clean test
 
 all: $(TARGET)
+
+test:
+	sh tests/check_water_gift_recheck.sh
 
 $(TARGET): $(SOURCES)
 	@mkdir -p build
