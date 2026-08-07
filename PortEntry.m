@@ -10,6 +10,7 @@
 static void (*originalViewDidLoad)(id, SEL);
 static void (*originalViewDidAppear)(id, SEL, BOOL);
 static id (*originalTransformResponseData)(id, SEL, id);
+static void (*originalUpdateBridgeReadyStatus)(id, SEL, id);
 static NSTimeInterval lastWaterGiftTapAt;
 static const void *GiftFullProbeKey = &GiftFullProbeKey;
 static __weak id giftProbeWebView;
@@ -26,6 +27,7 @@ static NSString * const AntForestButtonSideKey = @"AntForestButtonSide";
 static const void *AntForestButtonCollapsedKey = &AntForestButtonCollapsedKey;
 static const void *AntForestButtonCollapseTokenKey = &AntForestButtonCollapseTokenKey;
 static const void *ForestHomeStartKey = &ForestHomeStartKey;
+static const void *ForestHomeBridgeKey = &ForestHomeBridgeKey;
 static BOOL shouldRevealLeafOnNextForestAppearance = YES;
 
 static BOOL isForestHomeURL(NSURL *url) {
@@ -51,6 +53,28 @@ static id forestBridgeFromController(id controller) {
     return nil;
 }
 
+static id forestControllerForBridge(id bridge) {
+    id contentView = [bridge respondsToSelector:@selector(contentView)] ? ((id (*)(id, SEL))objc_msgSend)(bridge, @selector(contentView)) : nil;
+    for (NSString *name in @[ @"rvkViewController", @"psdViewController" ]) {
+        SEL selector = NSSelectorFromString(name);
+        if ([contentView respondsToSelector:selector]) return ((id (*)(id, SEL))objc_msgSend)(contentView, selector);
+    }
+    return nil;
+}
+
+static void finishForestHomeStart(id controller, id bridge) {
+    if (!controller || !bridge || !objc_getAssociatedObject(controller, ForestHomeStartKey)) return;
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    manager.jsBridge = bridge;
+    objc_setAssociatedObject(controller, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
+    if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
+    else if (manager.enableAutoCollect && manager.enableBackgroundLoop) {
+        [manager recordStage:@"收取 · 首页桥接就绪，立即补跑"];
+        [manager autoCollectBubbles];
+    }
+}
+
 static void startForestHomeWhenBridgeReady(id controller) {
     if (objc_getAssociatedObject(controller, ForestHomeStartKey)) return;
     objc_setAssociatedObject(controller, ForestHomeStartKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -61,24 +85,15 @@ static void startForestHomeWhenBridgeReady(id controller) {
         id currentController = weakController;
         NSURL *url = [currentController respondsToSelector:@selector(url)] ? [currentController url] : nil;
         if (!currentController || !isForestHomeURL(url) || isEarnEnergyURL(url)) { waitForBridge = nil; return; }
-        AntForestManager *manager = AntForestManager.sharedInstance;
-        id bridge = forestBridgeFromController(currentController);
+        id bridge = forestBridgeFromController(currentController) ?: objc_getAssociatedObject(currentController, ForestHomeBridgeKey);
         if (bridge) {
-            if (manager.jsBridge != bridge) {
-                manager.jsBridge = bridge;
-                [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
-            }
-            if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
-            else if (manager.enableAutoCollect && manager.enableBackgroundLoop) {
-                [manager recordStage:@"收取 · 首页桥接就绪，立即补跑"];
-                [manager autoCollectBubbles];
-            }
+            finishForestHomeStart(currentController, bridge);
             waitForBridge = nil;
             return;
         }
         if (++attempts >= 10) {
             objc_setAssociatedObject(currentController, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [manager recordStage:@"收取 · 森林首页 H5 Bridge 等待超时"];
+            [AntForestManager.sharedInstance recordStage:@"收取 · 森林首页 H5 Bridge 等待超时"];
             waitForBridge = nil;
             return;
         }
@@ -1207,6 +1222,17 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     return originalTransformResponseData(self, _cmd, value);
 }
 
+static void portUpdateBridgeReadyStatus(id self, SEL _cmd, id value) {
+    originalUpdateBridgeReadyStatus(self, _cmd, value);
+    if ([self respondsToSelector:@selector(isBridgeReady)] && !((BOOL (*)(id, SEL))objc_msgSend)(self, @selector(isBridgeReady))) return;
+    id controller = forestControllerForBridge(self);
+    NSURL *url = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
+    if (isForestHomeURL(url) && !isEarnEnergyURL(url)) {
+        objc_setAssociatedObject(controller, ForestHomeBridgeKey, self, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        finishForestHomeStart(controller, self);
+    }
+}
+
 static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original) {
     Method method = class_getInstanceMethod(cls, selector);
     if (!method) return NO;
@@ -1233,6 +1259,7 @@ static void installHooks(void) {
         BOOL viewHooked = hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
         BOOL appearanceHooked = hookMethod(webController, @selector(viewDidAppear:), (IMP)portViewDidAppear, (IMP *)&originalViewDidAppear);
         BOOL responseHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d", viewHooked, appearanceHooked, responseHooked);
+        BOOL bridgeReadyHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
+        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d ready=%d", viewHooked, appearanceHooked, responseHooked, bridgeReadyHooked);
     }
 }
