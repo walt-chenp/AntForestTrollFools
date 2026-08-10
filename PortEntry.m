@@ -10,6 +10,7 @@
 static void (*originalViewDidLoad)(id, SEL);
 static void (*originalViewDidAppear)(id, SEL, BOOL);
 static id (*originalTransformResponseData)(id, SEL, id);
+static void (*originalUpdateBridgeReadyStatus)(id, SEL, id);
 static NSTimeInterval lastWaterGiftTapAt;
 static const void *GiftFullProbeKey = &GiftFullProbeKey;
 static __weak id giftProbeWebView;
@@ -25,6 +26,8 @@ static NSString * const AntForestButtonYKey = @"AntForestButtonY";
 static NSString * const AntForestButtonSideKey = @"AntForestButtonSide";
 static const void *AntForestButtonCollapsedKey = &AntForestButtonCollapsedKey;
 static const void *AntForestButtonCollapseTokenKey = &AntForestButtonCollapseTokenKey;
+static const void *ForestHomeStartKey = &ForestHomeStartKey;
+static const void *ForestHomeBridgeKey = &ForestHomeBridgeKey;
 static BOOL shouldRevealLeafOnNextForestAppearance = YES;
 
 static BOOL isForestHomeURL(NSURL *url) {
@@ -50,6 +53,55 @@ static id forestBridgeFromController(id controller) {
     return nil;
 }
 
+static id forestControllerForBridge(id bridge) {
+    id contentView = [bridge respondsToSelector:@selector(contentView)] ? ((id (*)(id, SEL))objc_msgSend)(bridge, @selector(contentView)) : nil;
+    for (NSString *name in @[ @"rvkViewController", @"psdViewController" ]) {
+        SEL selector = NSSelectorFromString(name);
+        if ([contentView respondsToSelector:selector]) return ((id (*)(id, SEL))objc_msgSend)(contentView, selector);
+    }
+    return nil;
+}
+
+static void finishForestHomeStart(id controller, id bridge) {
+    if (!controller || !bridge || !objc_getAssociatedObject(controller, ForestHomeStartKey)) return;
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    manager.jsBridge = bridge;
+    objc_setAssociatedObject(controller, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
+    if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
+    else if (manager.enableAutoCollect && manager.enableBackgroundLoop) {
+        [manager recordStage:@"收取 · 首页桥接就绪，立即补跑"];
+        [manager autoCollectBubbles];
+    }
+}
+
+static void startForestHomeWhenBridgeReady(id controller) {
+    if (objc_getAssociatedObject(controller, ForestHomeStartKey)) return;
+    objc_setAssociatedObject(controller, ForestHomeStartKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    __weak id weakController = controller;
+    __block NSUInteger attempts = 0;
+    __block void (^waitForBridge)(void);
+    waitForBridge = ^{
+        id currentController = weakController;
+        NSURL *url = [currentController respondsToSelector:@selector(url)] ? [currentController url] : nil;
+        if (!currentController || !isForestHomeURL(url) || isEarnEnergyURL(url)) { waitForBridge = nil; return; }
+        id bridge = forestBridgeFromController(currentController) ?: objc_getAssociatedObject(currentController, ForestHomeBridgeKey);
+        if (bridge) {
+            finishForestHomeStart(currentController, bridge);
+            waitForBridge = nil;
+            return;
+        }
+        if (++attempts >= 10) {
+            objc_setAssociatedObject(currentController, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [AntForestManager.sharedInstance recordStage:@"收取 · 森林首页 H5 Bridge 等待超时"];
+            waitForBridge = nil;
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), waitForBridge);
+    };
+    waitForBridge();
+}
+
 static BOOL isForestResponse(id value) {
     if (![value isKindOfClass:NSDictionary.class]) return NO;
     NSDictionary *response = value;
@@ -68,8 +120,8 @@ static void tryAutoCollectWaterGift(void) {
     if (!manager.enableAutoCollect || !manager.enableSelfCollect || !giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt < 45) return;
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![giftProbeWebView respondsToSelector:evaluate]) return;
-    // ponytail: three empty taps absorb canvas render latency; any accepted gift request keeps the same fixed-point run going.
-    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';const x=Math.round(r.left+r.width*.242),y=Math.round(r.top+r.height*.218);if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}const tap=()=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};let attempts=0,misses=0;window.__afGiftAutoHits=0;window.__afGiftAutoRunning=1;const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};const step=()=>{if(attempts>=60||misses>=3)return done();const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;tap();setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before){misses=0;step()}else{misses++;step()}},1800)};step();return 'started:'+x+','+y})()";
+    // ponytail: one 4-second recheck covers delayed Canvas rendering; attempt cap still bounds a pathological page.
+    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';const x=Math.round(r.left+r.width*.242),y=Math.round(r.top+r.height*.218);if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}const tap=()=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};let attempts=0,misses=0,rechecked=0;window.__afGiftAutoHits=0;window.__afGiftAutoTapResult='';window.__afGiftAutoRunning=1;const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};const probe=(confirm)=>{const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;tap();setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before){misses=0;step()}else if(confirm)done();else{misses++;step()}},1800)};const step=()=>{if(attempts>=60)return done();if(misses>=3){if(rechecked)return done();rechecked=1;return setTimeout(()=>probe(1),4000)}probe(0)};step();return 'started:'+x+','+y})()";
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
     runJavaScript(giftProbeWebView, evaluate, script, ^(id result, NSError *error) {
         if (error || ![(NSString *)result hasPrefix:@"started:"]) return;
@@ -1135,18 +1187,7 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
-    if (forestHome && manager.enableWaterOnLaunch) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (manager.jsBridge) [manager startLaunchWateringThenCollect];
-        });
-    } else if (forestHome && manager.enableAutoCollect && manager.enableBackgroundLoop) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (manager.jsBridge) {
-                [manager recordStage:@"诊断 · 首页桥接就绪，立即补跑"];
-                [manager autoCollectBubbles];
-            }
-        });
-    }
+    if (forestHome && (manager.enableWaterOnLaunch || (manager.enableAutoCollect && manager.enableBackgroundLoop))) startForestHomeWhenBridgeReady(self);
     if (forestHome) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
@@ -1181,6 +1222,17 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     return originalTransformResponseData(self, _cmd, value);
 }
 
+static void portUpdateBridgeReadyStatus(id self, SEL _cmd, id value) {
+    originalUpdateBridgeReadyStatus(self, _cmd, value);
+    if ([self respondsToSelector:@selector(isBridgeReady)] && !((BOOL (*)(id, SEL))objc_msgSend)(self, @selector(isBridgeReady))) return;
+    id controller = forestControllerForBridge(self);
+    NSURL *url = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
+    if (isForestHomeURL(url) && !isEarnEnergyURL(url)) {
+        objc_setAssociatedObject(controller, ForestHomeBridgeKey, self, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        finishForestHomeStart(controller, self);
+    }
+}
+
 static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original) {
     Method method = class_getInstanceMethod(cls, selector);
     if (!method) return NO;
@@ -1207,6 +1259,7 @@ static void installHooks(void) {
         BOOL viewHooked = hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
         BOOL appearanceHooked = hookMethod(webController, @selector(viewDidAppear:), (IMP)portViewDidAppear, (IMP *)&originalViewDidAppear);
         BOOL responseHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d", viewHooked, appearanceHooked, responseHooked);
+        BOOL bridgeReadyHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
+        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d ready=%d", viewHooked, appearanceHooked, responseHooked, bridgeReadyHooked);
     }
 }

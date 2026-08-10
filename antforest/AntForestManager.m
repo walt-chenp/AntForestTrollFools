@@ -288,9 +288,12 @@ static NSString *waterResponseSummary(id value) {
 }
 
 - (void)startLaunchWateringThenCollect {
-    if (waterLaunchAttempted) return;
-    waterLaunchAttempted = YES;
     BOOL shouldCollect = self.enableAutoCollect && self.enableBackgroundLoop;
+    if (waterLaunchAttempted) {
+        if (shouldCollect) [self autoCollectBubbles];
+        return;
+    }
+    waterLaunchAttempted = YES;
     if (waterRunning) {
         [self recordStage:@"收取 · 蚂蚁森林自动浇水跳过：已有浇水任务运行中"];
         if (shouldCollect) [self autoCollectBubbles];
