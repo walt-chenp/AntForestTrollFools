@@ -29,7 +29,7 @@
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v2.7 正式版：iOS 15 及以上使用 `AntForestPort-v2.7.dylib`；iOS 14 使用 `AntForestPort-v2.7-iOS14.dylib`。两个包均为 `arm64 + arm64e` 通用 dylib。
+> v2.7.2 正式版：iOS 15 及以上使用 `AntForestPort-v2.7.2.dylib`；iOS 14 使用 `AntForestPort-v2.7.2-iOS14.dylib`。两个包均为 `arm64 + arm64e` 通用 dylib。
 
 ## v2.7.2 更新说明
 
