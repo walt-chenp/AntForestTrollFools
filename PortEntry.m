@@ -69,7 +69,7 @@ static void finishForestHomeStart(id controller, id bridge) {
     objc_setAssociatedObject(controller, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
     if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
-    else if (manager.enableAutoCollect && manager.enableBackgroundLoop) {
+    else if (manager.enableAutoCollect) {
         [manager recordStage:@"收取 · 首页桥接就绪，立即补跑"];
         [manager autoCollectBubbles];
     }
@@ -437,7 +437,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *query = searchController.searchBar.text.lowercaseString;
     AntForestManager *manager = AntForestManager.sharedInstance;
-    self.filteredFriendIds = query.length ? [self.friendIds filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { NSDictionary *c = manager.friendsName[uid]; NSString *name = [c[@"displayName"] description] ?: [c[@"name"] description] ?: @""; return [name.lowercaseString containsString:query]; }]] : self.friendIds;
+    self.filteredFriendIds = query.length ? [self.friendIds filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { NSDictionary *c = manager.friendsName[uid]; NSString *name = [AntForestManager extractNameFromDictionary:c] ?: @""; return [name.lowercaseString containsString:query]; }]] : self.friendIds;
     [self.tableView reloadData];
 }
 - (void)refreshFriends { [AntForestManager.sharedInstance refreshWaterFriends]; }
@@ -465,7 +465,7 @@ static void installEarnEnergyCollector(id controller) {
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"waterFriend"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"waterFriend"];
-    NSString *uid = self.filteredFriendIds[indexPath.row]; NSDictionary *contact = AntForestManager.sharedInstance.friendsName[uid]; cell.textLabel.text = [contact[@"displayName"] description] ?: [contact[@"name"] description] ?: @"好友"; cell.accessoryType = [AntForestManager.sharedInstance.waterFriendIds containsObject:uid] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone; return cell;
+    NSString *uid = self.filteredFriendIds[indexPath.row]; NSDictionary *contact = AntForestManager.sharedInstance.friendsName[uid]; NSString *name = [AntForestManager extractNameFromDictionary:contact]; cell.textLabel.text = name.length ? name : @"好友"; cell.accessoryType = [AntForestManager.sharedInstance.waterFriendIds containsObject:uid] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone; return cell;
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     NSString *uid = self.filteredFriendIds[indexPath.row]; NSMutableArray *selected = [AntForestManager.sharedInstance.waterFriendIds mutableCopy] ?: NSMutableArray.array; if ([selected containsObject:uid]) [selected removeObject:uid]; else [selected addObject:uid]; AntForestManager.sharedInstance.waterFriendIds = selected; [NSUserDefaults.standardUserDefaults setObject:selected forKey:@"waterFriendIds"]; [tableView deselectRowAtIndexPath:indexPath animated:YES]; [self.tableView reloadData];
@@ -1124,15 +1124,28 @@ static void addLogButton(UIViewController *controller, BOOL reveal) {
     NSLog(@"[AntForestPort] button added");
 }
 
+static id unarchiveDataSafe(NSData *data, Class primaryClass) {
+    if (!data) return nil;
+    NSError *error = nil;
+    NSSet *classes = [NSSet setWithArray:@[NSDictionary.class, NSArray.class, NSString.class, NSNumber.class]];
+    id obj = [NSKeyedUnarchiver unarchivedObjectOfClasses:classes fromData:data error:&error];
+    if (!obj) {
+        @try {
+            obj = [NSKeyedUnarchiver unarchiveObjectWithData:data];
+        } @catch (__unused NSException *e) {}
+    }
+    return [obj isKindOfClass:primaryClass] ? obj : nil;
+}
+
 static void initializeManager(void) {
     AntForestManager *manager = [AntForestManager sharedInstance];
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSData *bubbles = [defaults objectForKey:@"friendsBubbles"];
     NSData *names = [defaults objectForKey:@"friendsName"];
     NSData *logs = [defaults objectForKey:@"logRecord"];
-    manager.friendsBubbles = bubbles ? [[NSKeyedUnarchiver unarchivedObjectOfClass:NSDictionary.class fromData:bubbles error:nil] mutableCopy] : [NSMutableDictionary dictionary];
-    manager.friendsName = names ? [[NSKeyedUnarchiver unarchivedObjectOfClass:NSDictionary.class fromData:names error:nil] mutableCopy] : [NSMutableDictionary dictionary];
-    manager.logRecord = logs ? [[NSKeyedUnarchiver unarchivedObjectOfClass:NSArray.class fromData:logs error:nil] mutableCopy] : [NSMutableArray array];
+    manager.friendsBubbles = [unarchiveDataSafe(bubbles, NSDictionary.class) mutableCopy] ?: [NSMutableDictionary dictionary];
+    manager.friendsName = [unarchiveDataSafe(names, NSDictionary.class) mutableCopy] ?: [NSMutableDictionary dictionary];
+    manager.logRecord = [unarchiveDataSafe(logs, NSArray.class) mutableCopy] ?: [NSMutableArray array];
     manager.friendsRank = [NSMutableDictionary dictionary];
     manager.totalCollectedEnergy = [defaults integerForKey:@"totalCollectedEnergy"];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
@@ -1187,7 +1200,7 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
     BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
-    if (forestHome && (manager.enableWaterOnLaunch || (manager.enableAutoCollect && manager.enableBackgroundLoop))) startForestHomeWhenBridgeReady(self);
+    if (forestHome && (manager.enableWaterOnLaunch || manager.enableAutoCollect)) startForestHomeWhenBridgeReady(self);
     if (forestHome) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
