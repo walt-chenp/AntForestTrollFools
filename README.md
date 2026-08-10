@@ -31,7 +31,7 @@
 
 > v2.7 正式版：iOS 15 及以上使用 `AntForestPort-v2.7.dylib`；iOS 14 使用 `AntForestPort-v2.7-iOS14.dylib`。两个包均为 `arm64 + arm64e` 通用 dylib。
 
-## v2.7.1 更新说明
+## v2.7.2 更新说明
 
 - **修复后台循环与自动收取解耦**：当“后台循环”关闭而“自动收取”开启时，进入蚂蚁森林首页或自动浇水结束均可正常触发补跑与能量扫描。
 - **修复好友浇水列表昵称显示**：增强名字与用户 ID 的兼容性解析（提取 `displayName`、`userName`、`remarkName`、`name` 等），并补充对排行榜 `totalDatas` 与 `friendRanking` 中好友昵称的自动填充。
