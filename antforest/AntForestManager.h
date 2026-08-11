@@ -15,6 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 +(AntForestManager *)sharedInstance;
 + (NSLock*)sharedLock;
++ (NSString *)extractNameFromDictionary:(NSDictionary *)dict;
++ (NSString *)extractUserIdFromDictionary:(NSDictionary *)dict;
 
 @property(nonatomic,strong) PSDJsBridge* jsBridge;
 @property(nonatomic,strong) NSMutableDictionary *friendsBubbles; //存储的是未到时间的能量球

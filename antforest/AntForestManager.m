@@ -92,10 +92,42 @@ dispatch_queue_t globalSerialQueueTest;
     }
 }
 
++ (NSString *)extractNameFromDictionary:(NSDictionary *)dict {
+    if (![dict isKindOfClass:NSDictionary.class]) return nil;
+    for (NSString *key in @[ @"displayName", @"userName", @"remarkName", @"name", @"nickName", @"userDisplayName", @"showName", @"realName", @"alias" ]) {
+        id val = dict[key];
+        if ([val isKindOfClass:NSString.class] && [(NSString *)val length] > 0) return (NSString *)val;
+    }
+    for (NSString *subKey in @[ @"userBaseInfo", @"userInfo", @"contact", @"extInfo" ]) {
+        id subDict = dict[subKey];
+        if ([subDict isKindOfClass:NSDictionary.class]) {
+            NSString *nested = [self extractNameFromDictionary:subDict];
+            if (nested.length > 0) return nested;
+        }
+    }
+    return nil;
+}
+
++ (NSString *)extractUserIdFromDictionary:(NSDictionary *)dict {
+    if (![dict isKindOfClass:NSDictionary.class]) return nil;
+    for (NSString *key in @[ @"userId", @"userID", @"uid", @"id" ]) {
+        id val = dict[key];
+        if ([val isKindOfClass:NSString.class] && [(NSString *)val length] > 0) return (NSString *)val;
+        if ([val isKindOfClass:NSNumber.class]) return [(NSNumber *)val stringValue];
+    }
+    for (NSString *subKey in @[ @"userBaseInfo", @"userInfo", @"contact" ]) {
+        id subDict = dict[subKey];
+        if ([subDict isKindOfClass:NSDictionary.class]) {
+            NSString *nested = [self extractUserIdFromDictionary:subDict];
+            if (nested.length > 0) return nested;
+        }
+    }
+    return nil;
+}
+
 - (NSString *)waterDisplayNameForUser:(NSString *)uid {
     NSDictionary *contact = [self.friendsName[uid] isKindOfClass:NSDictionary.class] ? self.friendsName[uid] : nil;
-    NSString *name = [contact[@"displayName"] isKindOfClass:NSString.class] ? contact[@"displayName"] : nil;
-    if (!name.length) name = [contact[@"name"] isKindOfClass:NSString.class] ? contact[@"name"] : nil;
+    NSString *name = [AntForestManager extractNameFromDictionary:contact];
     if (!name.length) return @"好友";
     return name.length == 1 ? [name stringByAppendingString:@"***"] : [[name substringToIndex:MIN((NSUInteger)2, name.length)] stringByAppendingString:@"***"];
 }
@@ -244,7 +276,7 @@ static NSInteger reviveDailyCount(void) {
     if (!reviveRunning || ![args isKindOfClass:NSDictionary.class]) return;
     NSDictionary *resData = [(NSDictionary *)args[@"resData"] isKindOfClass:NSDictionary.class] ? args[@"resData"] : nil;
     if (!resData[@"resultCode"] || !resData[@"success"]) return;
-    NSString *name = [self waterDisplayNameForUser:reviveCurrentUserId];
+    NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[reviveCurrentUserId]] ?: @"好友";
     if (waterResponseSucceeded(resData)) {
         NSInteger count = reviveDailyCount() + 1;
         [NSUserDefaults.standardUserDefaults setInteger:count forKey:@"autoReviveCount"];
@@ -293,7 +325,7 @@ static NSInteger reviveDailyCount(void) {
     waterCurrentBizNo = nil;
     if (!collectAfterLaunchWater) return;
     collectAfterLaunchWater = NO;
-    if (!self.enableAutoCollect || !self.enableBackgroundLoop || !self.jsBridge) return;
+    if (!self.enableAutoCollect || !self.jsBridge) return;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
         [self recordStage:@"收取 · 蚂蚁森林自动浇水结束，开始自动收取"];
         [self autoCollectBubbles];
@@ -386,7 +418,7 @@ static NSInteger reviveDailyCount(void) {
 }
 
 - (void)startLaunchWateringThenCollect {
-    BOOL shouldCollect = self.enableAutoCollect && self.enableBackgroundLoop;
+    BOOL shouldCollect = self.enableAutoCollect;
     if (waterLaunchAttempted) {
         if (shouldCollect) [self autoCollectBubbles];
         return;
@@ -493,17 +525,31 @@ static NSInteger reviveDailyCount(void) {
     NSArray *contacts = [dict[@"contactsDicArray"] isKindOfClass:NSArray.class] ? dict[@"contactsDicArray"] : nil;
     if (contacts.count) {
         for (NSDictionary *contact in contacts) {
-            NSString *uid = contact[@"userID"];
+            NSString *uid = [AntForestManager extractUserIdFromDictionary:contact];
             if (uid.length) self.friendsName[uid] = contact;
         }
     }
     NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
     NSArray *rankings = [resData[@"totalDatas"] isKindOfClass:NSArray.class] ? resData[@"totalDatas"] : nil;
+    if (!rankings.count) rankings = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : nil;
     if (!rankings.count) return;
     [self.friendsRank removeAllObjects];
     for (NSDictionary *ranking in rankings) {
-        NSString *uid = ranking[@"userId"];
-        if (uid.length) self.friendsRank[uid] = ranking[@"rank"] ?: @0;
+        NSString *uid = [AntForestManager extractUserIdFromDictionary:ranking];
+        if (uid.length) {
+            self.friendsRank[uid] = ranking[@"rank"] ?: @0;
+            NSString *name = [AntForestManager extractNameFromDictionary:ranking];
+            if (name.length) {
+                NSMutableDictionary *contact = [self.friendsName[uid] mutableCopy] ?: [NSMutableDictionary dictionary];
+                contact[@"displayName"] = name;
+                self.friendsName[uid] = contact;
+            }
+        }
+    }
+    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:self.friendsName requiringSecureCoding:NO error:nil];
+    if (data) {
+        [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsName"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
     }
     waterFriendRefreshPending = NO;
     NSArray *kept = [self.waterFriendIds filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { return self.friendsRank[uid] != nil; }]];
@@ -542,8 +588,16 @@ static NSInteger reviveDailyCount(void) {
 }
 
 - (void)recordStage:(NSString *)stage {
-    if (![stage hasPrefix:@"收取 ·"]) return;
-    if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), stage]];
+    if (!stage.length) return;
+    NSString *logMessage = stage;
+    if ([stage hasPrefix:@"诊断 · "]) {
+        logMessage = [@"收取 · " stringByAppendingString:[stage substringFromIndex:5]];
+    } else if ([stage hasPrefix:@"诊断 ·"]) {
+        logMessage = [@"收取 · " stringByAppendingString:[stage substringFromIndex:4]];
+    } else if (![stage hasPrefix:@"收取 ·"]) {
+        return;
+    }
+    if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), logMessage]];
 }
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
@@ -690,7 +744,7 @@ NSString* getCurrentDateTimeString() {
         requestToken = ++takeLookRequestToken;
     }
     [self takeLook];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         @synchronized (self) {
             if (!takeLookRunning || !takeLookWaitingForFriend || requestToken != takeLookRequestToken) return;
             takeLookRunning = NO;
@@ -874,13 +928,13 @@ NSString* getCurrentDateTimeString() {
 
 //查询总排行 可以获取所有人的ID
 -(void)queryTotalRank{
-    NSString *version = @"20221001";
+    NSString *version = @"20241025";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
     NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
     if([self jsBridge]) {
-        [self recordStage:@"诊断 · 请求好友排行榜"];
+        [self recordStage:@"收取 · 请求好友排行榜"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook queryTotalRank");
     }
@@ -958,8 +1012,8 @@ NSString* getCurrentDateTimeString() {
             [self recordStage:[NSString stringWithFormat:@"诊断 · 收取未启动：自动收取=%d，桥接=%d", self.enableAutoCollect, self.jsBridge != nil]];
             return;
         }
-        if (lastCollectStartedAt && -[lastCollectStartedAt timeIntervalSinceNow] < 45) {
-            [self recordStage:@"诊断 · 收取跳过：45 秒冷却中"];
+        if (lastCollectStartedAt && -[lastCollectStartedAt timeIntervalSinceNow] < 10) {
+            [self recordStage:@"诊断 · 收取跳过：10 秒冷却中"];
             return;
         }
         lastCollectStartedAt = NSDate.date;
@@ -1360,17 +1414,19 @@ NSString* getCurrentDateTimeString() {
                 NSMutableDictionary* fn = [[AntForestManager sharedInstance] friendsName];
                 NSArray *cArr = [dict objectForKey:@"contactsDicArray"];
                 for(NSDictionary *cdict in cArr) {
-                    NSString *userId = [cdict objectForKey:@"userID"];
-                    [fn setObject:cdict forKey:userId];
+                    NSString *userId = [AntForestManager extractUserIdFromDictionary:cdict];
+                    if (userId.length) [fn setObject:cdict forKey:userId];
                 }
                 NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fn requiringSecureCoding:NO error:nil];
-                [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsName"];
-                [[NSUserDefaults standardUserDefaults] synchronize];
+                if (data) {
+                    [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsName"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                }
             }
             // 先查询本人首页；严格的“本人收取完成后再查好友”由独立修复处理。
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"myself"]) {
                 NSDictionary *myDict = [[dict objectForKey:@"resData"] objectForKey:@"myself"];
-                NSString *userIdMy = [myDict objectForKey:@"userId"];
+                NSString *userIdMy = [AntForestManager extractUserIdFromDictionary:myDict] ?: [myDict objectForKey:@"userId"];
                 if (userIdMy.length) {
                     [[AntForestManager sharedInstance] setMyUserId:userIdMy];
                     [self recordStage:@"收取 · 本人账户已识别"];
@@ -1393,9 +1449,8 @@ NSString* getCurrentDateTimeString() {
                 for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canProtectBubble"] boolValue]) [self queueAutoReviveForUser:[dictRank objectForKey:@"userId"]];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
                 for(NSDictionary *dictRank in rankArr) {
-                    NSString *userId = [dictRank objectForKey:@"userId"];
+                    NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
                     NSNumber *canCollectEnergy = [dictRank objectForKey:@"canCollectEnergy"];
-                    //FileLog(@"canCollectEnergy: %@ | %@",canCollectEnergy,userId);
                     if([canCollectEnergy isEqualToNumber:@1]){
                         if (selfPriorityPending) {
                             [deferredFriendRankIds addObject:userId];
@@ -1411,11 +1466,28 @@ NSString* getCurrentDateTimeString() {
             if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"totalDatas"]) {
                 NSArray *rankTotalArr = [[dict objectForKey:@"resData"] objectForKey:@"totalDatas"];
                 NSMutableDictionary *fr = [[AntForestManager sharedInstance] friendsRank];
+                NSMutableDictionary *fn = [[AntForestManager sharedInstance] friendsName];
+                BOOL nameUpdated = NO;
                 for(NSDictionary *dictTotalRank in rankTotalArr) {
                     NSString *rank = [dictTotalRank objectForKey:@"rank"];
-                    NSString *uid = [dictTotalRank objectForKey:@"userId"];
-                    //FileLog(@"rankTotalArr: %@ => %@",uid,rank);
-                    [fr setObject:rank forKey:uid];
+                    NSString *uid = [AntForestManager extractUserIdFromDictionary:dictTotalRank];
+                    if (uid.length) {
+                        if (rank) [fr setObject:rank forKey:uid];
+                        NSString *name = [AntForestManager extractNameFromDictionary:dictTotalRank];
+                        if (name.length) {
+                            NSMutableDictionary *contact = [fn[uid] mutableCopy] ?: [NSMutableDictionary dictionary];
+                            contact[@"displayName"] = name;
+                            fn[uid] = contact;
+                            nameUpdated = YES;
+                        }
+                    }
+                }
+                if (nameUpdated) {
+                    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fn requiringSecureCoding:NO error:nil];
+                    if (data) {
+                        [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsName"];
+                        [[NSUserDefaults standardUserDefaults] synchronize];
+                    }
                 }
                 if (rankScanPending) {
                     rankScanPending = NO;
