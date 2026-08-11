@@ -51,6 +51,12 @@ static NSString *waterRunReason = nil;
 static BOOL waterFriendRefreshPending = NO;
 static BOOL waterLaunchAttempted = NO;
 static BOOL collectAfterLaunchWater = NO;
+static NSMutableArray<NSString *> *reviveQueue = nil;
+static NSMutableSet<NSString *> *reviveQueuedIds = nil;
+static BOOL reviveRunning = NO;
+static NSString *reviveCurrentUserId = nil;
+static NSUInteger reviveRequestToken = 0;
+static BOOL reviveRewardRefreshNeeded = NO;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -70,6 +76,8 @@ dispatch_queue_t globalSerialQueueTest;
         pendingCollectBubbles = [NSMutableSet set];
         takeLookVisitedFriends = [NSMutableSet set];
         deferredFriendRankIds = [NSMutableArray array];
+        reviveQueue = [NSMutableArray array];
+        reviveQueuedIds = [NSMutableSet set];
         
     });
     return afm;
@@ -168,6 +176,96 @@ static NSString *waterResponseSummary(id value) {
         [parts addObject:[NSString stringWithFormat:@"%@=%@", key, text]];
     }
     return parts.count ? [parts componentsJoinedByString:@"，"] : @"未发现状态字段";
+}
+
+static NSInteger reviveDailyCount(void) {
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *today = getCurrentDateString();
+    if (![[defaults stringForKey:@"autoReviveDate"] isEqualToString:today]) {
+        [defaults setObject:today forKey:@"autoReviveDate"];
+        [defaults setInteger:0 forKey:@"autoReviveCount"];
+        [reviveQueue removeAllObjects];
+        [reviveQueuedIds removeAllObjects];
+    }
+    return [defaults integerForKey:@"autoReviveCount"];
+}
+
+- (void)reviveRefreshRewardIfNeeded {
+    if (!reviveRewardRefreshNeeded || !self.enableSelfCollect || !self.jsBridge) return;
+    reviveRewardRefreshNeeded = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        if (self.enableSelfCollect && self.jsBridge) {
+            [self recordStage:@"收取 · 复活奖励：请求本人首页"];
+            [self queryMyBubbles];
+        }
+    });
+}
+
+- (void)reviveStopWithReason:(NSString *)reason {
+    reviveRunning = NO;
+    reviveCurrentUserId = nil;
+    reviveRequestToken++;
+    [reviveQueue removeAllObjects];
+    if (reason.length) [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · %@", reason]];
+    [self reviveRefreshRewardIfNeeded];
+}
+
+- (void)reviveSendNext {
+    if (!self.enableAutoRevive || !self.enableAutoCollect || !self.jsBridge || reviveDailyCount() >= 6) {
+        if (reviveRunning) [self reviveStopWithReason:reviveDailyCount() >= 6 ? @"今日已达 6 次上限" : @"任务已停止或桥接不可用"];
+        return;
+    }
+    if (!reviveQueue.count) { reviveRunning = NO; reviveCurrentUserId = nil; [self reviveRefreshRewardIfNeeded]; return; }
+    reviveRunning = YES;
+    reviveCurrentUserId = reviveQueue.firstObject;
+    [reviveQueue removeObjectAtIndex:0];
+    NSUInteger token = ++reviveRequestToken;
+    NSString *timestamp = [NSString stringWithFormat:@"%ld", (long)(NSDate.date.timeIntervalSince1970 * 1000)];
+    NSDictionary *body = @{ @"targetUserId": reviveCurrentUserId, @"version": @"20230501", @"source": @"chInfo_ch_appcenter__chsub_9patch" };
+    NSDictionary *data = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": @"alipay.antforest.forest.h5.protectBubble", @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": [NSString stringWithFormat:@"revive_%@.%@", timestamp, [AntForestManager getNumberRandom:12]] };
+    NSString *queue = waterJSONString(@[data]);
+    if (!queue.length) { [self reviveStopWithReason:@"请求编码失败"]; return; }
+    NSString *url = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch", reviveCurrentUserId];
+    [self recordStage:@"收取 · 复活 · 请求帮助好友复活能量"];
+    [self.jsBridge _doFlushMessageQueue:queue url:url];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (reviveRunning && token == reviveRequestToken) [self reviveStopWithReason:@"回包超时，已停止"];
+    });
+}
+
+- (void)queueAutoReviveForUser:(NSString *)userId {
+    if (!self.enableAutoRevive || !self.enableAutoCollect || !userId.length || [userId isEqualToString:self.myUserId] || reviveDailyCount() >= 6 || [reviveQueuedIds containsObject:userId]) return;
+    [reviveQueuedIds addObject:userId];
+    [reviveQueue addObject:userId];
+    if (!reviveRunning) [self reviveSendNext];
+}
+
+- (void)handleAutoReviveResponse:(id)args {
+    if (!reviveRunning || ![args isKindOfClass:NSDictionary.class]) return;
+    NSDictionary *resData = [(NSDictionary *)args[@"resData"] isKindOfClass:NSDictionary.class] ? args[@"resData"] : nil;
+    if (!resData[@"resultCode"] || !resData[@"success"]) return;
+    NSString *name = [self waterDisplayNameForUser:reviveCurrentUserId];
+    if (waterResponseSucceeded(resData)) {
+        NSInteger count = reviveDailyCount() + 1;
+        [NSUserDefaults.standardUserDefaults setInteger:count forKey:@"autoReviveCount"];
+        [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 成功帮助好友“%@”复活能量（今日 %ld/6 次）", name, (long)count]];
+        reviveRewardRefreshNeeded = YES;
+        reviveRunning = NO;
+        reviveCurrentUserId = nil;
+        reviveRequestToken++;
+        [self reviveSendNext];
+    } else {
+        NSString *code = waterResponseCode(resData);
+        if ([code isEqualToString:@"TARGET_USER_PROTECT_BY_ENERGY_SHIELD"]) {
+            [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 好友“%@”已有能量保护罩，已跳过", name]];
+            reviveRunning = NO;
+            reviveCurrentUserId = nil;
+            reviveRequestToken++;
+            [self reviveSendNext];
+            return;
+        }
+        [self reviveStopWithReason:[NSString stringWithFormat:@"服务端拒绝%@，已停止", code.length ? [NSString stringWithFormat:@"（%@）", code] : @""]];
+    }
 }
 
 - (void)waterFinishCurrentFriendWithStatus:(NSString *)status {
@@ -1112,8 +1210,9 @@ NSString* getCurrentDateTimeString() {
 
 -(void)matchFriendIdAndBubbles:(id)args {
     @try {
-        // 浇水可独立于自动收取手动执行，必须先处理它的回包。
-        [self handleWaterResponse:args];
+    // 浇水可独立于自动收取手动执行，必须先处理它的回包。
+    [self handleWaterResponse:args];
+    [self handleAutoReviveResponse:args];
         if ([args isKindOfClass:NSDictionary.class]) [self updateWaterFriendListFromResponse:args];
         [self recordCollectedEnergyFromResponse:args];
         if (!self.enableAutoCollect) return;
@@ -1291,6 +1390,7 @@ NSString* getCurrentDateTimeString() {
                 NSArray *rankArr = [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"];
                 NSUInteger collectable = 0;
                 for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
+                for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canProtectBubble"] boolValue]) [self queueAutoReviveForUser:[dictRank objectForKey:@"userId"]];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
                 for(NSDictionary *dictRank in rankArr) {
                     NSString *userId = [dictRank objectForKey:@"userId"];

@@ -32,6 +32,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (assign, nonatomic) BOOL enableSelfCollect;
 @property (assign, nonatomic) BOOL enableAutoRain;
 @property (assign, nonatomic) BOOL enableAutoEarn;
+@property (assign, nonatomic) BOOL enableAutoRevive;
 @property (assign, nonatomic) BOOL enableBackgroundLoop;
 @property (assign, nonatomic) BOOL enableScheduledCollect;
 @property (nonatomic, strong) NSArray<NSString *> *scheduledTimes;

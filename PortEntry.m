@@ -549,14 +549,18 @@ static void installEarnEnergyCollector(id controller) {
     UIButton *schedule = [self settingsButtonWithTitle:@"定时收取设置" detail:@"管理每日固定收取时刻" icon:@"calendar" action:@selector(showSchedule)];
     UIButton *step = [self settingsButtonWithTitle:@"步数模拟设置（测试）" detail:@"独立配置支付宝可见步数" icon:@"figure.walk" action:@selector(showStepSimulator)];
     UIButton *water = [self settingsButtonWithTitle:@"好友浇水设置" detail:@"选择好友、克数与定时任务" icon:@"drop.fill" action:@selector(showWater)];
+    UIButton *revive = [self settingsButtonWithTitle:@"自动复活好友过期能量" detail:@"每日最多帮助 6 位可复活好友" icon:@"heart.circle.fill" action:nil];
+    UISwitch *reviveSwitch = [[UISwitch alloc] init]; reviveSwitch.on = AntForestManager.sharedInstance.enableAutoRevive; reviveSwitch.translatesAutoresizingMaskIntoConstraints = NO; [reviveSwitch addTarget:self action:@selector(toggleAutoRevive:) forControlEvents:UIControlEventValueChanged]; [revive addSubview:reviveSwitch];
     UIButton *earn = [self settingsButtonWithTitle:@"赚能量（打地鼠玩法）" detail:@"手动进入活动后自动点击好友头像" icon:@"hand.tap.fill" action:nil];
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
-    [self.view addSubview:schedule]; [self.view addSubview:step]; [self.view addSubview:water]; [self.view addSubview:earn];
+    [self.view addSubview:schedule]; [self.view addSubview:step]; [self.view addSubview:water]; [self.view addSubview:revive]; [self.view addSubview:earn];
     [NSLayoutConstraint activateConstraints:@[
         [schedule.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [schedule.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [schedule.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [schedule.heightAnchor constraintEqualToConstant:70],
         [step.topAnchor constraintEqualToAnchor:schedule.bottomAnchor constant:12], [step.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [step.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [step.heightAnchor constraintEqualToConstant:70],
         [water.topAnchor constraintEqualToAnchor:step.bottomAnchor constant:12], [water.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [water.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [water.heightAnchor constraintEqualToConstant:70],
-        [earn.topAnchor constraintEqualToAnchor:water.bottomAnchor constant:12], [earn.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [earn.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [earn.heightAnchor constraintEqualToConstant:70],
+        [revive.topAnchor constraintEqualToAnchor:water.bottomAnchor constant:12], [revive.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [revive.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [revive.heightAnchor constraintEqualToConstant:70],
+        [earn.topAnchor constraintEqualToAnchor:revive.bottomAnchor constant:12], [earn.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [earn.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [earn.heightAnchor constraintEqualToConstant:70],
+        [reviveSwitch.trailingAnchor constraintEqualToAnchor:revive.trailingAnchor constant:-18], [reviveSwitch.centerYAnchor constraintEqualToAnchor:revive.centerYAnchor],
         [earnSwitch.trailingAnchor constraintEqualToAnchor:earn.trailingAnchor constant:-18], [earnSwitch.centerYAnchor constraintEqualToAnchor:earn.centerYAnchor],
     ]];
 }
@@ -580,6 +584,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)showSchedule { [self.navigationController pushViewController:[[AntForestSchedulePanel alloc] init] animated:YES]; }
 - (void)showStepSimulator { [self.navigationController pushViewController:[[AntForestStepSimulatorPanel alloc] init] animated:YES]; }
 - (void)showWater { [self.navigationController pushViewController:[[AntForestWaterPanel alloc] init] animated:YES]; }
+- (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 自动复活好友过期能量已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 赚能量（打地鼠玩法）已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
@@ -923,8 +928,8 @@ static void installEarnEnergyCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
     [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1149,6 +1154,7 @@ static void initializeManager(void) {
     manager.enableSelfCollect = [defaults objectForKey:@"enableSelfCollect"] ? [defaults boolForKey:@"enableSelfCollect"] : YES;
     manager.enableAutoRain = [defaults objectForKey:@"enableAutoRain"] ? [defaults boolForKey:@"enableAutoRain"] : manager.enableAutoCollect;
     manager.enableAutoEarn = [defaults objectForKey:@"enableAutoEarn"] ? [defaults boolForKey:@"enableAutoEarn"] : YES;
+    manager.enableAutoRevive = [defaults boolForKey:@"enableAutoRevive"];
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
     manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
