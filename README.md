@@ -24,12 +24,19 @@
 - 每日定时收取：可设置多个每日固定时刻；到点仅执行一次好友/自己能量收取，不触发能量雨。已添加时间支持点选修改，并可向左滑动删除。
 - 好友浇水：在“功能设置 → 好友浇水设置”从总能量榜选择好友，统一选择 10g、18g、33g 或 66g；支持手动浇水、多个固定时刻定时浇水，以及首次打开蚂蚁森林自动浇水。三种触发方式互不影响，每位好友每天最多 3 次。
 - 浇水赠能：开启“自动收取”与“收取自己能量”后，识别首页浇水赠能位置并智能连续领取重叠能量球；达到无新命中状态后停止。
+- 自动复活好友过期能量：在“功能设置”中独立开关；最多帮助 6 位可复活好友，并自动收取本人获得的 5g 奖励。
 - 步数模拟（测试）：在“功能设置”中独立开启，设置范围后向支付宝返回当日稳定的模拟步数；关闭即恢复真实读取值。
 - 巨魔真后台：可配合 `ImmortalizerJailed.dylib` 尽量维持进程；退到桌面后不保证 H5/RPC 回包及实际收取。
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v2.7.2 正式版：iOS 15 及以上使用 `AntForestPort-v2.7.2.dylib`；iOS 14 使用 `AntForestPort-v2.7.2-iOS14.dylib`。两个包均为 `arm64 + arm64e` 通用 dylib。
+> v2.8 测试版：iOS 15 及以上请使用 [`AntForestPort-v2.8-test.dylib`](build/AntForestPort-v2.8-test.dylib)，用于进一步验证自动复活与 v2.7.2 的首页收取、好友昵称修复。该包为 `arm64 + arm64e` 通用 dylib；iOS 14 继续使用 v2.7.2 独立包。
+
+## v2.8 测试内容
+
+- 新增“自动复活好友过期能量”独立开关：每日最多帮助 6 位好友复活；服务端提示能量盾时跳过该好友，继续处理后续候选。
+- 复活成功后约 1.2 秒自动请求本人首页，收取获得的 5g 奖励；不会中断后续好友能量扫描。
+- 同步 v2.7.2 首页收取与好友昵称/缓存修复，重点验证自动收取、好友浇水、浇水赠能、自动复活之间连续执行是否稳定。
 
 ## v2.7.2 更新说明
 
@@ -64,13 +71,13 @@
 
 ## 使用说明
 
-1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.7.dylib`](build/AntForestPort-v2.7.dylib) 到支付宝。
+1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8-test.dylib`](build/AntForestPort-v2.8-test.dylib) 到支付宝。
 2. 注入前移除旧的 `AntForestProbe.dylib`，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，直接拖动叶子图标。静置约 2 秒后叶子会自动贴边缩小；左侧向右滑、右侧向左滑可再次展开。
 5. 在收取记录面板中按需打开“自动收取”、“收取自己能量”和“自动能量雨”。“收取自己能量”仅在自动收取已开启时生效；能量雨保持独立。面板中的“复制日志”仅导出正式收取记录。
 6. “后台循环”可单独开关，点击分钟按钮可设置 1～60 分钟间隔；在蚂蚁森林首页前台时，首次开启自动收取且后台循环已开启会立即执行一次。
-7. 点击右上角齿轮进入“功能设置”：可管理多个每日固定收取时刻（点选修改、左滑删除）、“步数模拟（测试）”、“好友浇水设置”与“赚能量（打地鼠玩法）”独立开关。好友浇水支持手动执行、定时执行，以及“打开蚂蚁森林自动浇水”独立开关。
+7. 点击右上角齿轮进入“功能设置”：可管理多个每日固定收取时刻（点选修改、左滑删除）、“步数模拟（测试）”、“好友浇水设置”、“赚能量（打地鼠玩法）”和“自动复活好友过期能量”独立开关。好友浇水支持手动执行、定时执行，以及“打开蚂蚁森林自动浇水”独立开关。
 8. 如需收取能量雨，进入能量雨页面并手动点击“立即开启”；开始后无需再手动点击雨滴。
 9. 如需使用赚能量，手动进入并开启活动；活动开始后无需手动点击好友头像，插件会自动处理当前局。该玩法每日机会由支付宝规则控制。
    如出现没有自动收集能量雨滴，立即退出能量雨界面，保留能量雨次数，不妨碍下次使用。
@@ -94,7 +101,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 
 后台使用步骤：
 
-1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.7.dylib` 和 `ImmortalizerJailed.dylib`。
+1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8-test.dylib` 和 `ImmortalizerJailed.dylib`。
 2. 完全杀掉并重新打开支付宝，进入蚂蚁森林首页。
 3. 点击叶子按钮，在收取记录面板中开启“自动收取”。
 4. 点击 ImmortalizerJailed 的浮动按钮启用保活。
@@ -116,7 +123,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | 标准 v2.7 包支持 iOS 15 及以上；iOS 14 使用独立 `AntForestPort-v2.7-iOS14.dylib` |
+| iOS | 标准 v2.8 测试包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.7.2-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -152,10 +159,10 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 需要完整 Xcode：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.7.dylib
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8-test.dylib
 ```
 
-本地 v2.7 产物位于 `build/AntForestPort-v2.7.dylib`。
+本地 v2.8 测试产物位于 `build/AntForestPort-v2.8-test.dylib`。
 
 GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
