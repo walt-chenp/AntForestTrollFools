@@ -804,7 +804,7 @@ static void installEarnEnergyCollector(id controller) {
         [self.tableView.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:8],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.tableView.heightAnchor constraintEqualToConstant:156],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12],
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:@"LogUpdated" object:nil];
     [self refresh];
@@ -1003,7 +1003,10 @@ static void showLogPanel(UIButton *button) {
     if (@available(iOS 16.0, *)) {
         panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent customDetentWithIdentifier:@"log" resolver:^CGFloat(id<UISheetPresentationControllerDetentResolutionContext> context) { return 600; }]];
     } else if (@available(iOS 15.0, *)) {
-        panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent mediumDetent]];
+        panel.sheetPresentationController.detents = @[[UISheetPresentationControllerDetent mediumDetent], [UISheetPresentationControllerDetent largeDetent]];
+        if ([UIScreen mainScreen].bounds.size.height <= 736) {
+            panel.sheetPresentationController.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
+        }
     }
     [presenter presentViewController:panel animated:YES completion:nil];
 }
