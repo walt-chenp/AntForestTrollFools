@@ -131,14 +131,13 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 设备 | iPhone 14 Pro（A16，`arm64e`） |
 | 系统 | iOS 16.2 |
 | 安装环境 | 非越狱：巨魔商店 TrollStore + 巨魔注入器 TrollFools |
-| 支付宝 | 12.12.6、12.12.8、12.12.10 |
+| 支付宝 | 12.12.6、12.12.8、12.12.10、12.12.12 |
 | 探针结果 | `H5WebViewController` 与 `PSDJsBridge` Hook 成功 |
 | 森林首页 | 新版顶层 `bubbles`、`userBaseInfo` 已确认 |
 | 好友气泡 | `id`、`userId`、`collectStatus`、`overTime` 等字段已确认 |
 | 好友排行榜 | `friendRanking`、`myself`、`totalDatas` 已确认 |
 | 自动能量雨 | 已确认能识别下降中的能量并自动收取 |
 | 自动赚能量（打地鼠玩法） | 已验证自动点击与正常结算；仅活动专用页面生效 |
-| 12.12.10 验证 | 森林收取、能量雨自动收取正常，无闪退或功能失效 |
 | iOS 15.7 验证 | iPhone 13 Pro Max、支付宝 12.12.10；叶子面板可打开，自动收取的排行与好友状态查询正常 |
 | iOS 15.0.1 验证 | iPhone X（A11，`arm64`）；通用 dylib 可通过 TrollFools 注入并正常使用 |
 | iOS 14.2.1 验证 | iPhone 12 Pro Max（A14，`arm64e`）、支付宝 12.12.10；iOS 14 独立包注入及功能正常 |
