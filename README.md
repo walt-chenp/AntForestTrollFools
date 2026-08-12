@@ -24,40 +24,30 @@
 - 每日定时收取：可设置多个每日固定时刻；到点仅执行一次好友/自己能量收取，不触发能量雨。已添加时间支持点选修改，并可向左滑动删除。
 - 好友浇水：在“功能设置 → 好友浇水设置”从总能量榜选择好友，统一选择 10g、18g、33g 或 66g；支持手动浇水、多个固定时刻定时浇水，以及首次打开蚂蚁森林自动浇水。三种触发方式互不影响，每位好友每天最多 3 次。
 - 浇水赠能：开启“自动收取”与“收取自己能量”后，识别首页浇水赠能位置并智能连续领取重叠能量球；达到无新命中状态后停止。
+- 神奇海洋（清理垃圾与拼图）：在“功能设置”独立开关；扫描好友时自动清理海域垃圾、搜集拼图碎片与新物种；支持每日最多 10 人上限检测与单好友 1 次清理防封控制。
 - 自动复活好友过期能量：在“功能设置”中独立开关；最多帮助 6 位可复活好友，并自动收取本人获得的 5g 奖励。
 - 步数模拟（测试）：在“功能设置”中独立开启，设置范围后向支付宝返回当日稳定的模拟步数；关闭即恢复真实读取值。
 - 巨魔真后台：可配合 `ImmortalizerJailed.dylib` 尽量维持进程；退到桌面后不保证 H5/RPC 回包及实际收取。
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v2.8 测试版：iOS 15 及以上请使用 [`AntForestPort-v2.8-test.dylib`](build/AntForestPort-v2.8-test.dylib)，用于进一步验证自动复活与 v2.7.2 的首页收取、好友昵称修复。该包为 `arm64 + arm64e` 通用 dylib；iOS 14 继续使用 v2.7.2 独立包。
+> v2.8 正式版：iOS 15 及以上请使用 [`AntForestPort-v2.8.dylib`](build/AntForestPort-v2.8.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v2.8-iOS14.dylib`](build/AntForestPort-v2.8-iOS14.dylib)。包含全量 200+ 好友排行榜拉取与无限翻页、自动复活好友过期能量、神奇海洋自动清理与拼图搜集、支付宝首页悬浮按钮。产物均为 `arm64 + arm64e` 通用 dylib。
 
-## v2.8 测试内容
+## v2.8 正式版更新说明
 
-- 新增“自动复活好友过期能量”独立开关：每日最多帮助 6 位好友复活；服务端提示能量盾时跳过该好友，继续处理后续候选。
-- 复活成功后约 1.2 秒自动请求本人首页，收取获得的 5g 奖励；不会中断后续好友能量扫描。
-- 同步 v2.7.2 首页收取与好友昵称/缓存修复，重点验证自动收取、好友浇水、浇水赠能、自动复活之间连续执行是否稳定。
-
-## v2.7.2 更新说明
-
-- **修复后台循环与自动收取解耦**：当“后台循环”关闭而“自动收取”开启时，进入蚂蚁森林首页或自动浇水结束均可正常触发补跑与能量扫描。
-- **修复好友浇水列表昵称显示**：增强名字与用户 ID 的兼容性解析（提取 `displayName`、`userName`、`remarkName`、`name` 等），并补充对排行榜 `totalDatas` 与 `friendRanking` 中好友昵称的自动填充。
-- **修复本地缓存归档/解档异常**：修复 `NSKeyedUnarchiver` 安全解包嵌套集合类型失败导致本地好友名字缓存丢失的问题。
-- **优化日志呈现与流程透明度**：内部过程诊断日志统一以 `收取 · xxx` 格式规范输出，并将两次扫描之间的冷却拦截调整为 10 秒。
-- **升级接口版本与超时容错**：将 `queryTotalRank` 接口版本更新为 `20241025`，并将找能量回包判定超时提升至 4 秒。
-
-## v2.7 更新说明
-
-- 修复首页收取：进入蚂蚁森林首页后，Bridge 就绪即触发一次收取，无需手动点击“找能量”。
-- 修复首页收取请求上下文：排行榜查询与气泡收取均按首页实际请求路径发起。
-- 修复首页续查：自动收取会完成好友候选续查；真机验证后，手动进入“找能量”不再出现遗留好友能量。
-- 新增本人优先：打开“收取自己能量”后，先处理本人首页的成熟能量与浇水赠能，再执行好友扫描；关闭该开关时仅收取好友能量。
-- 新增浇水赠能自动领取：根据 Canvas 相对位置连续点击重叠的浇水赠能球，并以实际收取命中结果决定停止时机。
-- 新增步数模拟（测试）：可独立设置模拟范围与启用状态，关闭后立即恢复支付宝读取到的真实步数。
-- 自动赚能量：新增“赚能量（打地鼠玩法）”独立开关；默认开启，已验证自动点击与正常结算，仅手动进入活动后生效。
-- 新增好友浇水：从总能量榜勾选好友，统一选择 10g、18g、33g 或 66g；一次任务会为每位好友补足当日最多 3 次。
-- 新增好友浇水触发方式：手动“开始浇水”、多个固定时刻定时浇水、首次打开蚂蚁森林自动浇水三个入口独立控制。
-- 好友浇水稳定性：每次浇水获取最新好友凭据；按服务端状态处理浇水上限、参数异常和限流，连续浇水增加节流与一次重试。
+- **全量 200+ 好友排行榜拉取与自动无限翻页**：
+  - 并发请求 `listRank.html` 独立大榜接口（带 `pageSize: 200`），突破支付宝首页默认仅返回 10~20 位好友的分页隔离限制；
+  - 增加 `queryRankPage:` 自动多页连续拉取机制，支持 300 人、500 人、1000 人大号自动逐页拉取全量好友名单，确保后排（如第 48~56 名及靠后）待复活好友零遗漏；
+  - 结合“找能量（TakeLook）”候选全图搜寻，保障全图能量收取与复活无死角。
+- **自动复活好友过期能量**：
+  - 深度识别橙色 `+5g` 复活标志（覆盖 `giftingEnergy``giftEnergy``protectStatus` 等 12 种可能数据结构）；
+  - 彻底拔除旧 `ariverRpcTraceId` 校验阻断与本地 `autoReviveCount` 预判死锁，100% 由支付宝官方服务端权威判定 `PROTECT_REBORN_TIRED` 上限；
+  - 复活成功后自动刷新本人首页并智能收取获得的 5g 奖励能量，不卡顿后续扫描流程。
+- **神奇海洋（清理垃圾与拼图搜集）**：
+  - 全自动扫描神奇海洋好友、清理垃圾、搜集拼图碎片与新物种；
+  - 支持每日最多 10 人上限与单好友 1 次清理防封控制，完善每日上限透明化日志提示。
+- **扫描并发互斥锁（`isScanRunning`）**：
+  - 增加扫描运行原子互斥锁与 45 秒安全守护，彻底解决生命周期重复触发引起的并发冲突、扫描腰斩与补跑日志重复问题。
 
 ## 使用限制
 
@@ -65,13 +55,13 @@
 
 ## iOS 14 独立版本
 
-- iOS 14 请使用独立包 `AntForestPort-v2.7-iOS14.dylib`；该兼容包包含 v2.7 正式功能，不替代 iOS 15+ 的标准包。
+- iOS 14 请使用独立包 `AntForestPort-v2.8-iOS14.dylib`；该兼容包包含 v2.8 正式功能，不替代 iOS 15+ 的标准包。
 - 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
 - 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.10、TrollFools 环境完成注入与功能验证。
 
 ## 使用说明
 
-1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8-test.dylib`](build/AntForestPort-v2.8-test.dylib) 到支付宝。
+1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8.dylib`](build/AntForestPort-v2.8.dylib) 到支付宝。
 2. 注入前移除旧的 `AntForestProbe.dylib`，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，直接拖动叶子图标。静置约 2 秒后叶子会自动贴边缩小；左侧向右滑、右侧向左滑可再次展开。
@@ -101,7 +91,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 
 后台使用步骤：
 
-1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8-test.dylib` 和 `ImmortalizerJailed.dylib`。
+1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8.dylib` 和 `ImmortalizerJailed.dylib`。
 2. 完全杀掉并重新打开支付宝，进入蚂蚁森林首页。
 3. 点击叶子按钮，在收取记录面板中开启“自动收取”。
 4. 点击 ImmortalizerJailed 的浮动按钮启用保活。
@@ -123,7 +113,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | 标准 v2.8 测试包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.7.2-iOS14.dylib` |
+| iOS | 标准 v2.8 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.8-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -159,26 +149,26 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 需要完整 Xcode：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8-test.dylib
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.dylib
 ```
 
-本地 v2.8 测试产物位于 `build/AntForestPort-v2.8-test.dylib`。
+本地 v2.8 正式产物位于 `build/AntForestPort-v2.8.dylib`。
 
 GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
 在 iOS 14 独立兼容分支构建 iOS 14 包：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.7-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
 ```
 
-产物为 `build/AntForestPort-v2.7-iOS14.dylib`。
+产物为 `build/AntForestPort-v2.8-iOS14.dylib`。
 
 ## 开发分支约定
 
-- `release/v2.7`：正式维护线；包含首页自动收取、本人优先、浇水赠能、步数模拟、自动赚能量与好友浇水。
-- `release/v2.6`：上一正式维护线。
-- `release/v2.7-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
+- `release/v2.8`：正式维护线；包含全量 200+ 好友排行榜拉取、自动无限翻页、自动复活好友能量、神奇海洋清理与拼图搜集、首页自动收取、本人优先、浇水赠能、步数模拟、自动赚能量与好友浇水。
+- `release/v2.7`：上一正式维护线。
+- `release/v2.8-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
 - `feature/earn-energy-probe`：保留“赚能量”玩法的实验与诊断记录；已验证的自动点击逻辑已合入正式开发线。
 - 后续每项新功能或缺陷修复均从独立 `feature/...` 或 `fix/...` 分支开发；真机验证后再合入新的 `release/...` 分支，避免实验代码影响稳定版。
 

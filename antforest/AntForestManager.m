@@ -210,6 +210,23 @@ static NSString *waterResponseSummary(id value) {
     return parts.count ? [parts componentsJoinedByString:@"，"] : @"未发现状态字段";
 }
 
+static BOOL canReviveFriendBubble(NSDictionary *dictRank) {
+    if (![dictRank isKindOfClass:NSDictionary.class]) return NO;
+    for (NSString *key in @[ @"canProtectBubble", @"canProtect", @"protectBubble", @"canProtectEnergy", @"canRevive", @"canReviveBubble", @"giftingEnergy", @"giftEnergy", @"energyRevive", @"reviveBubble", @"hasProtectBubble" ]) {
+        id val = dictRank[key];
+        if (val && val != NSNull.null) {
+            if ([val respondsToSelector:@selector(boolValue)] && [val boolValue]) return YES;
+            if ([val isKindOfClass:NSString.class] && ([(NSString *)val length] > 0 && ![(NSString *)val isEqualToString:@"0"] && ([(NSString *)val caseInsensitiveCompare:@"false"] != NSOrderedSame))) return YES;
+        }
+    }
+    id pStatus = dictRank[@"protectStatus"] ?: dictRank[@"reviveStatus"];
+    if (pStatus && pStatus != NSNull.null) {
+        if ([pStatus respondsToSelector:@selector(integerValue)] && [pStatus integerValue] == 1) return YES;
+        if ([pStatus isKindOfClass:NSString.class] && ([(NSString *)pStatus containsString:@"PROTECT"] || [(NSString *)pStatus containsString:@"REVIVE"] || [(NSString *)pStatus containsString:@"CAN"])) return YES;
+    }
+    return NO;
+}
+
 static NSInteger reviveDailyCount(void) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     NSString *today = getCurrentDateString();
@@ -243,8 +260,8 @@ static NSInteger reviveDailyCount(void) {
 }
 
 - (void)reviveSendNext {
-    if (!self.enableAutoRevive || !self.enableAutoCollect || !self.jsBridge || reviveDailyCount() >= 6) {
-        if (reviveRunning) [self reviveStopWithReason:reviveDailyCount() >= 6 ? @"今日已达 6 次上限" : @"任务已停止或桥接不可用"];
+    if (!self.enableAutoRevive || !self.jsBridge) {
+        if (reviveRunning) [self reviveStopWithReason:@"任务已停止或桥接不可用"];
         return;
     }
     if (!reviveQueue.count) { reviveRunning = NO; reviveCurrentUserId = nil; [self reviveRefreshRewardIfNeeded]; return; }
@@ -253,21 +270,28 @@ static NSInteger reviveDailyCount(void) {
     [reviveQueue removeObjectAtIndex:0];
     NSUInteger token = ++reviveRequestToken;
     NSString *timestamp = [NSString stringWithFormat:@"%ld", (long)(NSDate.date.timeIntervalSince1970 * 1000)];
-    NSDictionary *body = @{ @"targetUserId": reviveCurrentUserId, @"version": @"20230501", @"source": @"chInfo_ch_appcenter__chsub_9patch" };
+    NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[reviveCurrentUserId]] ?: @"好友";
+    NSDictionary *body = @{ @"targetUserId": reviveCurrentUserId, @"version": @"20241025", @"source": @"chInfo_ch_appcenter__chsub_9patch" };
     NSDictionary *data = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": @"alipay.antforest.forest.h5.protectBubble", @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": [NSString stringWithFormat:@"revive_%@.%@", timestamp, [AntForestManager getNumberRandom:12]] };
-    NSString *queue = waterJSONString(@[data]);
-    if (!queue.length) { [self reviveStopWithReason:@"请求编码失败"]; return; }
+    NSDictionary *dataOld = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": @"alipay.antmember.forest.h5.protectBubble", @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": [NSString stringWithFormat:@"revive_%@.%@_old", timestamp, [AntForestManager getNumberRandom:12]] };
+    NSString *queue1 = waterJSONString(@[data]);
+    NSString *queue2 = waterJSONString(@[dataOld]);
+    if (!queue1.length) { [self reviveStopWithReason:@"请求编码失败"]; return; }
     NSString *url = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch", reviveCurrentUserId];
-    [self recordStage:@"收取 · 复活 · 请求帮助好友复活能量"];
-    [self.jsBridge _doFlushMessageQueue:queue url:url];
+    [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 请求帮助好友“%@”复活能量", name]];
+    [self.jsBridge _doFlushMessageQueue:queue1 url:url];
+    if (queue2.length) [self.jsBridge _doFlushMessageQueue:queue2 url:url];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (reviveRunning && token == reviveRequestToken) [self reviveStopWithReason:@"回包超时，已停止"];
     });
 }
 
 - (void)queueAutoReviveForUser:(NSString *)userId {
-    if (!self.enableAutoRevive || !self.enableAutoCollect || !userId.length || [userId isEqualToString:self.myUserId] || reviveDailyCount() >= 6 || [reviveQueuedIds containsObject:userId]) return;
-    [reviveQueuedIds addObject:userId];
+    if (!self.enableAutoRevive || !userId.length || [userId isEqualToString:self.myUserId]) return;
+    if (reviveRunning && [reviveCurrentUserId isEqualToString:userId]) return;
+    if ([reviveQueue containsObject:userId] || [reviveQueuedIds containsObject:userId]) return;
+    NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[userId]] ?: @"好友";
+    [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 发现好友“%@”有待复活能量，加入复活队列", name]];
     [reviveQueue addObject:userId];
     if (!reviveRunning) [self reviveSendNext];
 }
@@ -275,11 +299,12 @@ static NSInteger reviveDailyCount(void) {
 - (void)handleAutoReviveResponse:(id)args {
     if (!reviveRunning || ![args isKindOfClass:NSDictionary.class]) return;
     NSDictionary *resData = [(NSDictionary *)args[@"resData"] isKindOfClass:NSDictionary.class] ? args[@"resData"] : nil;
-    if (!resData[@"resultCode"] || !resData[@"success"]) return;
+    if (!resData) return;
     NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[reviveCurrentUserId]] ?: @"好友";
-    if (waterResponseSucceeded(resData)) {
+    if (waterResponseSucceeded(resData) || [resData[@"success"] boolValue] || [[resData[@"resultCode"] description] isEqualToString:@"SUCCESS"]) {
         NSInteger count = reviveDailyCount() + 1;
         [NSUserDefaults.standardUserDefaults setInteger:count forKey:@"autoReviveCount"];
+        if (reviveCurrentUserId.length) [reviveQueuedIds addObject:reviveCurrentUserId];
         [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 成功帮助好友“%@”复活能量（今日 %ld/6 次）", name, (long)count]];
         reviveRewardRefreshNeeded = YES;
         reviveRunning = NO;
@@ -289,6 +314,7 @@ static NSInteger reviveDailyCount(void) {
     } else {
         NSString *code = waterResponseCode(resData);
         if ([code isEqualToString:@"TARGET_USER_PROTECT_BY_ENERGY_SHIELD"]) {
+            if (reviveCurrentUserId.length) [reviveQueuedIds addObject:reviveCurrentUserId];
             [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 好友“%@”已有能量保护罩，已跳过", name]];
             reviveRunning = NO;
             reviveCurrentUserId = nil;
@@ -296,7 +322,20 @@ static NSInteger reviveDailyCount(void) {
             [self reviveSendNext];
             return;
         }
-        [self reviveStopWithReason:[NSString stringWithFormat:@"服务端拒绝%@，已停止", code.length ? [NSString stringWithFormat:@"（%@）", code] : @""]];
+        if ([code containsString:@"LIMIT"] || [code containsString:@"EXCEED"] || [code containsString:@"OVER"] || [code containsString:@"TIRED"] || [code isEqualToString:@"PROTECT_REBORN_TIRED"]) {
+            [NSUserDefaults.standardUserDefaults setInteger:6 forKey:@"autoReviveCount"];
+            [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 帮复活能量已达支付宝官方上限（今天已用完，明天再继续吧）"]];
+            reviveRunning = NO;
+            reviveCurrentUserId = nil;
+            reviveRequestToken++;
+            [reviveQueue removeAllObjects];
+            return;
+        }
+        [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 帮助好友“%@”复活回包：%@，尝试下一位", name, waterResponseSummary(resData)]];
+        reviveRunning = NO;
+        reviveCurrentUserId = nil;
+        reviveRequestToken++;
+        [self reviveSendNext];
     }
 }
 
@@ -373,8 +412,35 @@ static NSInteger reviveDailyCount(void) {
     NSUInteger requestToken = ++waterRequestToken;
     waterAwaitingLimit = NO;
     waterAwaitingTransfer = YES;
-    NSDictionary *body = @{ @"bizNo": waterCurrentBizNo, @"energyId": @(self.waterEnergyId), @"extInfo": @{ @"sendChat": self.waterReminderEnabled ? @"true" : @"false" }, @"from": @"", @"source": @"chInfo_ch_appcenter__chsub_9patch", @"targetUser": waterCurrentUserId, @"transferType": @"WATERING", @"version": @"20230501" };
-    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · 诊断：请求第 %lu/%lu 次浇水", (unsigned long)(waterSucceededCount + 1), (unsigned long)waterTargetCount]];
+    NSDictionary *extInfoDict = self.waterReminderEnabled ? @{
+        @"sendChat": @"true",
+        @"sendMsg": @"true",
+        @"remind": @"true",
+        @"remindCollect": @"true",
+        @"notice": @"true",
+        @"remindFriend": @"true",
+        @"fillMsg": @"true",
+        @"waterRemind": @"true",
+        @"remindText": @"提醒TA来收（7天不收会退回）"
+    } : @{
+        @"sendChat": @"false",
+        @"remind": @"false"
+    };
+    NSString *extInfoJson = waterJSONString(extInfoDict) ?: @"{}";
+    
+    NSDictionary *body = @{
+        @"bizNo": waterCurrentBizNo,
+        @"energyId": @(self.waterEnergyId),
+        @"extInfo": extInfoDict,
+        @"extInfoStr": extInfoJson,
+        @"from": @"",
+        @"source": @"chInfo_ch_appcenter__chsub_9patch",
+        @"targetUser": waterCurrentUserId,
+        @"transferType": @"WATERING",
+        @"version": @"20241025"
+    };
+    [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · 诊断：请求第 %lu/%lu 次浇水（提醒=%@）", (unsigned long)(waterSucceededCount + 1), (unsigned long)waterTargetCount, self.waterReminderEnabled ? @"开" : @"关"]];
+    [self waterSendRPC:@"alipay.antforest.forest.h5.transferEnergy" body:body];
     [self waterSendRPC:@"alipay.antmember.forest.h5.transferEnergy" body:body];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!waterRunning || requestToken != waterRequestToken || !waterAwaitingTransfer) return;
@@ -490,6 +556,15 @@ static NSInteger reviveDailyCount(void) {
     counts[waterCurrentUserId] = @([counts[waterCurrentUserId] integerValue] + 1);
     saveWaterDailyCounts(counts);
     [self recordStage:[NSString stringWithFormat:@"收取 · 浇水 · %@：成功 %lu/%lu，%ld g", [self waterDisplayNameForUser:waterCurrentUserId], (unsigned long)waterSucceededCount, (unsigned long)waterTargetCount, (long)self.waterGrams]];
+    if (self.waterReminderEnabled && waterCurrentUserId.length) {
+        NSDictionary *remindBody = @{
+            @"targetUserId": waterCurrentUserId,
+            @"bizType": @"WATERING",
+            @"source": @"chInfo_ch_appcenter__chsub_9patch",
+            @"version": @"20230501"
+        };
+        [self waterSendRPC:@"alipay.antmember.forest.h5.waterReminder" body:remindBody];
+    }
     if (waterSucceededCount >= waterTargetCount) [self waterFinishCurrentFriendWithStatus:@"本次完成"];
     else dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kWaterTransferCooldown * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ if (waterRunning) [self waterRequestFriendHome]; });
 }
@@ -589,15 +664,14 @@ static NSInteger reviveDailyCount(void) {
 
 - (void)recordStage:(NSString *)stage {
     if (!stage.length) return;
-    NSString *logMessage = stage;
-    if ([stage hasPrefix:@"诊断 · "]) {
-        logMessage = [@"收取 · " stringByAppendingString:[stage substringFromIndex:5]];
-    } else if ([stage hasPrefix:@"诊断 ·"]) {
-        logMessage = [@"收取 · " stringByAppendingString:[stage substringFromIndex:4]];
-    } else if (![stage hasPrefix:@"收取 ·"]) {
+    if ([stage hasPrefix:@"诊断 ·"]) {
+        NSLog(@"[AntForestPort][Diag] %@", stage);
         return;
     }
-    if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), logMessage]];
+    if (![stage hasPrefix:@"收取 ·"]) {
+        return;
+    }
+    if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), stage]];
 }
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
@@ -734,6 +808,7 @@ NSString* getCurrentDateTimeString() {
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
             takeLookCurrentFriendId = nil;
+            self.isScanRunning = NO;
             [self recordStage:[NSString stringWithFormat:@"收取 · 本轮扫描结束：%@", reason]];
             return;
         }
@@ -749,7 +824,8 @@ NSString* getCurrentDateTimeString() {
             if (!takeLookRunning || !takeLookWaitingForFriend || requestToken != takeLookRequestToken) return;
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
-            [self recordStage:@"收取 · 本轮扫描结束：好友信息暂未返回"];
+            self.isScanRunning = NO;
+            [self recordStage:@"收取 · 本轮扫描完成"];
         }
     });
 }
@@ -772,6 +848,7 @@ NSString* getCurrentDateTimeString() {
                 return NO;
             }
             takeLookRunning = NO;
+            self.isScanRunning = NO;
             [self recordStage:@"收取 · 本轮扫描完成"];
             return NO;
         }
@@ -900,8 +977,18 @@ NSString* getCurrentDateTimeString() {
     }
 }
 
+static NSInteger myOceanCleanCount = 0;
+static NSMutableDictionary *friendOceanCleanCounts = nil;
+
+-(void)cleanMyOceanThoroughly {
+    if (!self.enableCleanOcean || !self.jsBridge) return;
+    myOceanCleanCount = 0;
+    [self cleanMyOcean];
+}
+
 //清理自己的海域
 -(void)cleanMyOcean{
+    if (self.myUserId.length) self.lastCleanedOceanUserId = self.myUserId;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
     NSString *randNum2=[AntForestManager getNumberRandom:16];
@@ -915,6 +1002,8 @@ NSString* getCurrentDateTimeString() {
 
 //清理朋友的海域
 -(void)cleanFriendsOcean:(NSString*)uid{
+    if (!uid.length) return;
+    self.lastCleanedOceanUserId = uid;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
     NSString *randNum2=[AntForestManager getNumberRandom:16];
@@ -922,21 +1011,99 @@ NSString* getCurrentDateTimeString() {
     NSString *arg2 = [NSString stringWithFormat:@"https://2021003115672468.h5app.alipay.com/www/index.html?fromAct=SAIL_AWAY&userId=%@&interactFlags=&source=ANT_FOREST_ly%%27&__webview_options__=ttb%%3Dauto%%26pd%%3DNO%%26bc%%3D1324950",uid];
     if([self jsBridge]) {
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
-        //FileLog(@"anthook cleanFriendsOcean");
     }
+}
+
+-(void)queryOceanFriendList {
+    if (!self.enableCleanOcean) return;
+    NSString *today = getCurrentDateString();
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![[defaults stringForKey:@"oceanCleanedDate"] isEqualToString:today]) {
+        [defaults setObject:today forKey:@"oceanCleanedDate"];
+        [defaults setObject:@[] forKey:@"oceanCleanedFriendsToday"];
+        [defaults setBool:NO forKey:@"oceanLimitReachedToday"];
+    }
+    if ([defaults boolForKey:@"oceanLimitReachedToday"]) return;
+    
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+    NSString *randNum=[AntForestManager getNumberRandom:15];
+    NSString *randNum2=[AntForestManager getNumberRandom:16];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.queryFriendList\",\"requestData\":[{\"source\":\"ANT_FOREST_ly'\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"queryFriendList\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
+    NSString *arg2 = @"https://2021003115672468.h5app.alipay.com/www/index.html";
+    if([self jsBridge]) {
+        [self recordStage:@"收取 · 请求神奇海洋好友列表"];
+        [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
+    }
+}
+
+-(void)scanOceanForFriends:(NSArray<NSString *> *)friendIds {
+    if (!self.enableCleanOcean || !friendIds.count) return;
+    NSString *today = getCurrentDateString();
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    if (![[defaults stringForKey:@"oceanCleanedDate"] isEqualToString:today]) {
+        [defaults setObject:today forKey:@"oceanCleanedDate"];
+        [defaults setObject:@[] forKey:@"oceanCleanedFriendsToday"];
+        [defaults setBool:NO forKey:@"oceanLimitReachedToday"];
+    }
+    if ([defaults boolForKey:@"oceanLimitReachedToday"]) {
+        static NSString *lastOceanLimitLogDate = nil;
+        if (![lastOceanLimitLogDate isEqualToString:today]) {
+            lastOceanLimitLogDate = today;
+            [self recordStage:@"收取 · 神奇海洋：今日自动清理海域与收集拼图已达每日上限（10/10 位）"];
+        }
+        return;
+    }
+    
+    NSArray *cleanedArr = [defaults arrayForKey:@"oceanCleanedFriendsToday"] ?: @[];
+    NSMutableSet *cleanedSet = [NSMutableSet setWithArray:cleanedArr];
+    if (cleanedSet.count >= 10) {
+        [defaults setBool:YES forKey:@"oceanLimitReachedToday"];
+        [self recordStage:@"收取 · 神奇海洋：今日已帮满 10 位好友清理，已达每日上限"];
+        return;
+    }
+    
+    NSMutableArray<NSString *> *toClean = [NSMutableArray array];
+    for (NSString *uid in friendIds) {
+        if (!uid.length || [uid isEqualToString:self.myUserId]) continue;
+        if ([cleanedSet containsObject:uid]) continue;
+        [toClean addObject:uid];
+        if (cleanedSet.count + toClean.count >= 10) break;
+    }
+    
+    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮 %lu/10 位好友清理，本轮计划清理 %lu 位好友", (unsigned long)cleanedSet.count, (unsigned long)toClean.count]];
+    
+    for (NSString *uid in toClean) {
+        dispatch_async(globalSerialQueueQuery, ^{
+            if ([[NSUserDefaults standardUserDefaults] boolForKey:@"oceanLimitReachedToday"]) return;
+            [self cleanFriendsOcean:uid];
+        });
+    }
+}
+
+-(void)queryRankPage:(NSInteger)startIndex {
+    if (!self.enableAutoCollect || !self.jsBridge) return;
+    NSString *version = @"20230501";
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+    NSString *randNum = [AntForestManager getNumberRandom:16];
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@_p%ld\"}]", version, (long)startIndex, timeStamp, randNum, (long)startIndex];
+    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/listRank.html?caprMode=sync&init=energyRank&periodType=total";
+    [self recordStage:[NSString stringWithFormat:@"收取 · 请求好友排行榜自动翻页（第 %ld-%ld 位）", (long)startIndex + 1, (long)startIndex + 200]];
+    [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
 }
 
 //查询总排行 可以获取所有人的ID
 -(void)queryTotalRank{
-    NSString *version = @"20241025";
+    NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
-    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
+    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/listRank.html?caprMode=sync&init=energyRank&periodType=total";
+    NSString *arg1_home=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@_home\"}]",version,timeStamp,randNum];
+    NSString *arg2_home = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
     if([self jsBridge]) {
-        [self recordStage:@"收取 · 请求好友排行榜"];
+        [self recordStage:@"收取 · 请求全量好友排行榜（200位/页）"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
-        //FileLog(@"anthook queryTotalRank");
+        [[self jsBridge] _doFlushMessageQueue:arg1_home url:arg2_home];
     }
 }
 
@@ -1005,6 +1172,7 @@ NSString* getCurrentDateTimeString() {
     });
 }
 
+
 // 每隔300秒一次
 -(void)autoCollectBubbles {
     @try {
@@ -1012,10 +1180,11 @@ NSString* getCurrentDateTimeString() {
             [self recordStage:[NSString stringWithFormat:@"诊断 · 收取未启动：自动收取=%d，桥接=%d", self.enableAutoCollect, self.jsBridge != nil]];
             return;
         }
-        if (lastCollectStartedAt && -[lastCollectStartedAt timeIntervalSinceNow] < 10) {
-            [self recordStage:@"诊断 · 收取跳过：10 秒冷却中"];
+        if (self.isScanRunning) {
+            [self recordStage:@"诊断 · 收取跳过：本轮扫描正在执行中"];
             return;
         }
+        self.isScanRunning = YES;
         lastCollectStartedAt = NSDate.date;
         collectionCycle++;
         NSUInteger cycle = collectionCycle;
@@ -1024,20 +1193,29 @@ NSString* getCurrentDateTimeString() {
         [deferredFriendRankIds removeAllObjects];
         deferredRankedFriendIds = nil;
         rankScanPending = YES;
-        [self.friendsRank removeAllObjects];
         @synchronized (self) { [pendingCollectBubbles removeAllObjects]; }
         [self recordStage:@"收取 · 本轮扫描开始"];
         [self queryTotalRank];
+        if (self.enableCleanOcean) {
+            [self cleanMyOceanThoroughly];
+            [self queryOceanFriendList];
+        }
         if (selfPriorityPending) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [self releaseSelfPriorityForCycle:cycle reason:@"本人首页回包超时"];
             });
         }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (rankScanPending && cycle == collectionCycle) {
                 rankScanPending = NO;
                 [self recordStage:@"诊断 · 排行榜回包超时，转入找能量续查"];
                 [self startTakeLookContinuation];
+            }
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.isScanRunning && cycle == collectionCycle) {
+                self.isScanRunning = NO;
+                [self recordStage:@"诊断 · 本轮扫描达到 45 秒安全超时释放锁"];
             }
         });
         self.failedTimes++;
@@ -1264,17 +1442,90 @@ NSString* getCurrentDateTimeString() {
 
 -(void)matchFriendIdAndBubbles:(id)args {
     @try {
-    // 浇水可独立于自动收取手动执行，必须先处理它的回包。
-    [self handleWaterResponse:args];
-    [self handleAutoReviveResponse:args];
+        if ([args isKindOfClass:NSDictionary.class]) {
+            NSDictionary *dict = args;
+            NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+            if (resData && (resData[@"cleanRewardVOS"] || resData[@"canClearFriendSeaToday"])) {
+                NSNumber *canClearToday = resData[@"canClearFriendSeaToday"];
+                if (canClearToday && [canClearToday boolValue] == NO) {
+                    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
+                    [self recordStage:@"收取 · 神奇海洋：服务端确认今日清理已达上限"];
+                }
+                NSArray *rewards = resData[@"cleanRewardVOS"];
+                if ([rewards isKindOfClass:NSArray.class] && rewards.count > 0) {
+                    NSString *cleanedUid = resData[@"cleanedUserId"] ?: resData[@"userId"] ?: dict[@"cleanedUserId"] ?: self.lastCleanedOceanUserId;
+                    BOOL isSelfOcean = !cleanedUid.length || [cleanedUid isEqualToString:self.myUserId];
+                    NSString *targetName = @"自己";
+                    if (!isSelfOcean) {
+                        NSString *displayName = [self waterDisplayNameForUser:cleanedUid];
+                        targetName = displayName.length ? [NSString stringWithFormat:@"好友“%@”", displayName] : @"好友";
+                        NSArray *cleanedArr = [[NSUserDefaults standardUserDefaults] arrayForKey:@"oceanCleanedFriendsToday"] ?: @[];
+                        NSMutableSet *cleanedSet = [NSMutableSet setWithArray:cleanedArr];
+                        [cleanedSet addObject:cleanedUid];
+                        [[NSUserDefaults standardUserDefaults] setObject:cleanedSet.allObjects forKey:@"oceanCleanedFriendsToday"];
+                        if (cleanedSet.count >= 10) {
+                            [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮满 10 位好友清理，已达每日上限"]];
+                        }
+                    }
+                    NSDictionary *first = rewards.firstObject;
+                    NSString *name = first[@"name"] ?: @"垃圾";
+                    NSArray *attach = [first[@"attachRewardBOList"] isKindOfClass:NSArray.class] ? first[@"attachRewardBOList"] : nil;
+                    if (attach.count > 0) {
+                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：获得%@的拼图碎片与%@", targetName, name]];
+                    } else {
+                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：清理%@的%@", targetName, name]];
+                    }
+                    if (isSelfOcean) {
+                        myOceanCleanCount++;
+                        if (myOceanCleanCount < 8) {
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                                if (self.enableCleanOcean && self.jsBridge) {
+                                    [self cleanMyOcean];
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            if (resData && (resData[@"friendList"] || resData[@"friendOceanList"] || resData[@"friendSeaList"] || resData[@"friendListVO"])) {
+                NSNumber *canClearFriendSeaToday = resData[@"canClearFriendSeaToday"] ?: resData[@"canCleanFriendSea"] ?: resData[@"canClearFriendSea"] ?: resData[@"canClearSea"];
+                NSInteger todayCleaned = [resData[@"todayCleanCount"] integerValue] ?: [resData[@"cleanedCount"] integerValue] ?: [resData[@"todayCleanedCount"] integerValue];
+                if ((canClearFriendSeaToday && [canClearFriendSeaToday boolValue] == NO) || todayCleaned >= 10) {
+                    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
+                    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：服务端确认今日清理好友已达上限（%ld/10 位）", (long)MAX(10, todayCleaned)]];
+                    return;
+                }
+                NSArray *list = resData[@"friendList"] ?: resData[@"friendOceanList"] ?: resData[@"friendSeaList"] ?: resData[@"friendListVO"];
+                if ([list isKindOfClass:NSArray.class] && list.count > 0) {
+                    NSMutableArray<NSString *> *cleanableFriends = [NSMutableArray array];
+                    for (NSDictionary *f in list) {
+                        if (![f isKindOfClass:NSDictionary.class]) continue;
+                        NSString *uid = [AntForestManager extractUserIdFromDictionary:f];
+                        BOOL canClean = [f[@"seaCleanable"] boolValue] || [f[@"canClean"] boolValue] || ([f[@"rubbishNumber"] integerValue] > 0) || ([f[@"cleanStatus"] integerValue] == 1);
+                        if (uid.length && (canClean || list.count <= 20)) {
+                            [cleanableFriends addObject:uid];
+                        }
+                    }
+                    if (cleanableFriends.count) {
+                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋列表：筛选出 %lu 位神奇海洋好友", (unsigned long)cleanableFriends.count]];
+                        [self scanOceanForFriends:cleanableFriends];
+                    }
+                }
+            }
+        }
+        // 浇水与自动复活可独立于自动收取手动执行，必须先处理它们的回包。
+        [self handleWaterResponse:args];
+        [self handleAutoReviveResponse:args];
         if ([args isKindOfClass:NSDictionary.class]) [self updateWaterFriendListFromResponse:args];
         [self recordCollectedEnergyFromResponse:args];
         if (!self.enableAutoCollect) return;
         if (args != nil && [args isKindOfClass:[NSDictionary class]]) {
             NSDictionary *dict = args;
+            NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
             // 匹配 过期能量球 返回的  signId
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"forestSignVOList"]) {
-                NSArray *signList =[[dict objectForKey:@"resData"] objectForKey:@"forestSignVOList"];
+            if(resData && resData[@"forestSignVOList"]) {
+                NSArray *signList = resData[@"forestSignVOList"];
                 for( NSDictionary *sign in signList) {
                     NSString *signId = [sign objectForKey:@"signId"];
                     NSString *userId = [[AntForestManager sharedInstance] myUserId]; //我自己的ID
@@ -1294,8 +1545,8 @@ NSString* getCurrentDateTimeString() {
             }
             
             // 匹配 takelook 返回的 friendID
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"friendId"]) {
-                NSString *friendId = [[dict objectForKey:@"resData"] objectForKey:@"friendId"];
+            if(resData && resData[@"friendId"]) {
+                NSString *friendId = resData[@"friendId"];
                 if (![self consumeTakeLookFriend:friendId]) return;
                 NSMutableDictionary* fb = [[AntForestManager sharedInstance] friendsBubbles];
                 //如果字典树中没有
@@ -1311,7 +1562,7 @@ NSString* getCurrentDateTimeString() {
                 });
             }
             // 匹配查询好的返回的所有能量球
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"bubbles"] && [dict objectForKey:@"userBaseInfo"]) {
+            if(dict[@"bubbles"] && dict[@"userBaseInfo"]) {
                 NSString *userId;
                 if([dict objectForKey:@"userBaseInfo"]) {
                     NSDictionary *pDic =[dict objectForKey:@"userBaseInfo"];
@@ -1320,6 +1571,13 @@ NSString* getCurrentDateTimeString() {
                 if (!userId.length || !self.myUserId.length) {
                     [self recordStage:@"诊断 · 气泡回包跳过：本人账户尚未识别"];
                     return;
+                }
+                if (self.enableAutoRevive && userId.length && ![userId isEqualToString:self.myUserId]) {
+                    NSDictionary *userInfo = [dict[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? dict[@"userBaseInfo"] : nil;
+                    NSDictionary *userForest = [dict[@"userForest"] isKindOfClass:NSDictionary.class] ? dict[@"userForest"] : nil;
+                    if (canReviveFriendBubble(dict) || canReviveFriendBubble(userInfo) || canReviveFriendBubble(userForest) || [dict[@"forestSignVOList"] isKindOfClass:NSArray.class]) {
+                        [self queueAutoReviveForUser:userId];
+                    }
                 }
                 
                 //判断是否有能量保护罩
@@ -1424,8 +1682,9 @@ NSString* getCurrentDateTimeString() {
                 }
             }
             // 先查询本人首页；严格的“本人收取完成后再查好友”由独立修复处理。
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"myself"]) {
-                NSDictionary *myDict = [[dict objectForKey:@"resData"] objectForKey:@"myself"];
+            if (!resData) resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+            if(resData && resData[@"myself"]) {
+                NSDictionary *myDict = resData[@"myself"];
                 NSString *userIdMy = [AntForestManager extractUserIdFromDictionary:myDict] ?: [myDict objectForKey:@"userId"];
                 if (userIdMy.length) {
                     [[AntForestManager sharedInstance] setMyUserId:userIdMy];
@@ -1433,7 +1692,6 @@ NSString* getCurrentDateTimeString() {
                 }
                 NSNumber *canCollectEnergy = [myDict objectForKey:@"canCollectEnergy"];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 本人能量状态：%@", [canCollectEnergy isEqualToNumber:@1] ? @"可收" : @"暂无成熟能量"]];
-                // 本人首页除成熟能量外还可能返回浇水赠能；该状态不一定反映在排行榜的 canCollectEnergy 中。
                 if(self.enableSelfCollect) {
                     dispatch_async(globalSerialQueueQuery, ^{
                         [self recordStage:@"收取 · 请求本人首页（含赠能）"];
@@ -1441,17 +1699,20 @@ NSString* getCurrentDateTimeString() {
                     });
                 }
             }
-            //匹配是否要查询这个人的首页
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"]) {
-                NSArray *rankArr = [[dict objectForKey:@"resData"] objectForKey:@"friendRanking"];
+            if(resData && (resData[@"friendRanking"] || resData[@"totalDatas"])) {
+                NSArray *rankArr = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : resData[@"totalDatas"];
                 NSUInteger collectable = 0;
                 for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
-                for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canProtectBubble"] boolValue]) [self queueAutoReviveForUser:[dictRank objectForKey:@"userId"]];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
                 for(NSDictionary *dictRank in rankArr) {
                     NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
-                    NSNumber *canCollectEnergy = [dictRank objectForKey:@"canCollectEnergy"];
-                    if([canCollectEnergy isEqualToNumber:@1]){
+                    if (!userId.length) continue;
+                    BOOL isCollectable = [[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1];
+                    BOOL isReviveable = canReviveFriendBubble(dictRank);
+                    if (isReviveable) {
+                        [self queueAutoReviveForUser:userId];
+                    }
+                    if (isCollectable || isReviveable){
                         if (selfPriorityPending) {
                             [deferredFriendRankIds addObject:userId];
                         } else {
@@ -1463,12 +1724,17 @@ NSString* getCurrentDateTimeString() {
                 }
             }
             //匹配排行
-            if([dict objectForKey:@"ariverRpcTraceId"] && [dict objectForKey:@"resData"] && [[dict objectForKey:@"resData"] objectForKey:@"totalDatas"]) {
-                NSArray *rankTotalArr = [[dict objectForKey:@"resData"] objectForKey:@"totalDatas"];
+            NSArray *rankTotalArr = [resData[@"totalDatas"] isKindOfClass:NSArray.class] ? resData[@"totalDatas"] : ([resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : nil);
+            if (rankTotalArr.count > 0) {
                 NSMutableDictionary *fr = [[AntForestManager sharedInstance] friendsRank];
                 NSMutableDictionary *fn = [[AntForestManager sharedInstance] friendsName];
                 BOOL nameUpdated = NO;
                 for(NSDictionary *dictTotalRank in rankTotalArr) {
+                    NSString *userId = [AntForestManager extractUserIdFromDictionary:dictTotalRank] ?: [dictTotalRank objectForKey:@"userId"];
+                    if (!userId.length) continue;
+                    if (canReviveFriendBubble(dictTotalRank)) {
+                        [self queueAutoReviveForUser:userId];
+                    }
                     NSString *rank = [dictTotalRank objectForKey:@"rank"];
                     NSString *uid = [AntForestManager extractUserIdFromDictionary:dictTotalRank];
                     if (uid.length) {
@@ -1481,6 +1747,11 @@ NSString* getCurrentDateTimeString() {
                             nameUpdated = YES;
                         }
                     }
+                }
+                NSData *rankData = [NSKeyedArchiver archivedDataWithRootObject:fr requiringSecureCoding:NO error:nil];
+                if (rankData) {
+                    [[NSUserDefaults standardUserDefaults] setObject:rankData forKey:@"cachedFriendsRank"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
                 }
                 if (nameUpdated) {
                     NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fn requiringSecureCoding:NO error:nil];
@@ -1497,7 +1768,19 @@ NSString* getCurrentDateTimeString() {
                         [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
                     }
                 }
+                BOOL hasMore = [resData[@"hasMore"] boolValue] || [resData[@"hasNext"] boolValue];
+                NSInteger nextIndex = [resData[@"nextStartIndex"] integerValue] ?: [resData[@"startIndex"] integerValue] + rankTotalArr.count;
+                if ((hasMore || rankTotalArr.count >= 200) && nextIndex > 0 && nextIndex < 1000) {
+                    static NSInteger lastFetchedIndex = 0;
+                    if (nextIndex > lastFetchedIndex) {
+                        lastFetchedIndex = nextIndex;
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                            [self queryRankPage:nextIndex];
+                        });
+                    }
+                }
             }
+            
             
         }
     }

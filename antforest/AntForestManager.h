@@ -27,6 +27,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(atomic) NSInteger todayCollectedEnergy;
 
 @property (nonatomic, strong) NSTimer *autoCollectTimer; //后台任务定时器
+@property(nonatomic, copy) NSString *lastCleanedOceanUserId;
 @property (nonatomic, strong) NSTimer *scheduledCollectTimer;
 @property (nonatomic, strong) NSTimer *scheduledWaterTimer;
 
@@ -45,6 +46,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSArray<NSString *> *waterFriendIds;
 @property (nonatomic, strong) NSArray<NSString *> *waterScheduledTimes;
 
+@property (assign, nonatomic) BOOL enableCleanOcean; // 神奇海洋自动清理海域与找拼图
+@property (atomic, assign) BOOL isScanRunning; // 扫描进行中独占锁
 @property (assign, nonatomic) int failedTimes; //未成功收取能量的次数
 @property(atomic) NSTimeInterval collectInterval; //takeLook时间间隔
 
@@ -57,6 +60,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 -(void)cleanFriendsOcean:(NSString*)uid;
 -(void)cleanMyOcean;
+-(void)cleanMyOceanThoroughly;
+-(void)scanOceanForFriends:(NSArray<NSString *> *)friendIds;
+-(void)queryOceanFriendList;
 
 -(void)queryTotalRank;
 -(void)queryRobFlag:(NSString*)uids;

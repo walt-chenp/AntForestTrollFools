@@ -70,6 +70,10 @@ static void finishForestHomeStart(id controller, id bridge) {
     [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
     if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
     else if (manager.enableAutoCollect) {
+        if (manager.isScanRunning) {
+            [manager recordStage:@"诊断 · 首页桥接就绪：前一轮扫描执行中，跳过重复启动"];
+            return;
+        }
         [manager recordStage:@"收取 · 首页桥接就绪，立即补跑"];
         [manager autoCollectBubbles];
     }
@@ -553,7 +557,9 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *reviveSwitch = [[UISwitch alloc] init]; reviveSwitch.on = AntForestManager.sharedInstance.enableAutoRevive; reviveSwitch.translatesAutoresizingMaskIntoConstraints = NO; [reviveSwitch addTarget:self action:@selector(toggleAutoRevive:) forControlEvents:UIControlEventValueChanged]; [revive addSubview:reviveSwitch];
     UIButton *earn = [self settingsButtonWithTitle:@"赚能量（打地鼠玩法）" detail:@"手动进入活动后自动点击好友头像" icon:@"hand.tap.fill" action:nil];
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
-    [self.view addSubview:schedule]; [self.view addSubview:step]; [self.view addSubview:water]; [self.view addSubview:revive]; [self.view addSubview:earn];
+    UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理垃圾与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
+    UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
+    [self.view addSubview:schedule]; [self.view addSubview:step]; [self.view addSubview:water]; [self.view addSubview:revive]; [self.view addSubview:earn]; [self.view addSubview:ocean];
     [NSLayoutConstraint activateConstraints:@[
         [schedule.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [schedule.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [schedule.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [schedule.heightAnchor constraintEqualToConstant:70],
         [step.topAnchor constraintEqualToAnchor:schedule.bottomAnchor constant:12], [step.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [step.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [step.heightAnchor constraintEqualToConstant:70],
@@ -562,6 +568,8 @@ static void installEarnEnergyCollector(id controller) {
         [earn.topAnchor constraintEqualToAnchor:revive.bottomAnchor constant:12], [earn.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [earn.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [earn.heightAnchor constraintEqualToConstant:70],
         [reviveSwitch.trailingAnchor constraintEqualToAnchor:revive.trailingAnchor constant:-18], [reviveSwitch.centerYAnchor constraintEqualToAnchor:revive.centerYAnchor],
         [earnSwitch.trailingAnchor constraintEqualToAnchor:earn.trailingAnchor constant:-18], [earnSwitch.centerYAnchor constraintEqualToAnchor:earn.centerYAnchor],
+        [ocean.topAnchor constraintEqualToAnchor:earn.bottomAnchor constant:12], [ocean.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [ocean.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [ocean.heightAnchor constraintEqualToConstant:70],
+        [oceanSwitch.trailingAnchor constraintEqualToAnchor:ocean.trailingAnchor constant:-18], [oceanSwitch.centerYAnchor constraintEqualToAnchor:ocean.centerYAnchor],
     ]];
 }
 
@@ -586,6 +594,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)showWater { [self.navigationController pushViewController:[[AntForestWaterPanel alloc] init] animated:YES]; }
 - (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 自动复活好友过期能量已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 赚能量（打地鼠玩法）已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 @end
@@ -928,8 +937,8 @@ static void installEarnEnergyCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
     [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -986,7 +995,9 @@ static void showLogPanel(UIButton *button) {
     UIResponder *responder = button;
     while (responder && ![responder isKindOfClass:[UIViewController class]]) responder = responder.nextResponder;
     UIViewController *presenter = (UIViewController *)responder;
-    if (!presenter || presenter.presentedViewController) return;
+    if (!presenter) presenter = [UIApplication sharedApplication].keyWindow.rootViewController;
+    while (presenter.presentedViewController) presenter = presenter.presentedViewController;
+    if (!presenter) return;
     AntForestLogPanel *panel = [[AntForestLogPanel alloc] init];
     panel.modalPresentationStyle = UIModalPresentationPageSheet;
     if (@available(iOS 16.0, *)) {
@@ -1094,7 +1105,23 @@ static void handleButtonPan(id controller, SEL _cmd, UIPanGestureRecognizer *ges
 }
 
 static void addLogButton(UIViewController *controller, BOOL reveal) {
-    UIButton *existingButton = (UIButton *)[controller.view viewWithTag:AntForestButtonTag];
+    if (!controller.view) return;
+    
+    UIWindow *window = controller.view.window;
+    if (!window) window = [UIApplication sharedApplication].keyWindow;
+    if (!window && [UIApplication sharedApplication].windows.count > 0) {
+        window = [UIApplication sharedApplication].windows.firstObject;
+    }
+    
+    // 全局 Window 层级防重：保证全局有且仅有一个叶子按钮
+    UIButton *existingButton = nil;
+    if (window) {
+        existingButton = (UIButton *)[window viewWithTag:AntForestButtonTag];
+    }
+    if (!existingButton && controller.view) {
+        existingButton = (UIButton *)[controller.view viewWithTag:AntForestButtonTag];
+    }
+    
     if (existingButton) {
         if (reveal) {
             expandButton(existingButton);
@@ -1102,6 +1129,15 @@ static void addLogButton(UIViewController *controller, BOOL reveal) {
         }
         return;
     }
+    
+    NSString *clsName = NSStringFromClass(controller.class);
+    if (![controller isKindOfClass:NSClassFromString(@"H5WebViewController")] &&
+        ![clsName containsString:@"Launcher"] &&
+        ![clsName isEqualToString:@"DTViewController"]) {
+        return;
+    }
+    
+    UIView *parentView = window ?: controller.view;
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     button.tag = AntForestButtonTag;
     button.tintColor = UIColor.whiteColor;
@@ -1110,23 +1146,27 @@ static void addLogButton(UIViewController *controller, BOOL reveal) {
     button.layer.shadowColor = UIColor.blackColor.CGColor;
     button.layer.shadowOpacity = 0.2;
     button.layer.shadowRadius = 8;
-    button.frame = CGRectMake(controller.view.bounds.size.width - 64, controller.view.safeAreaInsets.top + 160, 48, 48);
+    button.frame = CGRectMake(parentView.bounds.size.width - 64, parentView.safeAreaInsets.top + 160, 48, 48);
     button.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleBottomMargin;
     UIImage *image = [UIImage systemImageNamed:@"leaf.fill"];
     [button setImage:image forState:UIControlStateNormal];
-    [controller.view addSubview:button];
+    [parentView addSubview:button];
     [button addAction:[UIAction actionWithHandler:^(__kindof UIAction * _Nonnull action) {
         if (buttonIsCollapsed(button)) { expandButton(button); scheduleButtonCollapse(button); }
         else showLogPanel(button);
     }] forControlEvents:UIControlEventTouchUpInside];
     CGFloat savedX = [[NSUserDefaults standardUserDefaults] floatForKey:AntForestButtonXKey];
     CGFloat savedY = [[NSUserDefaults standardUserDefaults] floatForKey:AntForestButtonYKey];
-    if (savedX > 0 && savedY > 0) button.center = CGPointMake(savedX * controller.view.bounds.size.width, savedY * controller.view.bounds.size.height);
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:controller action:@selector(antforestHandlePan:)];
+    if (savedX > 0 && savedY > 0) button.center = CGPointMake(savedX * parentView.bounds.size.width, savedY * parentView.bounds.size.height);
+    
+    Class targetClass = parentView.class;
+    if (!class_getInstanceMethod(targetClass, @selector(antforestHandlePan:))) {
+        class_addMethod(targetClass, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
+    }
+    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:parentView action:@selector(antforestHandlePan:)];
     [button addGestureRecognizer:pan];
     if (reveal) scheduleButtonCollapse(button);
     else setButtonCollapsed(button, YES, NO);
-    NSLog(@"[AntForestPort] button added");
 }
 
 static id unarchiveDataSafe(NSData *data, Class primaryClass) {
@@ -1148,10 +1188,11 @@ static void initializeManager(void) {
     NSData *bubbles = [defaults objectForKey:@"friendsBubbles"];
     NSData *names = [defaults objectForKey:@"friendsName"];
     NSData *logs = [defaults objectForKey:@"logRecord"];
+    NSData *ranks = [defaults objectForKey:@"cachedFriendsRank"];
     manager.friendsBubbles = [unarchiveDataSafe(bubbles, NSDictionary.class) mutableCopy] ?: [NSMutableDictionary dictionary];
     manager.friendsName = [unarchiveDataSafe(names, NSDictionary.class) mutableCopy] ?: [NSMutableDictionary dictionary];
+    manager.friendsRank = [unarchiveDataSafe(ranks, NSDictionary.class) mutableCopy] ?: [NSMutableDictionary dictionary];
     manager.logRecord = [unarchiveDataSafe(logs, NSArray.class) mutableCopy] ?: [NSMutableArray array];
-    manager.friendsRank = [NSMutableDictionary dictionary];
     manager.totalCollectedEnergy = [defaults integerForKey:@"totalCollectedEnergy"];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateFormat = @"yyyy-MM-dd";
@@ -1167,7 +1208,8 @@ static void initializeManager(void) {
     manager.enableSelfCollect = [defaults objectForKey:@"enableSelfCollect"] ? [defaults boolForKey:@"enableSelfCollect"] : YES;
     manager.enableAutoRain = [defaults objectForKey:@"enableAutoRain"] ? [defaults boolForKey:@"enableAutoRain"] : manager.enableAutoCollect;
     manager.enableAutoEarn = [defaults objectForKey:@"enableAutoEarn"] ? [defaults boolForKey:@"enableAutoEarn"] : YES;
-    manager.enableAutoRevive = [defaults boolForKey:@"enableAutoRevive"];
+    manager.enableAutoRevive = [defaults objectForKey:@"enableAutoRevive"] ? [defaults boolForKey:@"enableAutoRevive"] : YES;
+    manager.enableCleanOcean = [defaults objectForKey:@"enableCleanOcean"] ? [defaults boolForKey:@"enableCleanOcean"] : YES;
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
     manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
@@ -1235,7 +1277,6 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     }
     [manager matchFriendIdAndBubbles:value];
     if (manager.enableAutoCollect && manager.enableSelfCollect && isMyHomeResponse(value, manager)) {
-        // The canvas may still be drawing when the native home response arrives.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(700 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{ tryAutoCollectWaterGift(); });
     }
     return originalTransformResponseData(self, _cmd, value);
@@ -1259,6 +1300,15 @@ static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original) 
     return YES;
 }
 
+static void (*originalDTViewDidAppear)(UIViewController *self, SEL _cmd, BOOL animated);
+static void portDTViewDidAppear(UIViewController *self, SEL _cmd, BOOL animated) {
+    if (originalDTViewDidAppear) originalDTViewDidAppear(self, _cmd, animated);
+    NSString *clsName = NSStringFromClass(self.class);
+    if ([clsName containsString:@"Launcher"] || [clsName isEqualToString:@"DTViewController"]) {
+        addLogButton(self, NO);
+    }
+}
+
 __attribute__((constructor))
 static void installHooks(void) {
     @autoreleasepool {
@@ -1267,6 +1317,7 @@ static void installHooks(void) {
             shouldInstall = class_addMethod(NSProcessInfo.class, sel_registerName("antforestPortHooksInstalled"), (IMP)portInstallMarker, "v@:");
         }
         if (!shouldInstall) return;
+        initializeManager();
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
             shouldRevealLeafOnNextForestAppearance = YES;
             [[AFStepSimulator shared] installAvailableHooks];
@@ -1277,6 +1328,13 @@ static void installHooks(void) {
         class_addMethod(webController, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
         BOOL viewHooked = hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
         BOOL appearanceHooked = hookMethod(webController, @selector(viewDidAppear:), (IMP)portViewDidAppear, (IMP *)&originalViewDidAppear);
+        
+        Class dtController = NSClassFromString(@"DTViewController");
+        if (dtController) {
+            class_addMethod(dtController, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
+            hookMethod(dtController, @selector(viewDidAppear:), (IMP)portDTViewDidAppear, (IMP *)&originalDTViewDidAppear);
+        }
+        
         BOOL responseHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
         BOOL bridgeReadyHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
         NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d ready=%d", viewHooked, appearanceHooked, responseHooked, bridgeReadyHooked);
