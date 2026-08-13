@@ -31,7 +31,23 @@
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v2.8.1 正式版：iOS 15 及以上请使用 [`AntForestPort-v2.8.1.dylib`](build/AntForestPort-v2.8.1.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v2.8.1-iOS14.dylib`](build/AntForestPort-v2.8.1-iOS14.dylib)。包含 iPhone 7 Plus/8 Plus 界面显示修复、全量 200+ 好友排行榜拉取与无限翻页、自动复活好友过期能量、神奇海洋自动清理与拼图搜集。产物均为 `arm64 + arm64e` 通用 dylib。
+> v2.8.2 正式版：iOS 15 及以上请使用 [`AntForestPort-v2.8.2.dylib`](build/AntForestPort-v2.8.2.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v2.8.2-iOS14.dylib`](build/AntForestPort-v2.8.2-iOS14.dylib)。包含蚂蚁森林与神奇海洋全流程拟人化随机动态抖动延时、服务端风控限流自动休眠熔断机制、日志重复输出消除与神奇海洋双重兜底托底搜寻。产物均为 `arm64 + arm64e` 通用 dylib。
+
+## v2.8.2 正式版更新说明
+
+- **蚂蚁森林与神奇海洋全流程拟人化随机动态抖动延时（Human Jitter）**：
+  - 气泡查询：`450ms ~ 850ms` 动态随机延时；
+  - 气泡收取：`350ms ~ 750ms` 动态随机延时；
+  - 排行榜 20 人组校验：`180ms ~ 380ms` 动态随机沉淀；
+  - 神奇海洋清理：`2.5s ~ 4.0s` 动态随机平滑间隔；
+  - 彻底摆脱固定周期与毫秒并发机械特征，极大降低触发支付宝反作弊限流（如提示“操作过于频繁”或“近期操作存在异常”）的风险。
+- **服务端风控限流自动休眠熔断机制（Circuit Breaker）**：
+  - 实时检测服务端响应中的风控与限流标志（覆盖 `LIMIT_EXCEEDED`、`SECURITY_RISK`、`ACCESS_DENIED` 以及“近期操作存在异常”、“频繁”等提示）；
+  - 一旦触发风控响应，插件自动打断本轮扫描并进入安全休眠保护状态，防止持续尝试导致风控升级，全力保障账号安全。
+- **消除日志重复输出与并发去重优化**：
+  - 加入定时器启动防重复去重、本人账号识别与首页查询防抖动去重，大幅提升日志流程清晰度。
+- **神奇海洋全自动触发与全量排行榜双重兜底**：
+  - 扩展神奇海洋 RPC 回包字段的多重兼容解析（覆盖 `friendList`、`friendOceanList`、`friendSeaList`、`friendInfoList`、`oceanFriendList` 等所有已知数据结构），并在全量好友排行榜扫描时增加神奇海洋全自动托底搜寻，彻底解决部分场景下神奇海洋不自动触发的问题。
 
 ## v2.8.1 正式版更新说明
 
@@ -59,13 +75,13 @@
 
 ## iOS 14 独立版本
 
-- iOS 14 请使用独立包 `AntForestPort-v2.8.1-iOS14.dylib`；该兼容包包含 v2.8.1 正式功能，不替代 iOS 15+ 的标准包。
+- iOS 14 请使用独立包 `AntForestPort-v2.8.2-iOS14.dylib`；该兼容包包含 v2.8.2 正式功能，不替代 iOS 15+ 的标准包。
 - 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
 - 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.10、TrollFools 环境完成注入与功能验证。
 
 ## 使用说明
 
-1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8.1.dylib`](build/AntForestPort-v2.8.1.dylib) 到支付宝。
+1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8.2.dylib`](build/AntForestPort-v2.8.2.dylib) 到支付宝。
 2. 注入前移除旧的 `AntForestProbe.dylib`，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，直接拖动叶子图标。静置约 2 秒后叶子会自动贴边缩小；左侧向右滑、右侧向左滑可再次展开。
@@ -95,7 +111,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 
 后台使用步骤：
 
-1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8.dylib` 和 `ImmortalizerJailed.dylib`。
+1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8.2.dylib` 和 `ImmortalizerJailed.dylib`。
 2. 完全杀掉并重新打开支付宝，进入蚂蚁森林首页。
 3. 点击叶子按钮，在收取记录面板中开启“自动收取”。
 4. 点击 ImmortalizerJailed 的浮动按钮启用保活。
@@ -117,7 +133,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | 标准 v2.8.1 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.8.1-iOS14.dylib` |
+| iOS | 标准 v2.8.2 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.8.2-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -152,26 +168,26 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 需要完整 Xcode：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.1.dylib
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.2.dylib
 ```
 
-本地 v2.8.1 正式产物位于 `build/AntForestPort-v2.8.1.dylib`。
+本地 v2.8.2 正式产物位于 `build/AntForestPort-v2.8.2.dylib`。
 
 GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
 在 iOS 14 独立兼容分支构建 iOS 14 包：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.1-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.2-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
 ```
 
-产物为 `build/AntForestPort-v2.8.1-iOS14.dylib`。
+产物为 `build/AntForestPort-v2.8.2-iOS14.dylib`。
 
 ## 开发分支约定
 
-- `release/v2.8.1`：正式维护线；包含 iPhone 7 Plus/8 Plus 面板显示修复、全量 200+ 好友排行榜拉取、自动无限翻页、自动复活好友能量、神奇海洋清理与拼图搜集。
-- `release/v2.8`：上一正式维护线。
-- `release/v2.8.1-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
+- `release/v2.8.2`：正式维护线；包含神奇海洋全自动触发与全量排行榜托底双重兜底、iPhone 7 Plus/8 Plus 面板显示修复、全量 200+ 好友排行榜拉取、自动无限翻页、自动复活好友能量。
+- `release/v2.8.1`：上一正式维护线。
+- `release/v2.8.2-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
 - `feature/earn-energy-probe`：保留“赚能量”玩法的实验与诊断记录；已验证的自动点击逻辑已合入正式开发线。
 - 后续每项新功能或缺陷修复均从独立 `feature/...` 或 `fix/...` 分支开发；真机验证后再合入新的 `release/...` 分支，避免实验代码影响稳定版。
 

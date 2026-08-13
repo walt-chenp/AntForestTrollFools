@@ -675,7 +675,9 @@ static NSInteger reviveDailyCount(void) {
 }
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
-    // 如果已有定时器，先停止它
+    if (self.autoCollectTimer.isValid && self.collectInterval == interval) {
+        return;
+    }
     [self.autoCollectTimer invalidate];
     self.autoCollectTimer = nil;
     self.collectInterval = interval;
@@ -873,7 +875,14 @@ NSString* getCurrentDateTimeString() {
     });
 }
 
+static NSTimeInterval lastMyBubblesQueryTime = 0;
+
 -(void)queryMyBubbles {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - lastMyBubblesQueryTime < 3.0) return;
+    lastMyBubblesQueryTime = now;
+    
+    [self recordStage:@"收取 · 请求本人首页（含赠能）"];
     [[AntForestManager sharedLock] lock];
     
     NSString *version = @"20241025";
@@ -907,7 +916,8 @@ NSString* getCurrentDateTimeString() {
         //FileLog(@"anthook queryFriendsBubbles: %@",friendId);
     }
     
-    [NSThread sleepForTimeInterval:0.5];
+    double randomDelay = 0.45 + (arc4random_uniform(400) / 1000.0);
+    [NSThread sleepForTimeInterval:randomDelay];
     [[AntForestManager sharedLock] unlock];
 }
 
@@ -943,7 +953,8 @@ NSString* getCurrentDateTimeString() {
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook collectBubbles: %@ | [%@] ",uid,bids);
     }
-    [NSThread sleepForTimeInterval:0.3];
+    double collectRandomDelay = 0.35 + (arc4random_uniform(400) / 1000.0);
+    [NSThread sleepForTimeInterval:collectRandomDelay];
     [[AntForestManager sharedLock] unlock];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         @synchronized (self) {
@@ -1033,17 +1044,30 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
     if([self jsBridge]) {
         [self recordStage:@"收取 · 请求神奇海洋好友列表"];
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
+        dispatch_async(globalSerialQueueQuery, ^{
+            [self cleanMyOcean];
+        });
     }
 }
 
+static NSMutableSet<NSString *> *inFlightOceanUids = nil;
+
 -(void)scanOceanForFriends:(NSArray<NSString *> *)friendIds {
     if (!self.enableCleanOcean || !friendIds.count) return;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        inFlightOceanUids = [NSMutableSet set];
+    });
+    
     NSString *today = getCurrentDateString();
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
     if (![[defaults stringForKey:@"oceanCleanedDate"] isEqualToString:today]) {
         [defaults setObject:today forKey:@"oceanCleanedDate"];
         [defaults setObject:@[] forKey:@"oceanCleanedFriendsToday"];
         [defaults setBool:NO forKey:@"oceanLimitReachedToday"];
+        @synchronized(inFlightOceanUids) {
+            [inFlightOceanUids removeAllObjects];
+        }
     }
     if ([defaults boolForKey:@"oceanLimitReachedToday"]) {
         static NSString *lastOceanLimitLogDate = nil;
@@ -1063,20 +1087,29 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
     }
     
     NSMutableArray<NSString *> *toClean = [NSMutableArray array];
-    for (NSString *uid in friendIds) {
-        if (!uid.length || [uid isEqualToString:self.myUserId]) continue;
-        if ([cleanedSet containsObject:uid]) continue;
-        [toClean addObject:uid];
-        if (cleanedSet.count + toClean.count >= 10) break;
+    @synchronized(inFlightOceanUids) {
+        for (NSString *uid in friendIds) {
+            if (!uid.length || [uid isEqualToString:self.myUserId]) continue;
+            if ([cleanedSet containsObject:uid]) continue;
+            if ([inFlightOceanUids containsObject:uid]) continue;
+            [toClean addObject:uid];
+            [inFlightOceanUids addObject:uid];
+            if (toClean.count >= 2 || (cleanedSet.count + inFlightOceanUids.count >= 10)) break;
+        }
     }
     
-    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮 %lu/10 位好友清理，本轮计划清理 %lu 位好友", (unsigned long)cleanedSet.count, (unsigned long)toClean.count]];
+    if (toClean.count == 0) return;
     
+    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮 %lu/10 位好友清理，本轮安排 %lu 位好友（安全随机间隔）", (unsigned long)cleanedSet.count, (unsigned long)toClean.count]];
+    
+    int64_t idx = 0;
     for (NSString *uid in toClean) {
-        dispatch_async(globalSerialQueueQuery, ^{
+        int64_t delayMs = (idx + 1) * 2500 + arc4random_uniform(1500);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayMs * NSEC_PER_MSEC)), globalSerialQueueQuery, ^{
             if ([[NSUserDefaults standardUserDefaults] boolForKey:@"oceanLimitReachedToday"]) return;
             [self cleanFriendsOcean:uid];
         });
+        idx++;
     }
 }
 
@@ -1165,6 +1198,8 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
             if (!self.enableAutoCollect || cycle != collectionCycle) break;
             [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验：第 %lu/%lu 组", (unsigned long)(index + 1), (unsigned long)groups.count]];
             [self queryRobFlag:groups[index]];
+            double rankGroupDelay = 0.18 + (arc4random_uniform(200) / 1000.0);
+            [NSThread sleepForTimeInterval:rankGroupDelay];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.enableAutoCollect && cycle == collectionCycle) [self startTakeLookContinuation];
@@ -1445,6 +1480,21 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
         if ([args isKindOfClass:NSDictionary.class]) {
             NSDictionary *dict = args;
             NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+            NSString *resultCode = [NSString stringWithFormat:@"%@", resData[@"resultCode"] ?: dict[@"resultCode"] ?: resData[@"resultStatus"] ?: dict[@"resultStatus"] ?: @""];
+            NSString *memo = [NSString stringWithFormat:@"%@", resData[@"memo"] ?: dict[@"memo"] ?: resData[@"resultMsg"] ?: dict[@"resultMsg"] ?: resData[@"errorMessage"] ?: @""];
+            if ([memo containsString:@"操作存在异常"] || [memo containsString:@"请稍后再试"] || [memo containsString:@"频繁"] || [resultCode isEqualToString:@"SECURITY_RISK"] || [resultCode isEqualToString:@"USER_OPERATE_LIMIT"]) {
+                static NSDate *lastForestRiskLogDate = nil;
+                if (!lastForestRiskLogDate || [[NSDate date] timeIntervalSinceDate:lastForestRiskLogDate] > 300) {
+                    lastForestRiskLogDate = [NSDate date];
+                    [self recordStage:@"⚠️ 警告 · 服务端提示“近期操作存在异常”，已触发安全熔断暂停本轮扫描（保护账号安全）"];
+                }
+                self.isScanRunning = NO;
+                return;
+            }
+            if ([resultCode isEqualToString:@"LIMIT_EXCEEDED"] || [resultCode isEqualToString:@"ACCESS_DENIED"] || [resultCode isEqualToString:@"FORBIDDEN"] || [memo containsString:@"拒绝"] || [memo containsString:@"代理"] || [memo containsString:@"风控"]) {
+                [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
+                [self recordStage:@"收取 · 神奇海洋：收到服务端安全风险拦截，已自动熔断暂停本日清理（保护账号安全）"];
+            }
             if (resData && (resData[@"cleanRewardVOS"] || resData[@"canClearFriendSeaToday"])) {
                 NSNumber *canClearToday = resData[@"canClearFriendSeaToday"];
                 if (canClearToday && [canClearToday boolValue] == NO) {
@@ -1488,27 +1538,31 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
                     }
                 }
             }
-            if (resData && (resData[@"friendList"] || resData[@"friendOceanList"] || resData[@"friendSeaList"] || resData[@"friendListVO"])) {
+            NSArray *list = nil;
+            if ([resData isKindOfClass:NSDictionary.class]) {
+                list = resData[@"friendList"] ?: resData[@"friendOceanList"] ?: resData[@"friendSeaList"] ?: resData[@"friendListVO"] ?: resData[@"friendInfoList"] ?: resData[@"friends"] ?: resData[@"oceanFriendList"] ?: resData[@"friendUserList"] ?: resData[@"oceanFriends"];
+            }
+            if (!list && [dict isKindOfClass:NSDictionary.class]) {
+                list = dict[@"friendList"] ?: dict[@"friendOceanList"] ?: dict[@"friendSeaList"] ?: dict[@"friendListVO"] ?: dict[@"friendInfoList"] ?: dict[@"friends"] ?: dict[@"oceanFriendList"];
+            }
+            if ([list isKindOfClass:NSArray.class] && list.count > 0) {
                 NSNumber *canClearFriendSeaToday = resData[@"canClearFriendSeaToday"] ?: resData[@"canCleanFriendSea"] ?: resData[@"canClearFriendSea"] ?: resData[@"canClearSea"];
                 NSInteger todayCleaned = [resData[@"todayCleanCount"] integerValue] ?: [resData[@"cleanedCount"] integerValue] ?: [resData[@"todayCleanedCount"] integerValue];
                 if ((canClearFriendSeaToday && [canClearFriendSeaToday boolValue] == NO) || todayCleaned >= 10) {
                     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
                     [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：服务端确认今日清理好友已达上限（%ld/10 位）", (long)MAX(10, todayCleaned)]];
-                    return;
-                }
-                NSArray *list = resData[@"friendList"] ?: resData[@"friendOceanList"] ?: resData[@"friendSeaList"] ?: resData[@"friendListVO"];
-                if ([list isKindOfClass:NSArray.class] && list.count > 0) {
+                } else {
                     NSMutableArray<NSString *> *cleanableFriends = [NSMutableArray array];
-                    for (NSDictionary *f in list) {
-                        if (![f isKindOfClass:NSDictionary.class]) continue;
-                        NSString *uid = [AntForestManager extractUserIdFromDictionary:f];
-                        BOOL canClean = [f[@"seaCleanable"] boolValue] || [f[@"canClean"] boolValue] || ([f[@"rubbishNumber"] integerValue] > 0) || ([f[@"cleanStatus"] integerValue] == 1);
-                        if (uid.length && (canClean || list.count <= 20)) {
-                            [cleanableFriends addObject:uid];
+                    for (id f in list) {
+                        if ([f isKindOfClass:NSDictionary.class]) {
+                            NSString *uid = [AntForestManager extractUserIdFromDictionary:f];
+                            BOOL canClean = [f[@"seaCleanable"] boolValue] || [f[@"canClean"] boolValue] || ([f[@"rubbishNumber"] integerValue] > 0) || ([f[@"cleanStatus"] integerValue] == 1);
+                            if (uid.length && (canClean || list.count <= 20)) [cleanableFriends addObject:uid];
+                        } else if ([f isKindOfClass:NSString.class]) {
+                            [cleanableFriends addObject:f];
                         }
                     }
                     if (cleanableFriends.count) {
-                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋列表：筛选出 %lu 位神奇海洋好友", (unsigned long)cleanableFriends.count]];
                         [self scanOceanForFriends:cleanableFriends];
                     }
                 }
@@ -1687,14 +1741,17 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
                 NSDictionary *myDict = resData[@"myself"];
                 NSString *userIdMy = [AntForestManager extractUserIdFromDictionary:myDict] ?: [myDict objectForKey:@"userId"];
                 if (userIdMy.length) {
-                    [[AntForestManager sharedInstance] setMyUserId:userIdMy];
-                    [self recordStage:@"收取 · 本人账户已识别"];
+                    if (!self.myUserId.length) {
+                        [[AntForestManager sharedInstance] setMyUserId:userIdMy];
+                        [self recordStage:@"收取 · 本人账户已识别"];
+                    } else {
+                        [[AntForestManager sharedInstance] setMyUserId:userIdMy];
+                    }
                 }
                 NSNumber *canCollectEnergy = [myDict objectForKey:@"canCollectEnergy"];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 本人能量状态：%@", [canCollectEnergy isEqualToNumber:@1] ? @"可收" : @"暂无成熟能量"]];
                 if(self.enableSelfCollect) {
                     dispatch_async(globalSerialQueueQuery, ^{
-                        [self recordStage:@"收取 · 请求本人首页（含赠能）"];
                         [[AntForestManager sharedInstance] queryMyBubbles];
                     });
                 }
@@ -1767,6 +1824,9 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
                     } else {
                         [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
                     }
+                }
+                if (self.enableCleanOcean && fr.allKeys.count > 0) {
+                    [self scanOceanForFriends:fr.allKeys];
                 }
                 BOOL hasMore = [resData[@"hasMore"] boolValue] || [resData[@"hasNext"] boolValue];
                 NSInteger nextIndex = [resData[@"nextStartIndex"] integerValue] ?: [resData[@"startIndex"] integerValue] + rankTotalArr.count;
