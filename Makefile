@@ -1,8 +1,8 @@
 SDK := $(shell xcrun --sdk iphoneos --show-sdk-path)
 CLANG := $(shell xcrun --sdk iphoneos --find clang)
 LIPO := $(shell xcrun --sdk iphoneos --find lipo)
-TARGET := build/AntForestPort-v2.8.2.dylib
-IOS14_TARGET := build/AntForestPort-v2.8.2-iOS14.dylib
+TARGET := build/AntForestPort-v2.8.3-1.dylib
+IOS14_TARGET := build/AntForestPort-v2.8.3-1-iOS14.dylib
 ARM64_TARGET := build/AntForestPort-arm64.dylib
 ARM64E_TARGET := build/AntForestPort-arm64e.dylib
 SOURCES := PortEntry.m antforest/AntForestManager.m antforest/StepSimulator.m antforest/DebugTool/Tool.m antforest/DebugTool/UIView+Toast.m

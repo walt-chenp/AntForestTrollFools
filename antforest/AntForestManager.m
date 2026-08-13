@@ -264,6 +264,14 @@ static NSInteger reviveDailyCount(void) {
         if (reviveRunning) [self reviveStopWithReason:@"任务已停止或桥接不可用"];
         return;
     }
+    if (reviveDailyCount() >= 6) {
+        [NSUserDefaults.standardUserDefaults setInteger:6 forKey:@"autoReviveCount"];
+        [self recordStage:@"收取 · 复活 · 帮复活能量已达支付宝官方上限（6/6 次）"];
+        reviveRunning = NO;
+        reviveCurrentUserId = nil;
+        [reviveQueue removeAllObjects];
+        return;
+    }
     if (!reviveQueue.count) { reviveRunning = NO; reviveCurrentUserId = nil; [self reviveRefreshRewardIfNeeded]; return; }
     reviveRunning = YES;
     reviveCurrentUserId = reviveQueue.firstObject;
@@ -273,21 +281,19 @@ static NSInteger reviveDailyCount(void) {
     NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[reviveCurrentUserId]] ?: @"好友";
     NSDictionary *body = @{ @"targetUserId": reviveCurrentUserId, @"version": @"20241025", @"source": @"chInfo_ch_appcenter__chsub_9patch" };
     NSDictionary *data = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": @"alipay.antforest.forest.h5.protectBubble", @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": [NSString stringWithFormat:@"revive_%@.%@", timestamp, [AntForestManager getNumberRandom:12]] };
-    NSDictionary *dataOld = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": @"alipay.antmember.forest.h5.protectBubble", @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": [NSString stringWithFormat:@"revive_%@.%@_old", timestamp, [AntForestManager getNumberRandom:12]] };
     NSString *queue1 = waterJSONString(@[data]);
-    NSString *queue2 = waterJSONString(@[dataOld]);
     if (!queue1.length) { [self reviveStopWithReason:@"请求编码失败"]; return; }
     NSString *url = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch", reviveCurrentUserId];
     [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 请求帮助好友“%@”复活能量", name]];
     [self.jsBridge _doFlushMessageQueue:queue1 url:url];
-    if (queue2.length) [self.jsBridge _doFlushMessageQueue:queue2 url:url];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (reviveRunning && token == reviveRequestToken) [self reviveStopWithReason:@"回包超时，已停止"];
     });
 }
 
 - (void)queueAutoReviveForUser:(NSString *)userId {
     if (!self.enableAutoRevive || !userId.length || [userId isEqualToString:self.myUserId]) return;
+    if (reviveDailyCount() >= 6) return;
     if (reviveRunning && [reviveCurrentUserId isEqualToString:userId]) return;
     if ([reviveQueue containsObject:userId] || [reviveQueuedIds containsObject:userId]) return;
     NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[userId]] ?: @"好友";
@@ -302,15 +308,21 @@ static NSInteger reviveDailyCount(void) {
     if (!resData) return;
     NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[reviveCurrentUserId]] ?: @"好友";
     if (waterResponseSucceeded(resData) || [resData[@"success"] boolValue] || [[resData[@"resultCode"] description] isEqualToString:@"SUCCESS"]) {
-        NSInteger count = reviveDailyCount() + 1;
-        [NSUserDefaults.standardUserDefaults setInteger:count forKey:@"autoReviveCount"];
-        if (reviveCurrentUserId.length) [reviveQueuedIds addObject:reviveCurrentUserId];
-        [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 成功帮助好友“%@”复活能量（今日 %ld/6 次）", name, (long)count]];
+        NSInteger count = reviveDailyCount();
+        if (reviveCurrentUserId.length && ![reviveQueuedIds containsObject:reviveCurrentUserId]) {
+            [reviveQueuedIds addObject:reviveCurrentUserId];
+            count++;
+            [NSUserDefaults.standardUserDefaults setInteger:MIN((NSInteger)6, count) forKey:@"autoReviveCount"];
+        }
+        [self recordStage:[NSString stringWithFormat:@"收取 · 复活 · 成功帮助好友“%@”复活能量（今日 %ld/6 次）", name, (long)MIN((NSInteger)6, count)]];
         reviveRewardRefreshNeeded = YES;
         reviveRunning = NO;
         reviveCurrentUserId = nil;
         reviveRequestToken++;
-        [self reviveSendNext];
+        double delaySec = 1.5 + (arc4random_uniform(1500) / 1000.0);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.enableAutoRevive) [self reviveSendNext];
+        });
     } else {
         NSString *code = waterResponseCode(resData);
         if ([code isEqualToString:@"TARGET_USER_PROTECT_BY_ENERGY_SHIELD"]) {
@@ -319,7 +331,10 @@ static NSInteger reviveDailyCount(void) {
             reviveRunning = NO;
             reviveCurrentUserId = nil;
             reviveRequestToken++;
-            [self reviveSendNext];
+            double delaySec = 1.2 + (arc4random_uniform(1000) / 1000.0);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                if (self.enableAutoRevive) [self reviveSendNext];
+            });
             return;
         }
         if ([code containsString:@"LIMIT"] || [code containsString:@"EXCEED"] || [code containsString:@"OVER"] || [code containsString:@"TIRED"] || [code isEqualToString:@"PROTECT_REBORN_TIRED"]) {
@@ -335,7 +350,10 @@ static NSInteger reviveDailyCount(void) {
         reviveRunning = NO;
         reviveCurrentUserId = nil;
         reviveRequestToken++;
-        [self reviveSendNext];
+        double delaySec = 1.2 + (arc4random_uniform(1000) / 1000.0);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.enableAutoRevive) [self reviveSendNext];
+        });
     }
 }
 
@@ -1051,9 +1069,11 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
 }
 
 static NSMutableSet<NSString *> *inFlightOceanUids = nil;
+static BOOL oceanScheduledInCurrentRound = NO;
 
 -(void)scanOceanForFriends:(NSArray<NSString *> *)friendIds {
     if (!self.enableCleanOcean || !friendIds.count) return;
+    if (oceanScheduledInCurrentRound) return;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         inFlightOceanUids = [NSMutableSet set];
@@ -1100,6 +1120,7 @@ static NSMutableSet<NSString *> *inFlightOceanUids = nil;
     
     if (toClean.count == 0) return;
     
+    oceanScheduledInCurrentRound = YES;
     [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮 %lu/10 位好友清理，本轮安排 %lu 位好友（安全随机间隔）", (unsigned long)cleanedSet.count, (unsigned long)toClean.count]];
     
     int64_t idx = 0;
@@ -1220,6 +1241,7 @@ static NSMutableSet<NSString *> *inFlightOceanUids = nil;
             return;
         }
         self.isScanRunning = YES;
+        oceanScheduledInCurrentRound = NO;
         lastCollectStartedAt = NSDate.date;
         collectionCycle++;
         NSUInteger cycle = collectionCycle;
@@ -1506,12 +1528,14 @@ static NSMutableSet<NSString *> *inFlightOceanUids = nil;
                     NSString *cleanedUid = resData[@"cleanedUserId"] ?: resData[@"userId"] ?: dict[@"cleanedUserId"] ?: self.lastCleanedOceanUserId;
                     BOOL isSelfOcean = !cleanedUid.length || [cleanedUid isEqualToString:self.myUserId];
                     NSString *targetName = @"自己";
+                    NSInteger currentCleanedCount = 0;
                     if (!isSelfOcean) {
                         NSString *displayName = [self waterDisplayNameForUser:cleanedUid];
                         targetName = displayName.length ? [NSString stringWithFormat:@"好友“%@”", displayName] : @"好友";
                         NSArray *cleanedArr = [[NSUserDefaults standardUserDefaults] arrayForKey:@"oceanCleanedFriendsToday"] ?: @[];
                         NSMutableSet *cleanedSet = [NSMutableSet setWithArray:cleanedArr];
                         [cleanedSet addObject:cleanedUid];
+                        currentCleanedCount = cleanedSet.count;
                         [[NSUserDefaults standardUserDefaults] setObject:cleanedSet.allObjects forKey:@"oceanCleanedFriendsToday"];
                         if (cleanedSet.count >= 10) {
                             [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
@@ -1521,10 +1545,18 @@ static NSMutableSet<NSString *> *inFlightOceanUids = nil;
                     NSDictionary *first = rewards.firstObject;
                     NSString *name = first[@"name"] ?: @"垃圾";
                     NSArray *attach = [first[@"attachRewardBOList"] isKindOfClass:NSArray.class] ? first[@"attachRewardBOList"] : nil;
-                    if (attach.count > 0) {
-                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：获得%@的拼图碎片与%@", targetName, name]];
+                    if (!isSelfOcean) {
+                        if (attach.count > 0) {
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：获得%@的拼图碎片与%@（今日帮 %ld/10 位）", targetName, name, (long)currentCleanedCount]];
+                        } else {
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：清理%@的%@（今日帮 %ld/10 位）", targetName, name, (long)currentCleanedCount]];
+                        }
                     } else {
-                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：清理%@的%@", targetName, name]];
+                        if (attach.count > 0) {
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：获得自己的拼图碎片与%@", name]];
+                        } else {
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：清理自己的%@", name]];
+                        }
                     }
                     if (isSelfOcean) {
                         myOceanCleanCount++;
