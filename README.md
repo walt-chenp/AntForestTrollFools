@@ -31,7 +31,14 @@
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v2.8.3 正式版：iOS 15 及以上请使用 [`AntForestPort-v2.8.3.dylib`](build/AntForestPort-v2.8.3.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v2.8.3-iOS14.dylib`](build/AntForestPort-v2.8.3-iOS14.dylib)。包含神奇海洋智能顺序清理队列（解决虚假占位锁死与无垃圾自动顺延）、好友清理成功实时进度递增显示（X/10位）、自动复活双重发包计数修复与拟人化延时。产物均为 `arm64 + arm64e` 通用 dylib。
+> v2.8.3-1 正式版：iOS 15 及以上请使用 [`AntForestPort-v2.8.3-1.dylib`](build/AntForestPort-v2.8.3-1.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v2.8.3-1-iOS14.dylib`](build/AntForestPort-v2.8.3-1-iOS14.dylib)。包含能量收取与好友气泡查询拟人化延时深度提速调优（提速 200% 以上）、神奇海洋智能顺序清理队列与实时进度递增显示（X/10位）、自动复活双重发包计数修复与拟人化延时。产物均为 `arm64 + arm64e` 通用 dylib。
+
+## v2.8.3-1 正式版更新说明
+
+- **能量收取与好友气泡查询拟人化动态延时深度提速调优（整体提速 200% 以上）**：
+  - **好友气泡查询延时**：从原 `450ms ~ 850ms` 深度优化为 **`180ms ~ 320ms`**，多好友无能量排查速度提升 2.5 倍，大幅缩短不同好友之间的等待跨度；
+  - **能量气泡收取延时**：从原 `350ms ~ 750ms` 优化为 **`120ms ~ 220ms`**，同一好友多颗气泡与跨好友收取连贯敏捷、行云流水；
+  - **本人首页与排行榜校验延时**：压缩同步等待时间至 `150ms ~ 250ms`，彻底解决扫描开始到收取第一个好友能量间隔过长的问题。
 
 ## v2.8.3 正式版更新说明
 
@@ -86,13 +93,13 @@
 
 ## iOS 14 独立版本
 
-- iOS 14 请使用独立包 `AntForestPort-v2.8.3-iOS14.dylib`；该兼容包包含 v2.8.3 正式功能，不替代 iOS 15+ 的标准包。
+- iOS 14 请使用独立包 `AntForestPort-v2.8.3-1-iOS14.dylib`；该兼容包包含 v2.8.3-1 正式功能，不替代 iOS 15+ 的标准包。
 - 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
 - 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.10、TrollFools 环境完成注入与功能验证。
 
 ## 使用说明
 
-1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8.3.dylib`](build/AntForestPort-v2.8.3.dylib) 到支付宝。
+1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v2.8.3-1.dylib`](build/AntForestPort-v2.8.3-1.dylib) 到支付宝。
 2. 注入前移除旧的 `AntForestProbe.dylib`，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，直接拖动叶子图标。静置约 2 秒后叶子会自动贴边缩小；左侧向右滑、右侧向左滑可再次展开。
@@ -122,7 +129,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 
 后台使用步骤：
 
-1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8.3.dylib` 和 `ImmortalizerJailed.dylib`。
+1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v2.8.3-1.dylib` 和 `ImmortalizerJailed.dylib`。
 2. 完全杀掉并重新打开支付宝，进入蚂蚁森林首页。
 3. 点击叶子按钮，在收取记录面板中开启“自动收取”。
 4. 点击 ImmortalizerJailed 的浮动按钮启用保活。
@@ -144,7 +151,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | 标准 v2.8.3 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.8.3-iOS14.dylib` |
+| iOS | 标准 v2.8.3-1 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.8.3-1-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -179,26 +186,26 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 需要完整 Xcode：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.3.dylib
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.3-1.dylib
 ```
 
-本地 v2.8.3 正式产物位于 `build/AntForestPort-v2.8.3.dylib`。
+本地 v2.8.3-1 正式产物位于 `build/AntForestPort-v2.8.3-1.dylib`。
 
 GitHub Release 的通用 dylib 按 `AntForestPort-vX.Y.dylib` 命名。
 
 在 iOS 14 独立兼容分支构建 iOS 14 包：
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.3-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make TARGET=build/AntForestPort-v2.8.3-1-iOS14.dylib IOS_DEPLOYMENT_TARGET=14.0
 ```
 
-产物为 `build/AntForestPort-v2.8.3-iOS14.dylib`。
+产物为 `build/AntForestPort-v2.8.3-1-iOS14.dylib`。
 
 ## 开发分支约定
 
-- `release/v2.8.3`：正式维护线；包含神奇海洋智能顺序清理队列（解决虚假占位锁死与无垃圾自动顺延）、好友清理成功实时进度递增显示（X/10位）、自动复活双重发包计数修复与拟人化延时。
-- `release/v2.8.2`：上一正式维护线。
-- `release/v2.8.3-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
+- `release/v2.8.3-1`：正式维护线；包含能量收取与好友气泡查询拟人化延时深度提速调优、神奇海洋智能顺序清理队列（解决虚假占位锁死与无垃圾自动顺延）、好友清理成功实时进度递增显示（X/10位）、自动复活双重发包计数修复与拟人化延时。
+- `release/v2.8.3`：上一正式维护线。
+- `release/v2.8.3-1-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
 - `feature/earn-energy-probe`：保留“赚能量”玩法的实验与诊断记录；已验证的自动点击逻辑已合入正式开发线。
 - 后续每项新功能或缺陷修复均从独立 `feature/...` 或 `fix/...` 分支开发；真机验证后再合入新的 `release/...` 分支，避免实验代码影响稳定版。
 

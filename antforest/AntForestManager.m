@@ -914,7 +914,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
         //FileLog(@"anthook queryMyBubbles");
     }
     
-    [NSThread sleepForTimeInterval:0.5];
+    [NSThread sleepForTimeInterval:0.18];
     [[AntForestManager sharedLock] unlock];
 }
 
@@ -934,7 +934,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
         //FileLog(@"anthook queryFriendsBubbles: %@",friendId);
     }
     
-    double randomDelay = 0.45 + (arc4random_uniform(400) / 1000.0);
+    double randomDelay = 0.18 + (arc4random_uniform(140) / 1000.0);
     [NSThread sleepForTimeInterval:randomDelay];
     [[AntForestManager sharedLock] unlock];
 }
@@ -971,7 +971,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
         //FileLog(@"anthook collectBubbles: %@ | [%@] ",uid,bids);
     }
-    double collectRandomDelay = 0.35 + (arc4random_uniform(400) / 1000.0);
+    double collectRandomDelay = 0.12 + (arc4random_uniform(100) / 1000.0);
     [NSThread sleepForTimeInterval:collectRandomDelay];
     [[AntForestManager sharedLock] unlock];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1105,9 +1105,9 @@ static const NSUInteger kOceanMaxCleanPerRound = 5;
     
     NSArray *cleanedArr = [defaults arrayForKey:@"oceanCleanedFriendsToday"] ?: @[];
     NSMutableSet *cleanedSet = [NSMutableSet setWithArray:cleanedArr];
-    if (cleanedSet.count >= 10) {
+    if (cleanedSet.count >= 20) {
         [defaults setBool:YES forKey:@"oceanLimitReachedToday"];
-        [self recordStage:@"收取 · 神奇海洋：今日已帮满 10 位好友清理，已达每日上限"];
+        [self recordStage:@"收取 · 神奇海洋：今日已帮满 20 位好友清理，已达每日上限"];
         oceanRunning = NO;
         oceanCurrentUserId = nil;
         [oceanQueue removeAllObjects];
@@ -1176,7 +1176,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
     
     NSArray *cleanedArr = [defaults arrayForKey:@"oceanCleanedFriendsToday"] ?: @[];
     NSMutableSet *cleanedSet = [NSMutableSet setWithArray:cleanedArr];
-    if (cleanedSet.count >= 10) return;
+    if (cleanedSet.count >= 20) return;
     
     NSUInteger added = 0;
     for (NSString *uid in friendIds) {
@@ -1191,7 +1191,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
     if (!oceanRunning && oceanQueue.count > 0) {
         if (!oceanPlanLoggedThisRound) {
             oceanPlanLoggedThisRound = YES;
-            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮 %lu/10 位好友清理，已规划 %lu 位候选好友（安全随机间隔）", (unsigned long)cleanedSet.count, (unsigned long)oceanQueue.count]];
+            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮 %lu/20 位好友清理，已规划 %lu 位候选好友（安全随机间隔）", (unsigned long)cleanedSet.count, (unsigned long)oceanQueue.count]];
         }
         [self oceanSendNext];
     }
@@ -1236,7 +1236,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
         //FileLog(@"uids:%@", uids);
         //FileLog(@"anthook queryRobFlag");
     }
-    [NSThread sleepForTimeInterval:0.5];
+    double robFlagDelay = 0.15 + (arc4random_uniform(100) / 1000.0);
+    [NSThread sleepForTimeInterval:robFlagDelay];
     [[AntForestManager sharedLock] unlock];
 }
 
@@ -1585,7 +1586,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 NSNumber *canClearToday = resData[@"canClearFriendSeaToday"];
                 if (canClearToday && [canClearToday boolValue] == NO) {
                     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
-                    [self recordStage:@"收取 · 神奇海洋：服务端确认今日清理已达上限"];
+                    [self recordStage:@"收取 · 神奇海洋：服务端确认今日海域清理已达上限（20/20 位）"];
+                    [self oceanStopWithReason:nil];
                 }
                 NSArray *rewards = resData[@"cleanRewardVOS"];
                 NSString *cleanedUid = resData[@"cleanedUserId"] ?: resData[@"userId"] ?: dict[@"cleanedUserId"] ?: oceanCurrentUserId ?: self.lastCleanedOceanUserId;
@@ -1601,9 +1603,10 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         if (cleanedUid.length) [cleanedSet addObject:cleanedUid];
                         currentCleanedCount = cleanedSet.count;
                         [[NSUserDefaults standardUserDefaults] setObject:cleanedSet.allObjects forKey:@"oceanCleanedFriendsToday"];
-                        if (cleanedSet.count >= 10) {
+                        if (cleanedSet.count >= 20) {
                             [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
-                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮满 10 位好友清理，已达每日上限"]];
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：今日已帮满 20 位好友清理，已达每日上限"]];
+                            [self oceanStopWithReason:nil];
                         }
                         oceanCleanedInCurrentRound++;
                     }
@@ -1612,9 +1615,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     NSArray *attach = [first[@"attachRewardBOList"] isKindOfClass:NSArray.class] ? first[@"attachRewardBOList"] : nil;
                     if (!isSelfOcean) {
                         if (attach.count > 0) {
-                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：获得%@的拼图碎片与%@（今日帮 %ld/10 位）", targetName, name, (long)currentCleanedCount]];
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：获得%@的拼图碎片与%@（今日帮 %ld/20 位）", targetName, name, (long)currentCleanedCount]];
                         } else {
-                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：清理%@的%@（今日帮 %ld/10 位）", targetName, name, (long)currentCleanedCount]];
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：清理%@的%@（今日帮 %ld/20 位）", targetName, name, (long)currentCleanedCount]];
                         }
                     } else {
                         if (attach.count > 0) {
@@ -1645,14 +1648,20 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     NSString *displayName = [self waterDisplayNameForUser:cleanedUid];
                     NSString *name = displayName.length ? [NSString stringWithFormat:@"好友“%@”", displayName] : @"好友";
                     NSString *failMsg = resData[@"resultDesc"] ?: resData[@"resultMsg"] ?: dict[@"resultDesc"] ?: dict[@"resultMsg"] ?: @"海域暂无可清理垃圾，尝试下一位";
-                    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：%@%@", name, failMsg]];
-                    oceanRunning = NO;
-                    oceanCurrentUserId = nil;
-                    oceanRequestToken++;
-                    double delaySec = 1.0 + (arc4random_uniform(800) / 1000.0);
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        if (self.enableCleanOcean) [self oceanSendNext];
-                    });
+                    if ([failMsg containsString:@"上限"] || [failMsg containsString:@"已达"] || [failMsg containsString:@"20次"] || [resultCode isEqualToString:@"CLEAN_TIMES_EXCEED"] || [resultCode isEqualToString:@"USER_CLEAN_TIRED"]) {
+                        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
+                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：服务端确认今日清理已达上限（%@）", failMsg]];
+                        [self oceanStopWithReason:nil];
+                    } else {
+                        [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：%@%@", name, failMsg]];
+                        oceanRunning = NO;
+                        oceanCurrentUserId = nil;
+                        oceanRequestToken++;
+                        double delaySec = 1.0 + (arc4random_uniform(800) / 1000.0);
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            if (self.enableCleanOcean) [self oceanSendNext];
+                        });
+                    }
                 }
             }
             NSArray *list = nil;
@@ -1665,9 +1674,10 @@ static BOOL oceanPlanLoggedThisRound = NO;
             if ([list isKindOfClass:NSArray.class] && list.count > 0) {
                 NSNumber *canClearFriendSeaToday = resData[@"canClearFriendSeaToday"] ?: resData[@"canCleanFriendSea"] ?: resData[@"canClearFriendSea"] ?: resData[@"canClearSea"];
                 NSInteger todayCleaned = [resData[@"todayCleanCount"] integerValue] ?: [resData[@"cleanedCount"] integerValue] ?: [resData[@"todayCleanedCount"] integerValue];
-                if ((canClearFriendSeaToday && [canClearFriendSeaToday boolValue] == NO) || todayCleaned >= 10) {
+                if ((canClearFriendSeaToday && [canClearFriendSeaToday boolValue] == NO) || todayCleaned >= 20) {
                     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
-                    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：服务端确认今日清理好友已达上限（%ld/10 位）", (long)MAX(10, todayCleaned)]];
+                    [self recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋：服务端确认今日清理好友已达上限（%ld/20 位）", (long)MAX(20, todayCleaned)]];
+                    [self oceanStopWithReason:nil];
                 } else {
                     NSMutableArray<NSString *> *cleanableFriends = [NSMutableArray array];
                     for (id f in list) {

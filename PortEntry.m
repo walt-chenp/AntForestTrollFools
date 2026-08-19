@@ -747,6 +747,13 @@ static void installEarnEnergyCollector(id controller) {
     UIView *divider2 = [[UIView alloc] init]; divider2.backgroundColor = UIColor.systemGray5Color; divider2.translatesAutoresizingMaskIntoConstraints = NO;
 
     [self.view addSubview:grabber];
+    UILabel *versionLabel = [[UILabel alloc] init];
+    versionLabel.text = @"当前版本：v2.8.3-1";
+    versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
+    versionLabel.textColor = [UIColor systemGray2Color];
+    versionLabel.textAlignment = NSTextAlignmentCenter;
+    versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
     [self.view addSubview:titleIcon];
     [self.view addSubview:title];
     [self.view addSubview:settingsButton];
@@ -755,6 +762,7 @@ static void installEarnEnergyCollector(id controller) {
     [self.view addSubview:stats];
     [self.view addSubview:card];
     [self.view addSubview:self.tableView];
+    [self.view addSubview:versionLabel];
     [card addSubview:autoRow];
     [card addSubview:selfRow];
     [card addSubview:rainRow];
@@ -804,7 +812,9 @@ static void installEarnEnergyCollector(id controller) {
         [self.tableView.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:8],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-12],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:versionLabel.topAnchor constant:-6],
+        [versionLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [versionLabel.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-4],
     ]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:@"LogUpdated" object:nil];
     [self refresh];
