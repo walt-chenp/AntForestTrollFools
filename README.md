@@ -159,9 +159,9 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | iOS | 标准 v2.8.3-1 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v2.8.3-1-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
-| 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
+| 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包；红巨魔注入可能会出现一些未知问题，非本插件原因。 |
 
-“支持巨魔商店 TrollStore”并不等于必然兼容：巨魔注入器 TrollFools 的注入能力、支付宝版本、私有类和响应字段也必须匹配。
+“支持巨魔商店 TrollStore”并不等于必然兼容：巨魔注入器 TrollFools 的注入能力、支付宝版本、私有类和响应字段也必须匹配。红巨魔需自行测试，本插件不保证可用。
 
 典型设备：iPhone X、iPhone 8/8 Plus、iPhone 7 等为 `arm64`；iPhone XS/XR、iPhone 11 至 iPhone 16 系列为 `arm64e`。
 
