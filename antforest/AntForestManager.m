@@ -694,8 +694,33 @@ static NSInteger reviveDailyCount(void) {
 
 static NSMutableArray<NSString *> *patrolProbeLogs = nil;
 
+static BOOL isNoiseProbeLog(NSString *log) {
+    if (!log) return YES;
+    if ([log containsString:@"deliverByPageId"] ||
+        [log containsString:@"ANTFOREST_GAME_CENTER_FLOW"] ||
+        [log containsString:@"offlineResources"] ||
+        [log containsString:@"manifest.json"] ||
+        [log containsString:@"runtime."] ||
+        [log containsString:@"all_vendor."] ||
+        [log containsString:@"galacean_downgrade"] ||
+        [log containsString:@"signInWarmCopyConfig"] ||
+        [log containsString:@"swiper.min"] ||
+        [log containsString:@"dataPrefetch"] ||
+        [log containsString:@"contactsDicArray"] ||
+        [log containsString:@"recentApps"] ||
+        [log containsString:@"systemMemoryLevel"] ||
+        [log containsString:@"screenReaderEnabled"] ||
+        [log containsString:@"SHOULDUSENEWTOUCHEVENT"] ||
+        [log containsString:@"\"safeArea\""]) {
+        return YES;
+    }
+    return NO;
+}
+
 - (void)recordProbeLog:(NSString *)log {
     if (!log.length) return;
+    if (isNoiseProbeLog(log)) return; // 过滤掉无关的数百KB营销游戏列表与系统UI探针
+    
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         patrolProbeLogs = [NSMutableArray array];
@@ -704,7 +729,7 @@ static NSMutableArray<NSString *> *patrolProbeLogs = nil;
     NSString *entry = [NSString stringWithFormat:@"[%@] %@", timeStr, log];
     @synchronized (patrolProbeLogs) {
         [patrolProbeLogs addObject:entry];
-        if (patrolProbeLogs.count > 300) {
+        if (patrolProbeLogs.count > 500) {
             [patrolProbeLogs removeObjectAtIndex:0];
         }
     }

@@ -182,6 +182,108 @@ static void installEnergyRainCollector(id controller) {
     });
 }
 
+static BOOL isPatrolURL(NSURL *url) {
+    NSString *str = url.absoluteString;
+    return [str containsString:@"68687842"] || [str containsString:@"protect.html"] || [str containsString:@"animalBook.html"] || [str containsString:@"protectedArea.html"];
+}
+
+static void installPatrolAutoPilot(id controller) {
+    if (![AntForestManager sharedInstance].enableAutoPatrol) return;
+    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) return;
+    
+    NSString *script = @"(()=>{if(window.__afPatrolInstalled)return'already';"
+    "window.__afPatrolInstalled=true;"
+    "function sendLog(data){try{prompt('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
+    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0};"
+    "function findAndClick(keywords){"
+    "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img'));"
+    "for(let el of els){"
+    "const txt=(el.innerText||el.textContent||'').trim();"
+    "const alt=(el.getAttribute('alt')||'').trim();"
+    "const aria=(el.getAttribute('aria-label')||'').trim();"
+    "for(let kw of keywords){"
+    "if(txt===kw||alt===kw||aria===kw||(kw.length>2&&(txt.includes(kw)||alt.includes(kw)))){ "
+    "const rect=el.getBoundingClientRect();"
+    "if(rect.width>0&&rect.height>0&&el.offsetParent!==null){"
+    "el.click();return true;"
+    "}}}"
+    "}return false;}"
+    "function handleEvents(events){"
+    "if(events&&Array.isArray(events)){"
+    "for(let ev of events){"
+    "if(ev.eventType==='material'&&ev.materialInfo&&ev.materialInfo.materialType==='quiz'){"
+    "const detail=ev.materialDetail||{};const q=detail.N_question||{};const correctIdx=q.correct;"
+    "sendLog({type:'AUTO-PATROL',action:'quiz_found',q:q.question,correct:correctIdx});"
+    "setTimeout(()=>{"
+    "const opts=document.querySelectorAll('.option,[class*=\"option\"],[class*=\"answer\"],[class*=\"item\"]');"
+    "if(opts&&opts[correctIdx]){opts[correctIdx].click();"
+    "setTimeout(()=>{findAndClick(['确定','确认','提交']);},400);}"
+    "},600);}"
+    "}}"
+    "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的']);},800);"
+    "}"
+    "function autoPatrolStep(){"
+    "if(patrolState.isBusy)return;"
+    "const now=Date.now();"
+    "if(now-patrolState.lastPatrolTime<2500)return;"
+    "if(patrolState.leftChance>0){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "sendLog({type:'AUTO-PATROL',action:'patrol_forward',leftChance:patrolState.leftChance});"
+    "findAndClick(['开始巡护','继续巡护','巡护']);"
+    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},3000);"
+    "}else if(patrolState.leftChance===0&&patrolState.usedStep<10000&&patrolState.leftStep>=2000){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "sendLog({type:'AUTO-PATROL',action:'exchange_step',leftStep:patrolState.leftStep,usedStep:patrolState.usedStep});"
+    "findAndClick(['兑换巡护机会','兑换步数','兑换']);"
+    "setTimeout(()=>{"
+    "findAndClick(['确认兑换','确定','兑换','我知道了']);"
+    "setTimeout(()=>{patrolState.isBusy=false;},1000);"
+    "},800);"
+    "}"
+    "if(location.href.includes('animalBook.html')){"
+    "findAndClick(['合成物种','一键合成','合成','立即派遣','派遣']);"
+    "}"
+    "}"
+    "function hookBridge(){"
+    "if(!window.AlipayJSBridge||!window.AlipayJSBridge.call){setTimeout(hookBridge,150);return;}"
+    "const _call=window.AlipayJSBridge.call;"
+    "window.AlipayJSBridge.call=function(name,params,cb){"
+    "if(name==='rpc'&&params){"
+    "const op=params.operationType||'';const req=params.requestData||null;"
+    "sendLog({type:'RPC-REQ',op:op,req:req});"
+    "const origCb=cb;"
+    "cb=function(res){"
+    "sendLog({type:'RPC-RES',op:op,res:res});"
+    "if(res){"
+    "const up=res.userPatrol||(res.resData&&res.resData.userPatrol);"
+    "if(up&&up.chance){"
+    "patrolState.leftChance=up.chance.leftChance!==undefined?up.chance.leftChance:0;"
+    "patrolState.leftStep=up.chance.leftStep||0;"
+    "patrolState.usedStep=up.chance.usedStep||0;"
+    "}"
+    "if(res.events)handleEvents(res.events);"
+    "}"
+    "setTimeout(autoPatrolStep,1500);"
+    "if(origCb)origCb(res);"
+    "};"
+    "return _call.call(this,name,params,cb);"
+    "}"
+    "return _call.apply(this,arguments);"
+    "};"
+    "sendLog({type:'STATUS',msg:'AlipayJSBridge Patrol Hooked & AutoPilot Active'});"
+    "setInterval(autoPatrolStep,3500);"
+    "};"
+    "hookBridge();"
+    "return'autopilot-injected';})()";
+
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
+        NSLog(@"[AntForestPatrol] hook script result: %@ error: %@", result, error);
+    });
+}
+
 static void installEarnEnergyCollector(id controller) {
     static const void *collectorKey = &collectorKey;
     if (objc_getAssociatedObject(controller, collectorKey)) return;
@@ -550,6 +652,16 @@ static void installEarnEnergyCollector(id controller) {
     self.title = @"功能设置";
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"返回" style:UIBarButtonItemStylePlain target:self action:@selector(close)];
+    
+    UIScrollView *scrollView = [[UIScrollView alloc] initWithFrame:self.view.bounds];
+    scrollView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    scrollView.alwaysBounceVertical = YES;
+    [self.view addSubview:scrollView];
+    
+    UIView *contentView = [[UIView alloc] init];
+    contentView.translatesAutoresizingMaskIntoConstraints = NO;
+    [scrollView addSubview:contentView];
+    
     UIButton *schedule = [self settingsButtonWithTitle:@"定时收取设置" detail:@"管理每日固定收取时刻" icon:@"calendar" action:@selector(showSchedule)];
     UIButton *step = [self settingsButtonWithTitle:@"步数模拟设置（测试）" detail:@"独立配置支付宝可见步数" icon:@"figure.walk" action:@selector(showStepSimulator)];
     UIButton *water = [self settingsButtonWithTitle:@"好友浇水设置" detail:@"选择好友、克数与定时任务" icon:@"drop.fill" action:@selector(showWater)];
@@ -557,19 +669,32 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *reviveSwitch = [[UISwitch alloc] init]; reviveSwitch.on = AntForestManager.sharedInstance.enableAutoRevive; reviveSwitch.translatesAutoresizingMaskIntoConstraints = NO; [reviveSwitch addTarget:self action:@selector(toggleAutoRevive:) forControlEvents:UIControlEventValueChanged]; [revive addSubview:reviveSwitch];
     UIButton *earn = [self settingsButtonWithTitle:@"赚能量（打地鼠玩法）" detail:@"手动进入活动后自动点击好友头像" icon:@"hand.tap.fill" action:nil];
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
-    UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理垃圾与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
+    UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
-    [self.view addSubview:schedule]; [self.view addSubview:step]; [self.view addSubview:water]; [self.view addSubview:revive]; [self.view addSubview:earn]; [self.view addSubview:ocean];
+    UIButton *patrol = [self settingsButtonWithTitle:@"保护地巡护（走步/答题/合成）" detail:@"自动走步、自动答题与步数兑换" icon:@"leaf.circle.fill" action:nil];
+    UISwitch *patrolSwitch = [[UISwitch alloc] init]; patrolSwitch.on = AntForestManager.sharedInstance.enableAutoPatrol; patrolSwitch.translatesAutoresizingMaskIntoConstraints = NO; [patrolSwitch addTarget:self action:@selector(toggleAutoPatrol:) forControlEvents:UIControlEventValueChanged]; [patrol addSubview:patrolSwitch];
+    
+    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:patrol];
     [NSLayoutConstraint activateConstraints:@[
-        [schedule.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [schedule.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [schedule.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [schedule.heightAnchor constraintEqualToConstant:70],
+        [contentView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor],
+        [contentView.leadingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.leadingAnchor],
+        [contentView.trailingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.trailingAnchor],
+        [contentView.bottomAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.bottomAnchor],
+        [contentView.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor],
+        
+        [schedule.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:16], [schedule.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:16], [schedule.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-16], [schedule.heightAnchor constraintEqualToConstant:70],
         [step.topAnchor constraintEqualToAnchor:schedule.bottomAnchor constant:12], [step.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [step.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [step.heightAnchor constraintEqualToConstant:70],
         [water.topAnchor constraintEqualToAnchor:step.bottomAnchor constant:12], [water.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [water.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [water.heightAnchor constraintEqualToConstant:70],
         [revive.topAnchor constraintEqualToAnchor:water.bottomAnchor constant:12], [revive.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [revive.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [revive.heightAnchor constraintEqualToConstant:70],
         [earn.topAnchor constraintEqualToAnchor:revive.bottomAnchor constant:12], [earn.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [earn.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [earn.heightAnchor constraintEqualToConstant:70],
+        [ocean.topAnchor constraintEqualToAnchor:earn.bottomAnchor constant:12], [ocean.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [ocean.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [ocean.heightAnchor constraintEqualToConstant:70],
+        [patrol.topAnchor constraintEqualToAnchor:ocean.bottomAnchor constant:12], [patrol.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [patrol.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [patrol.heightAnchor constraintEqualToConstant:70],
+        [patrol.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-24],
+        
         [reviveSwitch.trailingAnchor constraintEqualToAnchor:revive.trailingAnchor constant:-18], [reviveSwitch.centerYAnchor constraintEqualToAnchor:revive.centerYAnchor],
         [earnSwitch.trailingAnchor constraintEqualToAnchor:earn.trailingAnchor constant:-18], [earnSwitch.centerYAnchor constraintEqualToAnchor:earn.centerYAnchor],
-        [ocean.topAnchor constraintEqualToAnchor:earn.bottomAnchor constant:12], [ocean.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [ocean.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [ocean.heightAnchor constraintEqualToConstant:70],
         [oceanSwitch.trailingAnchor constraintEqualToAnchor:ocean.trailingAnchor constant:-18], [oceanSwitch.centerYAnchor constraintEqualToAnchor:ocean.centerYAnchor],
+        [patrolSwitch.trailingAnchor constraintEqualToAnchor:patrol.trailingAnchor constant:-18], [patrolSwitch.centerYAnchor constraintEqualToAnchor:patrol.centerYAnchor],
     ]];
 }
 
@@ -595,6 +720,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 自动复活好友过期能量已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 赚能量（打地鼠玩法）已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoPatrol:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrol = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrol"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 保护地自动巡护已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 @end
@@ -947,8 +1073,8 @@ static void installEarnEnergyCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，保护地巡护=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoPatrol ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     NSMutableString *fullOutput = [NSMutableString stringWithString:header];
     if (records.count) {
         [fullOutput appendString:[records componentsJoinedByString:@"\n\n"]];
@@ -1238,6 +1364,7 @@ static void initializeManager(void) {
     manager.enableAutoEarn = [defaults objectForKey:@"enableAutoEarn"] ? [defaults boolForKey:@"enableAutoEarn"] : YES;
     manager.enableAutoRevive = [defaults objectForKey:@"enableAutoRevive"] ? [defaults boolForKey:@"enableAutoRevive"] : YES;
     manager.enableCleanOcean = [defaults objectForKey:@"enableCleanOcean"] ? [defaults boolForKey:@"enableCleanOcean"] : YES;
+    manager.enableAutoPatrol = [defaults objectForKey:@"enableAutoPatrol"] ? [defaults boolForKey:@"enableAutoPatrol"] : YES;
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
     manager.scheduledTimes = [defaults arrayForKey:@"scheduledCollectTimes"] ?: @[];
@@ -1287,12 +1414,63 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             installEnergyRainCollector(self);
         });
     }
+    if (isPatrolURL(url)) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            installPatrolAutoPilot(self);
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            installPatrolAutoPilot(self);
+        });
+    }
     if (earnEnergy && manager.enableAutoEarn) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installEarnEnergyCollector(self);
         });
     }
     addLogButton(self, revealLeaf);
+}
+
+static BOOL isNoiseProbeLog(NSString *log) {
+    if (!log) return YES;
+    if ([log containsString:@"deliverByPageId"] ||
+        [log containsString:@"ANTFOREST_GAME_CENTER_FLOW"] ||
+        [log containsString:@"offlineResources"] ||
+        [log containsString:@"manifest.json"] ||
+        [log containsString:@"runtime."] ||
+        [log containsString:@"all_vendor."] ||
+        [log containsString:@"galacean_downgrade"] ||
+        [log containsString:@"signInWarmCopyConfig"] ||
+        [log containsString:@"swiper.min"] ||
+        [log containsString:@"dataPrefetch"] ||
+        [log containsString:@"contactsDicArray"] ||
+        [log containsString:@"recentApps"] ||
+        [log containsString:@"systemMemoryLevel"] ||
+        [log containsString:@"screenReaderEnabled"] ||
+        [log containsString:@"SHOULDUSENEWTOUCHEVENT"] ||
+        [log containsString:@"\"safeArea\""]) {
+        return YES;
+    }
+    return NO;
+}
+
+static void (*originalCallRPC)(id, SEL, id, id);
+static void portCallRPC(id self, SEL _cmd, id rpcConfig, id completeBlock) {
+    @try {
+        NSString *str = nil;
+        if ([rpcConfig isKindOfClass:NSString.class]) str = rpcConfig;
+        else if ([NSJSONSerialization isValidJSONObject:rpcConfig]) {
+            NSData *d = [NSJSONSerialization dataWithJSONObject:rpcConfig options:0 error:nil];
+            if (d) str = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        }
+        if (!str) str = [rpcConfig description];
+        
+        if (str.length && !isNoiseProbeLog(str)) {
+            NSLog(@"\n🔍 [PatrolProbe-RPC-REQ]\n📦 %@", str);
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[RPC-REQ] %@", str]];
+        }
+    } @catch (NSException *e) {}
+    
+    if (originalCallRPC) originalCallRPC(self, _cmd, rpcConfig, completeBlock);
 }
 
 static void (*originalDoFlushMessageQueue)(id, SEL, id, id);
@@ -1317,6 +1495,91 @@ static void portDoFlushMessageQueue(id self, SEL _cmd, id msg, id url) {
     if (originalDoFlushMessageQueue) {
         originalDoFlushMessageQueue(self, _cmd, msg, url);
     }
+}
+
+static void (*originalFlushMessageQueueWithMessage)(id, SEL, id, id);
+static void portFlushMessageQueueWithMessage(id self, SEL _cmd, id msg, id url) {
+    @try {
+        NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
+        NSString *msgStr = nil;
+        if ([msg isKindOfClass:NSString.class]) msgStr = msg;
+        else if ([NSJSONSerialization isValidJSONObject:msg]) {
+            NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
+            if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        }
+        if (!msgStr) msgStr = [msg description];
+        if (msgStr.length) {
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[REQ] URL: %@\nData: %@", urlStr, msgStr]];
+        }
+    } @catch (NSException *e) {}
+    if (originalFlushMessageQueueWithMessage) originalFlushMessageQueueWithMessage(self, _cmd, msg, url);
+}
+
+static id (*originalDeserializeMessageJSON)(id, SEL, id);
+static id portDeserializeMessageJSON(id self, SEL _cmd, id json) {
+    @try {
+        NSString *str = [json isKindOfClass:NSString.class] ? json : [json description];
+        if (str.length && !isNoiseProbeLog(str)) {
+            NSLog(@"\n🔍 [PatrolProbe-H5REQ]\n📦 %@", str);
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[H5REQ] %@", str]];
+        }
+    } @catch (NSException *e) {}
+    if (originalDeserializeMessageJSON) return originalDeserializeMessageJSON(self, _cmd, json);
+    return nil;
+}
+
+static void (*originalRunJsTextInput)(id, SEL, id, id, id, id, id);
+static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defText, id frame, id handler) {
+    @try {
+        NSString *str = [prompt isKindOfClass:NSString.class] ? prompt : [prompt description];
+        if ([str hasPrefix:@"PATROL_LOG:"]) {
+            NSString *payload = [str substringFromIndex:11];
+            NSLog(@"\n🔍 [PatrolProbe-HOOK]\n📦 %@", payload);
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[PATROL-HOOK] %@", payload]];
+            if (handler) {
+                void (^completionBlock)(NSString *) = handler;
+                completionBlock(nil);
+            }
+            return;
+        }
+        if (str.length && !isNoiseProbeLog(str)) {
+            NSLog(@"\n🔍 [PatrolProbe-PROMPT]\n📦 %@", str);
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[PROMPT] %@", str]];
+        }
+    } @catch (NSException *e) {}
+    if (originalRunJsTextInput) originalRunJsTextInput(self, _cmd, webView, prompt, defText, frame, handler);
+}
+
+static void (*originalDispatchMessage)(id, SEL, id);
+static void portDispatchMessage(id self, SEL _cmd, id msg) {
+    @try {
+        NSString *msgStr = nil;
+        if ([msg isKindOfClass:NSString.class]) msgStr = msg;
+        else if ([NSJSONSerialization isValidJSONObject:msg]) {
+            NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
+            if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        }
+        if (!msgStr) msgStr = [msg description];
+        if (msgStr.length) {
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[DISPATCH] %@", msgStr]];
+        }
+    } @catch (NSException *e) {}
+    if (originalDispatchMessage) originalDispatchMessage(self, _cmd, msg);
+}
+
+static void (*originalCallHandler)(id, SEL, id, id, id);
+static void portCallHandler(id self, SEL _cmd, id name, id data, id cb) {
+    @try {
+        NSString *dataStr = nil;
+        if ([data isKindOfClass:NSString.class]) dataStr = data;
+        else if ([NSJSONSerialization isValidJSONObject:data]) {
+            NSData *d = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
+            if (d) dataStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        }
+        if (!dataStr) dataStr = [data description];
+        [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[HANDLER: %@] %@", name, dataStr]];
+    } @catch (NSException *e) {}
+    if (originalCallHandler) originalCallHandler(self, _cmd, name, data, cb);
 }
 
 static void (*originalCallJsApi)(id, SEL, id, id, id, id);
@@ -1410,9 +1673,11 @@ static void installHooks(void) {
         [[AFStepSimulator shared] installAvailableHooks];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [[AFStepSimulator shared] installAvailableHooks]; });
         Class webController = NSClassFromString(@"H5WebViewController");
-        class_addMethod(webController, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
-        BOOL viewHooked = hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
-        BOOL appearanceHooked = hookMethod(webController, @selector(viewDidAppear:), (IMP)portViewDidAppear, (IMP *)&originalViewDidAppear);
+        if (webController) {
+            class_addMethod(webController, @selector(antforestHandlePan:), (IMP)handleButtonPan, "v@:@");
+            hookMethod(webController, @selector(viewDidLoad), (IMP)portViewDidLoad, (IMP *)&originalViewDidLoad);
+            hookMethod(webController, @selector(viewDidAppear:), (IMP)portViewDidAppear, (IMP *)&originalViewDidAppear);
+        }
         
         Class dtController = NSClassFromString(@"DTViewController");
         if (dtController) {
@@ -1423,16 +1688,22 @@ static void installHooks(void) {
         Class psdClass = NSClassFromString(@"PSDJsBridge");
         Class rvkClass = NSClassFromString(@"RVKJsBridge");
         Class targetBridgeClass = psdClass ?: rvkClass;
-        BOOL responseHooked = hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-        BOOL bridgeReadyHooked = hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
-        BOOL reqHooked = hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
-        if (!reqHooked && rvkClass && rvkClass != targetBridgeClass) {
-            reqHooked = hookMethod(rvkClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
+        if (targetBridgeClass) {
+            hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
+            hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
+            hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
+            hookMethod(targetBridgeClass, @selector(_flushMessageQueueWithMessage:url:), (IMP)portFlushMessageQueueWithMessage, (IMP *)&originalFlushMessageQueueWithMessage);
+            hookMethod(targetBridgeClass, @selector(_dispatchMessage:), (IMP)portDispatchMessage, (IMP *)&originalDispatchMessage);
+            hookMethod(targetBridgeClass, @selector(callHandler:data:responseCallback:), (IMP)portCallHandler, (IMP *)&originalCallHandler);
+            hookMethod(targetBridgeClass, @selector(_deserializeMessageJSON:), (IMP)portDeserializeMessageJSON, (IMP *)&originalDeserializeMessageJSON);
+            hookMethod(targetBridgeClass, @selector(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:), (IMP)portRunJsTextInput, (IMP *)&originalRunJsTextInput);
+            hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
         }
-        BOOL jsapiHooked = hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
-        if (!jsapiHooked && rvkClass && rvkClass != targetBridgeClass) {
-            jsapiHooked = hookMethod(rvkClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
+        
+        Class h5RpcClass = NSClassFromString(@"H5RPCCaller") ?: NSClassFromString(@"RVKRPCCaller") ?: NSClassFromString(@"PSDRPCCaller");
+        if (h5RpcClass) {
+            hookMethod(h5RpcClass, @selector(callRPC:completeBlock:), (IMP)portCallRPC, (IMP *)&originalCallRPC);
         }
-        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d ready=%d req=%d jsapi=%d", viewHooked, appearanceHooked, responseHooked, bridgeReadyHooked, reqHooked, jsapiHooked);
+        NSLog(@"[AntForestPort] Bridge and controllers hooked safely.");
     }
 }

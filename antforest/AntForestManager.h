@@ -47,6 +47,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSArray<NSString *> *waterScheduledTimes;
 
 @property (assign, nonatomic) BOOL enableCleanOcean; // 神奇海洋自动清理海域与找拼图
+@property (assign, nonatomic) BOOL enableAutoPatrol; // 保护地自动巡护与物种合成派遣
 @property (atomic, assign) BOOL isScanRunning; // 扫描进行中独占锁
 @property (assign, nonatomic) int failedTimes; //未成功收取能量的次数
 @property(atomic) NSTimeInterval collectInterval; //takeLook时间间隔
