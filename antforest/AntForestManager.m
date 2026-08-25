@@ -692,6 +692,44 @@ static NSInteger reviveDailyCount(void) {
     if (self.logRecord) [self addLog:[NSString stringWithFormat:@"%@\n%@", getCurrentDateTimeString(), stage]];
 }
 
+static NSMutableArray<NSString *> *patrolProbeLogs = nil;
+
+- (void)recordProbeLog:(NSString *)log {
+    if (!log.length) return;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        patrolProbeLogs = [NSMutableArray array];
+    });
+    NSString *timeStr = getCurrentDateTimeString();
+    NSString *entry = [NSString stringWithFormat:@"[%@] %@", timeStr, log];
+    @synchronized (patrolProbeLogs) {
+        [patrolProbeLogs addObject:entry];
+        if (patrolProbeLogs.count > 300) {
+            [patrolProbeLogs removeObjectAtIndex:0];
+        }
+    }
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        @try {
+            NSString *docPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+            NSString *filePath = [docPath stringByAppendingPathComponent:@"AntForestPatrolProbe.log"];
+            NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:filePath];
+            if (!handle) {
+                [[NSFileManager defaultManager] createFileAtPath:filePath contents:nil attributes:nil];
+                handle = [NSFileHandle fileHandleForWritingAtPath:filePath];
+            }
+            [handle seekToEndOfFile];
+            [handle writeData:[[entry stringByAppendingString:@"\n\n"] dataUsingEncoding:NSUTF8StringEncoding]];
+            [handle closeFile];
+        } @catch (NSException *e) {}
+    });
+}
+
+- (NSArray<NSString *> *)probeRecords {
+    @synchronized (patrolProbeLogs) {
+        return [patrolProbeLogs copy] ?: @[];
+    }
+}
+
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
     if (self.autoCollectTimer.isValid && self.collectInterval == interval) {
         return;

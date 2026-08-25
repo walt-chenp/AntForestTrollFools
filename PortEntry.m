@@ -748,7 +748,7 @@ static void installEarnEnergyCollector(id controller) {
 
     [self.view addSubview:grabber];
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"当前版本：v2.8.3-1";
+    versionLabel.text = @"当前版本：保护地巡护全量抓包探针版 (Patrol Probe)";
     versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     versionLabel.textColor = [UIColor systemGray2Color];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -947,9 +947,24 @@ static void installEarnEnergyCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
                       getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
-    UIPasteboard.generalPasteboard.string = records.count ? [header stringByAppendingString:[records componentsJoinedByString:@"\n\n"]] : [header stringByAppendingString:@"没有可复制的收取日志"];
+    NSMutableString *fullOutput = [NSMutableString stringWithString:header];
+    if (records.count) {
+        [fullOutput appendString:[records componentsJoinedByString:@"\n\n"]];
+    } else {
+        [fullOutput appendString:@"没有常规收取日志\n"];
+    }
+    
+    NSArray *probes = manager.probeRecords;
+    [fullOutput appendFormat:@"\n\n========================================\n📋 保护地巡护 / 全量 H5 RPC 抓包探针数据（共 %lu 条）\n========================================\n\n", (unsigned long)probes.count];
+    if (probes.count) {
+        [fullOutput appendString:[probes componentsJoinedByString:@"\n\n"]];
+    } else {
+        [fullOutput appendString:@"暂未捕获到 H5 RPC 请求（请先打开保护地巡护页面进行操作）\n"];
+    }
+    
+    UIPasteboard.generalPasteboard.string = fullOutput;
     [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [sender setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
@@ -1280,7 +1295,64 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     addLogButton(self, revealLeaf);
 }
 
+static void (*originalDoFlushMessageQueue)(id, SEL, id, id);
+static void portDoFlushMessageQueue(id self, SEL _cmd, id msg, id url) {
+    @try {
+        NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
+        NSString *msgStr = nil;
+        if ([msg isKindOfClass:NSString.class]) {
+            msgStr = msg;
+        } else if ([NSJSONSerialization isValidJSONObject:msg]) {
+            NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
+            if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        }
+        if (!msgStr) msgStr = [msg description];
+        
+        if (msgStr.length) {
+            NSLog(@"\n🔍 [PatrolProbe-REQ]\n📍 URL: %@\n📦 Request: %@\n", urlStr, msgStr);
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[REQ] URL: %@\nData: %@", urlStr, msgStr]];
+        }
+    } @catch (NSException *e) {}
+    
+    if (originalDoFlushMessageQueue) {
+        originalDoFlushMessageQueue(self, _cmd, msg, url);
+    }
+}
+
+static void (*originalCallJsApi)(id, SEL, id, id, id, id);
+static void portCallJsApi(id self, SEL _cmd, id name, id url, id data, id cb) {
+    @try {
+        NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
+        NSString *dataStr = nil;
+        if ([data isKindOfClass:NSString.class]) dataStr = data;
+        else if ([NSJSONSerialization isValidJSONObject:data]) {
+            NSData *d = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
+            if (d) dataStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        }
+        if (!dataStr) dataStr = [data description];
+        
+        NSLog(@"\n🔍 [PatrolProbe-JSAPI]\n📍 API: %@ | URL: %@\n📦 Data: %@\n", name, urlStr, dataStr);
+        [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[JSAPI: %@] URL: %@\nData: %@", name, urlStr, dataStr]];
+    } @catch (NSException *e) {}
+    
+    if (originalCallJsApi) originalCallJsApi(self, _cmd, name, url, data, cb);
+}
+
 static id portTransformResponseData(id self, SEL _cmd, id value) {
+    @try {
+        NSString *resStr = nil;
+        if ([NSJSONSerialization isValidJSONObject:value]) {
+            NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+            if (data) resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        }
+        if (!resStr) resStr = [value description];
+        
+        if (resStr.length) {
+            NSLog(@"\n📥 [PatrolProbe-RES]\n📦 Response: %@\n", resStr);
+            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[RES] %@", resStr]];
+        }
+    } @catch (NSException *e) {}
+
     AntForestManager *manager = [AntForestManager sharedInstance];
     if (isForestResponse(value)) {
         if (manager.jsBridge != self) {
@@ -1348,8 +1420,19 @@ static void installHooks(void) {
             hookMethod(dtController, @selector(viewDidAppear:), (IMP)portDTViewDidAppear, (IMP *)&originalDTViewDidAppear);
         }
         
-        BOOL responseHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-        BOOL bridgeReadyHooked = hookMethod(NSClassFromString(@"PSDJsBridge"), @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
-        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d ready=%d", viewHooked, appearanceHooked, responseHooked, bridgeReadyHooked);
+        Class psdClass = NSClassFromString(@"PSDJsBridge");
+        Class rvkClass = NSClassFromString(@"RVKJsBridge");
+        Class targetBridgeClass = psdClass ?: rvkClass;
+        BOOL responseHooked = hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
+        BOOL bridgeReadyHooked = hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
+        BOOL reqHooked = hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
+        if (!reqHooked && rvkClass && rvkClass != targetBridgeClass) {
+            reqHooked = hookMethod(rvkClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
+        }
+        BOOL jsapiHooked = hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
+        if (!jsapiHooked && rvkClass && rvkClass != targetBridgeClass) {
+            jsapiHooked = hookMethod(rvkClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
+        }
+        NSLog(@"[AntForestPort] installed: view=%d appearance=%d response=%d ready=%d req=%d jsapi=%d", viewHooked, appearanceHooked, responseHooked, bridgeReadyHooked, reqHooked, jsapiHooked);
     }
 }

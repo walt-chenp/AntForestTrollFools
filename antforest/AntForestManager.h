@@ -79,6 +79,8 @@ NS_ASSUME_NONNULL_BEGIN
 -(NSString*)getUserName:(NSString*)uid;
 -(void)addLog:(NSString *)logMessage;
 -(void)recordStage:(NSString *)stage;
+-(void)recordProbeLog:(NSString *)log;
+@property (nonatomic, readonly) NSArray<NSString *> *probeRecords;
 
 // 好友浇水：仅由“好友浇水设置”手动或定时触发，与自动收取独立。
 -(void)refreshWaterFriends;
