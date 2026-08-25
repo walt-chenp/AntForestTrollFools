@@ -1156,10 +1156,11 @@ static BOOL vitalityTaskRunning = NO;
 
 static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     if (!taskType.length) return NO;
-    // 永久排除用户指定和高风险任务
+    // 永久排除用户指定和高风险/消耗资产任务
     if ([taskType isEqualToString:@"ZHRW_haoyibaomzx_202601"] ||
         [taskType isEqualToString:@"ZHRW_haoyibaoseyl_202512"] ||
-        [taskType isEqualToString:@"ONE_CLICK_WATERING_V1"]) {
+        [taskType isEqualToString:@"ONE_CLICK_WATERING_V1"] ||
+        [taskType isEqualToString:@"NORMAL_DRAW_EXCHANGE_VITALITY"]) {
         return NO;
     }
     NSString *lowerType = taskType.lowercaseString;
@@ -1168,13 +1169,15 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [lowerType containsString:@"insure"] ||
         [lowerType containsString:@"baoxian"] ||
         [lowerType containsString:@"watering"] ||
-        [lowerType containsString:@"jiaoshui"]) {
+        [lowerType containsString:@"jiaoshui"] ||
+        [lowerType containsString:@"exchange_vitality"]) {
         return NO;
     }
     if ([lowerTitle containsString:@"保障"] ||
         [lowerTitle containsString:@"保险"] ||
         [lowerTitle containsString:@"好医保"] ||
-        [lowerTitle containsString:@"浇水"]) {
+        [lowerTitle containsString:@"浇水"] ||
+        [lowerTitle containsString:@"消耗活力值"]) {
         return NO;
     }
     return YES;
@@ -1183,17 +1186,58 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
 -(void)queryVitalityTaskList {
     if (!self.enableAutoRewardTasks || !self.jsBridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
-    NSString *randNum = [AntForestManager getNumberRandom:15];
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_VITALITY_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
+    NSString *randNum1 = [AntForestManager getNumberRandom:15];
+    NSString *randNum2 = [AntForestManager getNumberRandom:15];
+    NSString *randNum3 = [AntForestManager getNumberRandom:15];
+    NSString *randNum4 = [AntForestManager getNumberRandom:15];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
-    if (self.jsBridge) {
-        [self recordStage:@"收取 · 领奖励：请求任务列表与签到状态"];
-        [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
-        
-        NSString *randNum2 = [AntForestManager getNumberRandom:15];
-        NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"requestData\":[{\"version\":\"20230501\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
-        [self.jsBridge _doFlushMessageQueue:forestArg1 url:arg2];
-    }
+    
+    // 1. 主线任务列表
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_VITALITY_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum1];
+    [self recordStage:@"收取 · 领奖励：请求主线与寻宝任务列表"];
+    [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
+    
+    // 2. 森林全量任务 (含落叶等)
+    NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"requestData\":[{\"version\":\"20230501\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
+    [self.jsBridge _doFlushMessageQueue:forestArg1 url:arg2];
+    
+    // 3. 普通寻宝任务列表 (ANTFOREST_NORMAL_DRAW_TASK)
+    NSString *normalDrawArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum3];
+    [self.jsBridge _doFlushMessageQueue:normalDrawArg url:arg2];
+    
+    // 4. 活动寻宝任务列表 (ANTFOREST_ACTIVITY_DRAW_TASK)
+    NSString *activityDrawArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum4];
+    [self.jsBridge _doFlushMessageQueue:activityDrawArg url:arg2];
+    
+    // 5. 寻宝抽奖信息查询
+    [self queryDrawInfo];
+}
+
+-(void)queryDrawInfo {
+    if (!self.enableAutoRewardTasks || !self.jsBridge) return;
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+    NSString *randNum1 = [AntForestManager getNumberRandom:15];
+    NSString *randNum2 = [AntForestManager getNumberRandom:15];
+    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&sceneCode=ANTFOREST_ACTIVITY_DRAW&source=task_entry&chInfo=task_entry";
+    
+    NSString *drawArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryActivity\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum1];
+    [self.jsBridge _doFlushMessageQueue:drawArg1 url:arg2];
+
+    NSString *drawArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryActivity\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
+    [self.jsBridge _doFlushMessageQueue:drawArg2 url:arg2];
+}
+
+-(void)triggerLotteryDraw:(NSString *)sceneCode activityId:(NSString *)activityId {
+    if (!self.enableAutoRewardTasks || !self.jsBridge) return;
+    NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_NORMAL_DRAW";
+    NSString *actId = activityId.length ? activityId : @"default";
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+    NSString *randNum = [AntForestManager getNumberRandom:15];
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.draw\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"activityId\":\"%@\",\"requestType\":\"rpc\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, actId, timeStamp, randNum];
+    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync";
+    
+    [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：正在执行抽奖（%@）...", [scene containsString:@"ACTIVITY"] ? @"活动版" : @"普通版"]];
+    [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
 }
 
 -(void)signVitalityTask:(NSString *)signId {
@@ -1241,6 +1285,8 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     if (!vitalityTaskQueue.count) {
         vitalityTaskRunning = NO;
         [self recordStage:@"收取 · 领奖励：本轮所有任务与奖励已处理完毕"];
+        // 任务做完后，尝试触发森林寻宝抽奖
+        [self queryDrawInfo];
         return;
     }
     vitalityTaskRunning = YES;
@@ -1278,10 +1324,46 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         data = data[@"resData"];
     }
     
+    // 0. 抽奖结果与中奖信息拦截
+    NSDictionary *drawPrize = [data[@"drawPrize"] isKindOfClass:NSDictionary.class] ? data[@"drawPrize"] : nil;
+    if (!drawPrize && [data[@"drawPrizes"] isKindOfClass:NSArray.class] && [data[@"isWin"] boolValue]) {
+        drawPrize = [data[@"drawPrizes"] firstObject];
+    }
+    if (drawPrize) {
+        NSString *prizeName = drawPrize[@"prizeName"] ?: @"神秘礼品";
+        [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：🎉 恭喜抽中【%@】！", prizeName]];
+    }
+    
+    // 检查剩余抽奖次数
+    NSInteger drawBalance = 0;
+    NSString *drawSceneCode = @"ANTFOREST_NORMAL_DRAW";
+    NSString *drawActivityId = @"";
+    if (data[@"drawAsset"] && [data[@"drawAsset"] isKindOfClass:NSDictionary.class]) {
+        drawBalance = [data[@"drawAsset"][@"blance"] integerValue];
+        if (drawBalance <= 0) drawBalance = [data[@"drawAsset"][@"balance"] integerValue];
+    }
+    if (data[@"drawEntranceVO"] && [data[@"drawEntranceVO"] isKindOfClass:NSDictionary.class]) {
+        NSDictionary *vo = data[@"drawEntranceVO"];
+        if (drawBalance <= 0) drawBalance = [vo[@"balance"] integerValue];
+        if (vo[@"sceneCode"]) drawSceneCode = vo[@"sceneCode"];
+        if (vo[@"activityId"]) drawActivityId = vo[@"activityId"];
+    }
+    if (data[@"drawActivity"] && [data[@"drawActivity"] isKindOfClass:NSDictionary.class]) {
+        NSDictionary *act = data[@"drawActivity"];
+        if (act[@"sceneCode"]) drawSceneCode = act[@"sceneCode"];
+        if (act[@"activityId"]) drawActivityId = act[@"activityId"];
+    }
+    
+    if (drawBalance > 0) {
+        [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：检测到剩余抽奖机会 %ld 次，正在自动抽奖...", (long)drawBalance]];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self triggerLotteryDraw:drawSceneCode activityId:drawActivityId];
+        });
+    }
+    
     if (!vitalityTaskQueue) {
         vitalityTaskQueue = [NSMutableArray array];
     }
-    [vitalityTaskQueue removeAllObjects];
     
     // 1. 签到处理
     NSDictionary *signVO = [data[@"energySignVO"] isKindOfClass:NSDictionary.class] ? data[@"energySignVO"] : nil;
@@ -1345,8 +1427,8 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
             if (bd) bizInfo = [NSJSONSerialization JSONObjectWithData:bd options:0 error:nil];
         }
         
-        NSString *taskTitle = bizInfo[@"taskTitle"] ?: taskType;
-        NSString *awardName = bizInfo[@"energy"] ?: bizInfo[@"vitality"] ?: @"能量";
+        NSString *taskTitle = bizInfo[@"taskTitle"] ?: bizInfo[@"title"] ?: taskType;
+        NSString *awardName = bizInfo[@"energy"] ?: bizInfo[@"vitality"] ?: ([taskTitle containsString:@"机会"] ? @"抽奖机会" : @"奖励");
         
         // 过滤安全任务
         if (!isSafeRewardTask(taskType, taskTitle)) continue;
@@ -1408,6 +1490,8 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [self executeNextVitalityTask];
     }
 }
+    
+
 
 static NSMutableArray<NSString *> *oceanQueue = nil;
 static NSString *oceanCurrentUserId = nil;
@@ -2039,15 +2123,12 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
             }
         }
-        // 浇水与自动复活可独立于自动收取手动执行，必须先处理它们的回包。
-        [self handleWaterResponse:args];
-        [self handleAutoReviveResponse:args];
         if ([args isKindOfClass:NSDictionary.class]) {
-            [self updateWaterFriendListFromResponse:args];
             NSDictionary *dict = args;
             NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+            [self updateWaterFriendListFromResponse:args];
             NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: @""];
-            if (resData[@"forestTasksNew"] || resData[@"energySignVO"] || (resData[@"taskInfoList"] && [opType containsString:@"antiep"]) || [opType containsString:@"queryTaskList"]) {
+            if (resData[@"forestTasksNew"] || resData[@"energySignVO"] || resData[@"taskInfoList"] || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || [opType containsString:@"antiep"] || [opType containsString:@"queryTaskList"] || [opType containsString:@"draw"]) {
                 [self handleVitalityTaskListResponse:resData ?: dict];
             }
         }

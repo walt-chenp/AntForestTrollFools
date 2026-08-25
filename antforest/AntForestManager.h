@@ -91,6 +91,10 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title;
 -(void)receiveVitalityTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName;
 
+// 森林寻宝：自动抽奖与寻宝专属任务
+-(void)queryDrawInfo;
+-(void)triggerLotteryDraw:(NSString *)sceneCode activityId:(NSString *)activityId;
+
 // 好友浇水：仅由“好友浇水设置”手动或定时触发，与自动收取独立。
 -(void)refreshWaterFriends;
 -(void)startWateringSelectedFriendsWithReason:(NSString *)reason;
