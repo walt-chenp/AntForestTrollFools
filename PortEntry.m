@@ -1446,9 +1446,14 @@ static void installForestPatrolAutoTrigger(id controller) {
     "if(localStorage.getItem('__af_patrol_done_date')===today)return'done-today';"
     "setTimeout(()=>{"
     "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
-    "window.AlipayJSBridge.call('pushWindow',{url:'https://68687842.h5app.alipay.com/www/protect.html'});"
+    "window.AlipayJSBridge.call('startApp',{"
+    "appId:'68687842',"
+    "param:{source:'ANT_FOREST_ly'}"
+    "});"
+    "}else{"
+    "window.location.href='alipays://platformapi/startapp?appId=68687842&source=ANT_FOREST_ly';"
     "}"
-    "},2500);"
+    "},3000);"
     "return'scheduled';})()", today];
     
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
@@ -1493,6 +1498,9 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             installPatrolAutoPilot(self);
         });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            installPatrolAutoPilot(self);
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             installPatrolAutoPilot(self);
         });
     }
