@@ -730,10 +730,12 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
     UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
+    UIButton *reward = [self settingsButtonWithTitle:@"自动领奖励（任务中心）" detail:@"自动签到、做浏览任务与领阶梯能量" icon:@"gift.fill" action:nil];
+    UISwitch *rewardSwitch = [[UISwitch alloc] init]; rewardSwitch.on = AntForestManager.sharedInstance.enableAutoRewardTasks; rewardSwitch.translatesAutoresizingMaskIntoConstraints = NO; [rewardSwitch addTarget:self action:@selector(toggleAutoRewardTasks:) forControlEvents:UIControlEventValueChanged]; [reward addSubview:rewardSwitch];
     UIButton *patrol = [self settingsButtonWithTitle:@"保护地巡护（走步/答题/合成）" detail:@"手动进入保护地自动走步、答题与派遣" icon:@"leaf.circle.fill" action:nil];
     UISwitch *patrolSwitch = [[UISwitch alloc] init]; patrolSwitch.on = AntForestManager.sharedInstance.enableAutoPatrol; patrolSwitch.translatesAutoresizingMaskIntoConstraints = NO; [patrolSwitch addTarget:self action:@selector(toggleAutoPatrol:) forControlEvents:UIControlEventValueChanged]; [patrol addSubview:patrolSwitch];
     
-    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:patrol];
+    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:reward]; [contentView addSubview:patrol];
     [NSLayoutConstraint activateConstraints:@[
         [contentView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor],
         [contentView.leadingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.leadingAnchor],
@@ -747,12 +749,14 @@ static void installEarnEnergyCollector(id controller) {
         [revive.topAnchor constraintEqualToAnchor:water.bottomAnchor constant:12], [revive.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [revive.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [revive.heightAnchor constraintEqualToConstant:70],
         [earn.topAnchor constraintEqualToAnchor:revive.bottomAnchor constant:12], [earn.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [earn.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [earn.heightAnchor constraintEqualToConstant:70],
         [ocean.topAnchor constraintEqualToAnchor:earn.bottomAnchor constant:12], [ocean.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [ocean.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [ocean.heightAnchor constraintEqualToConstant:70],
-        [patrol.topAnchor constraintEqualToAnchor:ocean.bottomAnchor constant:12], [patrol.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [patrol.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [patrol.heightAnchor constraintEqualToConstant:70],
+        [reward.topAnchor constraintEqualToAnchor:ocean.bottomAnchor constant:12], [reward.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [reward.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [reward.heightAnchor constraintEqualToConstant:70],
+        [patrol.topAnchor constraintEqualToAnchor:reward.bottomAnchor constant:12], [patrol.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [patrol.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [patrol.heightAnchor constraintEqualToConstant:70],
         [patrol.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-24],
         
         [reviveSwitch.trailingAnchor constraintEqualToAnchor:revive.trailingAnchor constant:-18], [reviveSwitch.centerYAnchor constraintEqualToAnchor:revive.centerYAnchor],
         [earnSwitch.trailingAnchor constraintEqualToAnchor:earn.trailingAnchor constant:-18], [earnSwitch.centerYAnchor constraintEqualToAnchor:earn.centerYAnchor],
         [oceanSwitch.trailingAnchor constraintEqualToAnchor:ocean.trailingAnchor constant:-18], [oceanSwitch.centerYAnchor constraintEqualToAnchor:ocean.centerYAnchor],
+        [rewardSwitch.trailingAnchor constraintEqualToAnchor:reward.trailingAnchor constant:-18], [rewardSwitch.centerYAnchor constraintEqualToAnchor:reward.centerYAnchor],
         [patrolSwitch.trailingAnchor constraintEqualToAnchor:patrol.trailingAnchor constant:-18], [patrolSwitch.centerYAnchor constraintEqualToAnchor:patrol.centerYAnchor],
     ]];
 }
@@ -779,6 +783,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"复活能量 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"打地鼠 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoRewardTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRewardTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRewardTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"领奖励 · 任务中心自动处理已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoPatrol:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrol = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrol"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"保护地巡护 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
@@ -1132,8 +1137,8 @@ static void installEarnEnergyCollector(id controller) {
         return [log containsString:@"收取 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，保护地巡护=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoPatrol ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，自动领奖励=%@，保护地巡护=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoPatrol ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     NSMutableString *fullOutput = [NSMutableString stringWithString:header];
     if (records.count) {
         [fullOutput appendString:[records componentsJoinedByString:@"\n\n"]];
@@ -1423,6 +1428,7 @@ static void initializeManager(void) {
     manager.enableAutoEarn = [defaults objectForKey:@"enableAutoEarn"] ? [defaults boolForKey:@"enableAutoEarn"] : YES;
     manager.enableAutoRevive = [defaults objectForKey:@"enableAutoRevive"] ? [defaults boolForKey:@"enableAutoRevive"] : YES;
     manager.enableCleanOcean = [defaults objectForKey:@"enableCleanOcean"] ? [defaults boolForKey:@"enableCleanOcean"] : YES;
+    manager.enableAutoRewardTasks = [defaults objectForKey:@"enableAutoRewardTasks"] ? [defaults boolForKey:@"enableAutoRewardTasks"] : YES;
     manager.enableAutoPatrol = [defaults objectForKey:@"enableAutoPatrol"] ? [defaults boolForKey:@"enableAutoPatrol"] : YES;
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
     manager.enableScheduledCollect = [defaults boolForKey:@"enableScheduledCollect"];
