@@ -2,7 +2,7 @@
 //  Tool.h
 //  wechat
 //
-//  Created by 王友坤 on 2023/4/12.
+//  Created by walt-chenp.
 //
 
 #import <Foundation/Foundation.h>
