@@ -182,9 +182,26 @@ static void installEnergyRainCollector(id controller) {
     });
 }
 
-static BOOL isPatrolURL(NSURL *url) {
+static BOOL isPatrolURL(NSURL *url, id controller) {
     NSString *str = url.absoluteString;
-    return [str containsString:@"68687842"] || [str containsString:@"protect.html"] || [str containsString:@"animalBook.html"] || [str containsString:@"protectedArea.html"];
+    if ([str containsString:@"68687842"] || [str containsString:@"protect.html"] || [str containsString:@"animalBook.html"] || [str containsString:@"protectedArea.html"] || [str containsString:@"patrol"]) {
+        return YES;
+    }
+    if ([controller respondsToSelector:@selector(title)]) {
+        NSString *t = [controller title];
+        if ([t containsString:@"保护地"] || [t containsString:@"巡护"]) return YES;
+    }
+    if ([controller respondsToSelector:@selector(appId)]) {
+        id appIdObj = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(appId));
+        NSString *appId = [appIdObj isKindOfClass:NSString.class] ? appIdObj : [appIdObj description];
+        if ([appId containsString:@"68687842"]) return YES;
+    }
+    if ([controller respondsToSelector:@selector(curUrl)]) {
+        id curUrl = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(curUrl));
+        NSString *cStr = [curUrl isKindOfClass:NSURL.class] ? [(NSURL *)curUrl absoluteString] : [curUrl description];
+        if ([cStr containsString:@"68687842"] || [cStr containsString:@"protect.html"]) return YES;
+    }
+    return NO;
 }
 
 static void installPatrolAutoPilot(id controller) {
@@ -196,7 +213,7 @@ static void installPatrolAutoPilot(id controller) {
     NSString *script = @"(()=>{if(window.__afPatrolInstalled)return'already';"
     "window.__afPatrolInstalled=true;"
     "function sendLog(data){try{prompt('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
-    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0};"
+    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0};"
     "function findAndClick(keywords){"
     "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img'));"
     "for(let el of els){"
@@ -204,7 +221,7 @@ static void installPatrolAutoPilot(id controller) {
     "const alt=(el.getAttribute('alt')||'').trim();"
     "const aria=(el.getAttribute('aria-label')||'').trim();"
     "for(let kw of keywords){"
-    "if(txt===kw||alt===kw||aria===kw||(kw.length>2&&(txt.includes(kw)||alt.includes(kw)))){ "
+    "if(txt===kw||alt===kw||aria===kw||(kw.length>=2&&(txt.includes(kw)||alt.includes(kw)))){ "
     "const rect=el.getBoundingClientRect();"
     "if(rect.width>0&&rect.height>0&&el.offsetParent!==null){"
     "el.click();return true;"
@@ -222,10 +239,9 @@ static void installPatrolAutoPilot(id controller) {
     "setTimeout(()=>{findAndClick(['确定','确认','提交']);},400);}"
     "},600);}"
     "}}"
-    "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的']);},800);"
+    "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取']);},800);"
     "}"
     "function checkAllDoneAndExit(){"
-    "if(patrolState.leftChance===0&&(patrolState.usedStep>=10000||patrolState.leftStep<2000)){"
     "sendLog({type:'AUTO-PATROL',action:'all_tasks_finished_auto_exit'});"
     "try{localStorage.setItem('__af_patrol_done_date',new Date().toISOString().slice(0,10));}catch(e){}"
     "setTimeout(()=>{"
@@ -235,26 +251,38 @@ static void installPatrolAutoPilot(id controller) {
     "}"
     "},1500);"
     "}"
-    "}"
     "function autoPatrolStep(){"
     "if(patrolState.isBusy)return;"
     "const now=Date.now();"
-    "if(now-patrolState.lastPatrolTime<2500)return;"
-    "if(patrolState.leftChance>0){"
-    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "if(now-patrolState.lastPatrolTime<2000)return;"
+    "findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取']);"
+    "if(patrolState.leftChance>0||patrolState.leftChance===-1){"
+    "const clicked=findAndClick(['开始巡护','继续巡护','巡护','立即巡护','去巡护','前进']);"
+    "if(clicked){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;patrolState.noBtnCount=0;"
     "sendLog({type:'AUTO-PATROL',action:'patrol_forward',leftChance:patrolState.leftChance});"
-    "findAndClick(['开始巡护','继续巡护','巡护']);"
-    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},3000);"
-    "}else if(patrolState.leftChance===0&&patrolState.usedStep<10000&&patrolState.leftStep>=2000){"
+    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},2500);"
+    "return;"
+    "}else{"
+    "patrolState.noBtnCount++;"
+    "}"
+    "}"
+    "if(patrolState.leftChance===0||patrolState.noBtnCount>=3){"
+    "if(patrolState.usedStep<10000&&patrolState.leftStep>=2000){"
+    "const exClicked=findAndClick(['兑换巡护机会','兑换步数','兑换']);"
+    "if(exClicked){"
     "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
     "sendLog({type:'AUTO-PATROL',action:'exchange_step',leftStep:patrolState.leftStep,usedStep:patrolState.usedStep});"
-    "findAndClick(['兑换巡护机会','兑换步数','兑换']);"
     "setTimeout(()=>{"
     "findAndClick(['确认兑换','确定','兑换','我知道了']);"
-    "setTimeout(()=>{patrolState.isBusy=false;},1000);"
+    "setTimeout(()=>{patrolState.isBusy=false;patrolState.noBtnCount=0;},1000);"
     "},800);"
-    "}else if(patrolState.leftChance===0){"
+    "return;"
+    "}"
+    "}"
+    "if(patrolState.noBtnCount>=4||patrolState.leftChance===0){"
     "checkAllDoneAndExit();"
+    "}"
     "}"
     "}"
     "function dispatchSmartAnimal(){"
@@ -285,7 +313,6 @@ static void installPatrolAutoPilot(id controller) {
     "findAndClick(['立即合成','合成物种','一键合成','合成']);"
     "setTimeout(dispatchSmartAnimal,600);"
     "}"
-    "}"
     "function hookBridge(){"
     "if(!window.AlipayJSBridge||!window.AlipayJSBridge.call){setTimeout(hookBridge,150);return;}"
     "const _call=window.AlipayJSBridge.call;"
@@ -305,15 +332,11 @@ static void installPatrolAutoPilot(id controller) {
     "}"
     "if(res.events)handleEvents(res.events);"
     "}"
-    "setTimeout(autoPatrolStep,1500);"
+    "setTimeout(autoPatrolStep,1000);"
     "if(origCb)origCb(res);"
-    "};"
-    "return _call.call(this,name,params,cb);"
-    "}"
-    "return _call.apply(this,arguments);"
-    "};"
     "sendLog({type:'STATUS',msg:'AlipayJSBridge Patrol Hooked & AutoPilot Active'});"
-    "setInterval(autoPatrolStep,3500);"
+    "setTimeout(autoPatrolStep,1000);"
+    "setInterval(autoPatrolStep,2500);"
     "};"
     "hookBridge();"
     "return'autopilot-injected';})()";
@@ -1493,7 +1516,7 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             installEnergyRainCollector(self);
         });
     }
-    if (isPatrolURL(url)) {
+    if (isPatrolURL(url, self)) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             installPatrolAutoPilot(self);
         });
