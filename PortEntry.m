@@ -204,8 +204,51 @@ static BOOL isPatrolURL(NSURL *url, id controller) {
     return NO;
 }
 
+static __weak id currentPatrolController = nil;
+
+static void exitPatrolController(id controller) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id target = controller ?: currentPatrolController;
+        if ([target isKindOfClass:[UIViewController class]]) {
+            UIViewController *vc = (UIViewController *)target;
+            if (vc.navigationController && vc.navigationController.viewControllers.count > 1) {
+                [vc.navigationController popViewControllerAnimated:YES];
+                return;
+            }
+            if (vc.presentingViewController) {
+                [vc dismissViewControllerAnimated:YES completion:nil];
+                return;
+            }
+        }
+        UIWindow *window = [UIApplication sharedApplication].keyWindow;
+        if (!window) {
+            for (id scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene respondsToSelector:@selector(windows)]) {
+                    for (UIWindow *w in [scene windows]) {
+                        if (w.isKeyWindow) { window = w; break; }
+                    }
+                }
+            }
+        }
+        if (!window && [UIApplication sharedApplication].windows.count > 0) {
+            window = [UIApplication sharedApplication].windows.firstObject;
+        }
+        UIViewController *topVC = window.rootViewController;
+        while (topVC.presentedViewController) topVC = topVC.presentedViewController;
+        if ([topVC isKindOfClass:[UINavigationController class]]) {
+            topVC = [(UINavigationController *)topVC topViewController];
+        }
+        if (topVC.navigationController && topVC.navigationController.viewControllers.count > 1) {
+            [topVC.navigationController popViewControllerAnimated:YES];
+        } else if (topVC.presentingViewController) {
+            [topVC dismissViewControllerAnimated:YES completion:nil];
+        }
+    });
+}
+
 static void installPatrolAutoPilot(id controller) {
     if (![AntForestManager sharedInstance].enableAutoPatrol) return;
+    currentPatrolController = controller;
     id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![webView respondsToSelector:evaluate]) return;
@@ -213,7 +256,8 @@ static void installPatrolAutoPilot(id controller) {
     NSString *script = @"(()=>{if(window.__afPatrolInstalled)return'already';"
     "window.__afPatrolInstalled=true;"
     "function sendLog(data){try{prompt('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
-    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0};"
+    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0,hasExited:false};"
+    "setTimeout(()=>{checkAllDoneAndExit();},12000);"
     "function findAndClick(keywords){"
     "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img'));"
     "for(let el of els){"
@@ -242,14 +286,17 @@ static void installPatrolAutoPilot(id controller) {
     "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取']);},800);"
     "}"
     "function checkAllDoneAndExit(){"
+    "if(patrolState.hasExited)return;"
+    "patrolState.hasExited=true;"
     "sendLog({type:'AUTO-PATROL',action:'all_tasks_finished_auto_exit'});"
     "try{localStorage.setItem('__af_patrol_done_date',new Date().toISOString().slice(0,10));}catch(e){}"
     "setTimeout(()=>{"
     "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
     "window.AlipayJSBridge.call('popWindow');"
     "window.AlipayJSBridge.call('exitApp');"
+    "window.AlipayJSBridge.call('closeWebview');"
     "}"
-    "},1500);"
+    "},600);"
     "}"
     "function autoPatrolStep(){"
     "if(patrolState.isBusy)return;"
@@ -1666,18 +1713,7 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
                 NSString *today = [fmt stringFromDate:[NSDate date]];
                 [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastAutoPatrolDoneDate"];
                 [manager recordStage:@"保护地巡护 · 今日任务已全部自动完成并返回森林"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
-                    while (topVC.presentedViewController) topVC = topVC.presentedViewController;
-                    if ([topVC isKindOfClass:[UINavigationController class]]) {
-                        topVC = [(UINavigationController *)topVC topViewController];
-                    }
-                    if (topVC.navigationController && topVC.navigationController.viewControllers.count > 1) {
-                        [topVC.navigationController popViewControllerAnimated:YES];
-                    } else if (topVC.presentingViewController) {
-                        [topVC dismissViewControllerAnimated:YES completion:nil];
-                    }
-                });
+                exitPatrolController(currentPatrolController);
             }
             if (handler) {
                 void (^completionBlock)(NSString *) = handler;
