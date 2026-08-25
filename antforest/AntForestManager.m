@@ -1173,6 +1173,10 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     if (self.jsBridge) {
         [self recordStage:@"收取 · 领奖励：请求任务列表与签到状态"];
         [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
+        
+        NSString *randNum2 = [AntForestManager getNumberRandom:15];
+        NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"requestData\":[{\"version\":\"20230501\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
+        [self.jsBridge _doFlushMessageQueue:forestArg1 url:arg2];
     }
 }
 
@@ -1300,6 +1304,12 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSArray *topList = [data[@"taskInfoList"] isKindOfClass:NSArray.class] ? data[@"taskInfoList"] : nil;
     if (topList.count > 0) {
         [allTaskList addObjectsFromArray:topList];
+    }
+    if (data[@"leafCollectTaskInfo"] && [data[@"leafCollectTaskInfo"] isKindOfClass:NSDictionary.class]) {
+        [allTaskList addObject:@{@"taskBaseInfo": data[@"leafCollectTaskInfo"]}];
+    }
+    if (data[@"leafConvertTaskInfo"] && [data[@"leafConvertTaskInfo"] isKindOfClass:NSDictionary.class]) {
+        [allTaskList addObject:@{@"taskBaseInfo": data[@"leafConvertTaskInfo"]}];
     }
     
     NSMutableArray<NSDictionary *> *accTasks = [NSMutableArray array];
