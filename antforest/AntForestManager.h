@@ -82,6 +82,7 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)addLog:(NSString *)logMessage;
 -(void)recordStage:(NSString *)stage;
 -(void)recordProbeLog:(NSString *)log;
+-(void)clearProbeLogs;
 @property (nonatomic, readonly) NSArray<NSString *> *probeRecords;
 
 // 任务中心：自动签到与领奖励

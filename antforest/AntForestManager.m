@@ -719,7 +719,7 @@ static BOOL isNoiseProbeLog(NSString *log) {
 
 - (void)recordProbeLog:(NSString *)log {
     if (!log.length) return;
-    if (isNoiseProbeLog(log)) return; // 过滤掉无关的数百KB营销游戏列表与系统UI探针
+    if (isNoiseProbeLog(log)) return; // 过滤掉无关的营销游戏列表与系统UI探针
     
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -729,19 +729,49 @@ static BOOL isNoiseProbeLog(NSString *log) {
     NSString *entry = [NSString stringWithFormat:@"[%@] %@", timeStr, log];
     @synchronized (patrolProbeLogs) {
         [patrolProbeLogs addObject:entry];
+        if (patrolProbeLogs.count > 200) {
+            [patrolProbeLogs removeObjectsInRange:NSMakeRange(0, patrolProbeLogs.count - 200)];
+        }
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         @try {
             NSString *docPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
             NSString *filePath = [docPath stringByAppendingPathComponent:@"AntForestPatrolProbe.log"];
+            NSFileManager *fm = [NSFileManager defaultManager];
+            
+            // 文件大小超 1MB 时自动滚动裁剪，防止占用手机存储
+            NSDictionary *attrs = [fm attributesOfItemAtPath:filePath error:nil];
+            if (attrs && [attrs fileSize] > 1024 * 1024) {
+                NSString *content = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:nil];
+                NSArray *lines = [content componentsSeparatedByString:@"\n\n"];
+                if (lines.count > 100) {
+                    NSArray *tailLines = [lines subarrayWithRange:NSMakeRange(lines.count - 100, 100)];
+                    NSString *newContent = [tailLines componentsJoinedByString:@"\n\n"];
+                    [newContent writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                }
+            }
+            
             NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:filePath];
             if (!handle) {
-                [[NSFileManager defaultManager] createFileAtPath:filePath contents:nil attributes:nil];
+                [fm createFileAtPath:filePath contents:nil attributes:nil];
                 handle = [NSFileHandle fileHandleForWritingAtPath:filePath];
             }
             [handle seekToEndOfFile];
             [handle writeData:[[entry stringByAppendingString:@"\n\n"] dataUsingEncoding:NSUTF8StringEncoding]];
             [handle closeFile];
+        } @catch (NSException *e) {}
+    });
+}
+
+- (void)clearProbeLogs {
+    @synchronized (patrolProbeLogs) {
+        [patrolProbeLogs removeAllObjects];
+    }
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
+        @try {
+            NSString *docPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+            NSString *filePath = [docPath stringByAppendingPathComponent:@"AntForestPatrolProbe.log"];
+            [[NSFileManager defaultManager] removeItemAtPath:filePath error:nil];
         } @catch (NSException *e) {}
     });
 }

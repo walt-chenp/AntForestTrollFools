@@ -1127,6 +1127,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)clearLogs {
     [((AntForestManager *)[AntForestManager sharedInstance]).logRecord removeAllObjects];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"logRecord"];
+    [[AntForestManager sharedInstance] clearProbeLogs];
     [self.tableView reloadData];
 }
 
