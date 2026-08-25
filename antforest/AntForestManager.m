@@ -729,9 +729,6 @@ static BOOL isNoiseProbeLog(NSString *log) {
     NSString *entry = [NSString stringWithFormat:@"[%@] %@", timeStr, log];
     @synchronized (patrolProbeLogs) {
         [patrolProbeLogs addObject:entry];
-        if (patrolProbeLogs.count > 500) {
-            [patrolProbeLogs removeObjectAtIndex:0];
-        }
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
         @try {
