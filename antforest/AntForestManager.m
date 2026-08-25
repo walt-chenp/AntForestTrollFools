@@ -748,8 +748,27 @@ static BOOL isNoiseProbeLog(NSString *log) {
 
 - (NSArray<NSString *> *)probeRecords {
     @synchronized (patrolProbeLogs) {
-        return [patrolProbeLogs copy] ?: @[];
+        if (patrolProbeLogs.count > 0) {
+            return [patrolProbeLogs copy];
+        }
     }
+    @try {
+        NSString *docPath = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *filePath = [docPath stringByAppendingPathComponent:@"AntForestPatrolProbe.log"];
+        if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+            NSString *content = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:nil];
+            if (content.length) {
+                NSArray *lines = [content componentsSeparatedByString:@"\n\n"];
+                NSMutableArray *res = [NSMutableArray array];
+                for (NSString *l in lines) {
+                    NSString *trim = [l stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                    if (trim.length) [res addObject:trim];
+                }
+                return res;
+            }
+        }
+    } @catch (NSException *e) {}
+    return @[];
 }
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
