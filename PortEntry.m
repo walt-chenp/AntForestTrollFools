@@ -1147,11 +1147,12 @@ static void installEarnEnergyCollector(id controller) {
     }
     
     NSArray *probes = manager.probeRecords;
-    [fullOutput appendFormat:@"\n\n========================================\n📋 保护地巡护 / 全量 H5 RPC 抓包探针数据（共 %lu 条）\n========================================\n\n", (unsigned long)probes.count];
+    [fullOutput appendFormat:@"\n\n========================================\n📋 保护地巡护 / 寻宝抽奖 / 全量 H5 RPC 抓包探针数据（共 %lu 条，最新排在最前）\n========================================\n\n", (unsigned long)probes.count];
     if (probes.count) {
-        [fullOutput appendString:[probes componentsJoinedByString:@"\n\n"]];
+        NSArray *reversedProbes = probes.reverseObjectEnumerator.allObjects;
+        [fullOutput appendString:[reversedProbes componentsJoinedByString:@"\n\n"]];
     } else {
-        [fullOutput appendString:@"暂未捕获到 H5 RPC 请求（请先打开保护地巡护页面进行操作）\n"];
+        [fullOutput appendString:@"暂未捕获到 H5 RPC 请求（请先打开相应页面进行操作）\n"];
     }
     
     UIPasteboard.generalPasteboard.string = fullOutput;
