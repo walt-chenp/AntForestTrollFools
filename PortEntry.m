@@ -269,18 +269,19 @@ static void installPatrolAutoPilot(id controller) {
     "for(let card of cards){"
     "const txt=card.innerText||card.textContent||'';"
     "if(txt.includes('巡护中')||txt.includes('已派遣'))return;"
-    "if(txt.includes(kw)){card.click();setTimeout(()=>{findAndClick(['派它巡护森林','立即派遣','派遣']);},300);return;}"
+    "if(txt.includes(kw)){card.click();sendLog({type:'AUTO-PATROL',action:'dispatch_animal',animal:kw});setTimeout(()=>{findAndClick(['派它巡护森林','立即派遣','派遣']);},300);return;}"
     "}"
     "}"
     "for(let kw of midYields){"
     "for(let card of cards){"
     "const txt=card.innerText||card.textContent||'';"
     "if(txt.includes('巡护中')||txt.includes('已派遣'))return;"
-    "if(txt.includes(kw)){card.click();setTimeout(()=>{findAndClick(['派它巡护森林','立即派遣','派遣']);},300);return;}"
+    "if(txt.includes(kw)){card.click();sendLog({type:'AUTO-PATROL',action:'dispatch_animal',animal:kw});setTimeout(()=>{findAndClick(['派它巡护森林','立即派遣','派遣']);},300);return;}"
     "}"
     "}"
     "}"
     "if(location.href.includes('animalBook.html')){"
+    "sendLog({type:'AUTO-PATROL',action:'synthesize_animal'});"
     "findAndClick(['立即合成','合成物种','一键合成','合成']);"
     "setTimeout(dispatchSmartAnimal,600);"
     "}"
@@ -1427,35 +1428,6 @@ static void portViewDidLoad(id self, SEL _cmd) {
     dispatch_once(&onceToken, ^{ initializeManager(); });
 }
 
-static void installForestPatrolAutoTrigger(id controller) {
-    if (![AntForestManager sharedInstance].enableAutoPatrol) return;
-    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
-    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if (![webView respondsToSelector:evaluate]) return;
-    
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"yyyy-MM-dd";
-    NSString *today = [fmt stringFromDate:[NSDate date]];
-    NSString *lastDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"lastAutoPatrolDoneDate"];
-    if ([today isEqualToString:lastDate]) return;
-    
-    NSString *script = [NSString stringWithFormat:@"(()=>{if(window.__afPatrolTriggered)return'already';"
-    "window.__afPatrolTriggered=1;"
-    "const today='%@';"
-    "if(localStorage.getItem('__af_patrol_done_date')===today)return'done-today';"
-    "setTimeout(()=>{"
-    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
-    "window.AlipayJSBridge.call('pushWindow',{url:'https://68687842.h5app.alipay.com/www/protect.html'});"
-    "}"
-    "},2000);"
-    "return'scheduled';})()", today];
-    
-    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
-        NSLog(@"[AntForestPatrol] Forest Home Auto Trigger result: %@ error: %@", result, error);
-    });
-}
-
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     [[AFStepSimulator shared] installAvailableHooks];
@@ -1476,11 +1448,6 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
         });
-        if (manager.enableAutoPatrol) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                installForestPatrolAutoTrigger(self);
-            });
-        }
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1609,12 +1576,31 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
             NSString *payload = [str substringFromIndex:11];
             NSLog(@"\n🔍 [PatrolProbe-HOOK]\n📦 %@", payload);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[PATROL-HOOK] %@", payload]];
-            if ([payload containsString:@"all_tasks_finished_auto_exit"]) {
+            
+            NSDictionary *dict = nil;
+            NSData *d = [payload dataUsingEncoding:NSUTF8StringEncoding];
+            if (d) dict = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+            NSString *action = [dict isKindOfClass:NSDictionary.class] ? dict[@"action"] : nil;
+            AntForestManager *manager = [AntForestManager sharedInstance];
+            
+            if ([action isEqualToString:@"patrol_forward"]) {
+                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：自动走步（剩余机会 %@ 次）", dict[@"leftChance"] ?: @"1"]];
+            } else if ([action isEqualToString:@"quiz_found"]) {
+                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：智能满分答题（题目：%@）", dict[@"q"] ?: @"科普问答"]];
+            } else if ([action isEqualToString:@"exchange_step"]) {
+                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：自动兑换步数（剩余 %ld 步，今日已兑 %ld 步）", (long)[dict[@"leftStep"] integerValue], (long)[dict[@"usedStep"] integerValue]]];
+            } else if ([action isEqualToString:@"skip_dispatch_already_active"]) {
+                [manager recordStage:@"收取 · 保护地巡护：已有动物在岗巡护中，自动保护当前动物"];
+            } else if ([action isEqualToString:@"dispatch_animal"]) {
+                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：智能高收益派遣动物（%@）", dict[@"animal"] ?: @"最优物种"]];
+            } else if ([action isEqualToString:@"synthesize_animal"]) {
+                [manager recordStage:@"收取 · 保护地巡护：自动一键合成物种碎片"];
+            } else if ([action isEqualToString:@"all_tasks_finished_auto_exit"]) {
                 NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
                 fmt.dateFormat = @"yyyy-MM-dd";
                 NSString *today = [fmt stringFromDate:[NSDate date]];
                 [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastAutoPatrolDoneDate"];
-                [[AntForestManager sharedInstance] recordStage:@"收取 · 保护地巡护：今日任务已全部自动完成并返回森林"];
+                [manager recordStage:@"收取 · 保护地巡护：今日任务已全部自动完成并返回森林"];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
                     while (topVC.presentedViewController) topVC = topVC.presentedViewController;
