@@ -622,7 +622,7 @@ static void installEarnEnergyCollector(id controller) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"步数模拟设置（测试）";
+    self.title = @"步数模拟设置";
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
     AFStepSimulator *simulator = AFStepSimulator.shared;
@@ -703,7 +703,7 @@ static void installEarnEnergyCollector(id controller) {
     [scrollView addSubview:contentView];
     
     UIButton *schedule = [self settingsButtonWithTitle:@"定时收取设置" detail:@"管理每日固定收取时刻" icon:@"calendar" action:@selector(showSchedule)];
-    UIButton *step = [self settingsButtonWithTitle:@"步数模拟设置（测试）" detail:@"独立配置支付宝可见步数" icon:@"figure.walk" action:@selector(showStepSimulator)];
+    UIButton *step = [self settingsButtonWithTitle:@"步数模拟设置" detail:@"独立配置支付宝可见步数" icon:@"figure.walk" action:@selector(showStepSimulator)];
     UIButton *water = [self settingsButtonWithTitle:@"好友浇水设置" detail:@"选择好友、克数与定时任务" icon:@"drop.fill" action:@selector(showWater)];
     UIButton *revive = [self settingsButtonWithTitle:@"自动复活好友过期能量" detail:@"每日最多帮助 6 位可复活好友" icon:@"heart.circle.fill" action:nil];
     UISwitch *reviveSwitch = [[UISwitch alloc] init]; reviveSwitch.on = AntForestManager.sharedInstance.enableAutoRevive; reviveSwitch.translatesAutoresizingMaskIntoConstraints = NO; [reviveSwitch addTarget:self action:@selector(toggleAutoRevive:) forControlEvents:UIControlEventValueChanged]; [revive addSubview:reviveSwitch];
