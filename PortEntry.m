@@ -1428,6 +1428,35 @@ static void portViewDidLoad(id self, SEL _cmd) {
     dispatch_once(&onceToken, ^{ initializeManager(); });
 }
 
+static void installForestPatrolAutoTrigger(id controller) {
+    if (![AntForestManager sharedInstance].enableAutoPatrol) return;
+    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) return;
+    
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.dateFormat = @"yyyy-MM-dd";
+    NSString *today = [fmt stringFromDate:[NSDate date]];
+    NSString *lastDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"lastAutoPatrolDoneDate"];
+    if ([today isEqualToString:lastDate]) return;
+    
+    NSString *script = [NSString stringWithFormat:@"(()=>{if(window.__afPatrolTriggered)return'already';"
+    "window.__afPatrolTriggered=1;"
+    "const today='%@';"
+    "if(localStorage.getItem('__af_patrol_done_date')===today)return'done-today';"
+    "setTimeout(()=>{"
+    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
+    "window.AlipayJSBridge.call('pushWindow',{url:'https://68687842.h5app.alipay.com/www/protect.html'});"
+    "}"
+    "},2500);"
+    "return'scheduled';})()", today];
+    
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
+        NSLog(@"[AntForestPatrol] Forest Home Auto Trigger result: %@ error: %@", result, error);
+    });
+}
+
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     [[AFStepSimulator shared] installAvailableHooks];
@@ -1448,6 +1477,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
         });
+        if (manager.enableAutoPatrol) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                installForestPatrolAutoTrigger(self);
+            });
+        }
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
