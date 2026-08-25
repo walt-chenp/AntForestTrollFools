@@ -729,8 +729,8 @@ static BOOL isNoiseProbeLog(NSString *log) {
     NSString *entry = [NSString stringWithFormat:@"[%@] %@", timeStr, log];
     @synchronized (patrolProbeLogs) {
         [patrolProbeLogs addObject:entry];
-        if (patrolProbeLogs.count > 200) {
-            [patrolProbeLogs removeObjectsInRange:NSMakeRange(0, patrolProbeLogs.count - 200)];
+        if (patrolProbeLogs.count > 1000) {
+            [patrolProbeLogs removeObjectsInRange:NSMakeRange(0, patrolProbeLogs.count - 1000)];
         }
     }
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
@@ -739,13 +739,13 @@ static BOOL isNoiseProbeLog(NSString *log) {
             NSString *filePath = [docPath stringByAppendingPathComponent:@"AntForestPatrolProbe.log"];
             NSFileManager *fm = [NSFileManager defaultManager];
             
-            // 文件大小超 1MB 时自动滚动裁剪，防止占用手机存储
+            // 文件大小超 10MB 时自动滚动裁剪，保证测试数据完整性的同时防止无限膨胀
             NSDictionary *attrs = [fm attributesOfItemAtPath:filePath error:nil];
-            if (attrs && [attrs fileSize] > 1024 * 1024) {
+            if (attrs && [attrs fileSize] > 10 * 1024 * 1024) {
                 NSString *content = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:nil];
                 NSArray *lines = [content componentsSeparatedByString:@"\n\n"];
-                if (lines.count > 100) {
-                    NSArray *tailLines = [lines subarrayWithRange:NSMakeRange(lines.count - 100, 100)];
+                if (lines.count > 500) {
+                    NSArray *tailLines = [lines subarrayWithRange:NSMakeRange(lines.count - 500, 500)];
                     NSString *newContent = [tailLines componentsJoinedByString:@"\n\n"];
                     [newContent writeToFile:filePath atomically:YES encoding:NSUTF8StringEncoding error:nil];
                 }
