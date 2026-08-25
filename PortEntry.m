@@ -204,51 +204,8 @@ static BOOL isPatrolURL(NSURL *url, id controller) {
     return NO;
 }
 
-static __weak id currentPatrolController = nil;
-
-static void exitPatrolController(id controller) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        id target = controller ?: currentPatrolController;
-        if ([target isKindOfClass:[UIViewController class]]) {
-            UIViewController *vc = (UIViewController *)target;
-            if (vc.navigationController && vc.navigationController.viewControllers.count > 1) {
-                [vc.navigationController popViewControllerAnimated:YES];
-                return;
-            }
-            if (vc.presentingViewController) {
-                [vc dismissViewControllerAnimated:YES completion:nil];
-                return;
-            }
-        }
-        UIWindow *window = [UIApplication sharedApplication].keyWindow;
-        if (!window) {
-            for (id scene in [UIApplication sharedApplication].connectedScenes) {
-                if ([scene respondsToSelector:@selector(windows)]) {
-                    for (UIWindow *w in [scene windows]) {
-                        if (w.isKeyWindow) { window = w; break; }
-                    }
-                }
-            }
-        }
-        if (!window && [UIApplication sharedApplication].windows.count > 0) {
-            window = [UIApplication sharedApplication].windows.firstObject;
-        }
-        UIViewController *topVC = window.rootViewController;
-        while (topVC.presentedViewController) topVC = topVC.presentedViewController;
-        if ([topVC isKindOfClass:[UINavigationController class]]) {
-            topVC = [(UINavigationController *)topVC topViewController];
-        }
-        if (topVC.navigationController && topVC.navigationController.viewControllers.count > 1) {
-            [topVC.navigationController popViewControllerAnimated:YES];
-        } else if (topVC.presentingViewController) {
-            [topVC dismissViewControllerAnimated:YES completion:nil];
-        }
-    });
-}
-
 static void installPatrolAutoPilot(id controller) {
     if (![AntForestManager sharedInstance].enableAutoPatrol) return;
-    currentPatrolController = controller;
     id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![webView respondsToSelector:evaluate]) return;
@@ -256,8 +213,7 @@ static void installPatrolAutoPilot(id controller) {
     NSString *script = @"(()=>{if(window.__afPatrolInstalled)return'already';"
     "window.__afPatrolInstalled=true;"
     "function sendLog(data){try{prompt('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
-    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0,hasExited:false};"
-    "setTimeout(()=>{checkAllDoneAndExit();},12000);"
+    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0,reportedDone:false};"
     "function findAndClick(keywords){"
     "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img'));"
     "for(let el of els){"
@@ -284,19 +240,6 @@ static void installPatrolAutoPilot(id controller) {
     "},600);}"
     "}}"
     "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取']);},800);"
-    "}"
-    "function checkAllDoneAndExit(){"
-    "if(patrolState.hasExited)return;"
-    "patrolState.hasExited=true;"
-    "sendLog({type:'AUTO-PATROL',action:'all_tasks_finished_auto_exit'});"
-    "try{localStorage.setItem('__af_patrol_done_date',new Date().toISOString().slice(0,10));}catch(e){}"
-    "setTimeout(()=>{"
-    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
-    "window.AlipayJSBridge.call('popWindow');"
-    "window.AlipayJSBridge.call('exitApp');"
-    "window.AlipayJSBridge.call('closeWebview');"
-    "}"
-    "},600);"
     "}"
     "function autoPatrolStep(){"
     "if(patrolState.isBusy)return;"
@@ -327,8 +270,9 @@ static void installPatrolAutoPilot(id controller) {
     "return;"
     "}"
     "}"
-    "if(patrolState.noBtnCount>=4||patrolState.leftChance===0){"
-    "checkAllDoneAndExit();"
+    "if((patrolState.noBtnCount>=4||patrolState.leftChance===0)&&!patrolState.reportedDone){"
+    "patrolState.reportedDone=true;"
+    "sendLog({type:'AUTO-PATROL',action:'all_tasks_finished'});"
     "}"
     "}"
     "}"
@@ -381,6 +325,11 @@ static void installPatrolAutoPilot(id controller) {
     "}"
     "setTimeout(autoPatrolStep,1000);"
     "if(origCb)origCb(res);"
+    "};"
+    "return _call.call(this,name,params,cb);"
+    "}"
+    "return _call.apply(this,arguments);"
+    "};"
     "sendLog({type:'STATUS',msg:'AlipayJSBridge Patrol Hooked & AutoPilot Active'});"
     "setTimeout(autoPatrolStep,1000);"
     "setInterval(autoPatrolStep,2500);"
@@ -781,7 +730,7 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
     UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
-    UIButton *patrol = [self settingsButtonWithTitle:@"保护地巡护（走步/答题/合成）" detail:@"自动走步、自动答题与步数兑换" icon:@"leaf.circle.fill" action:nil];
+    UIButton *patrol = [self settingsButtonWithTitle:@"保护地巡护（走步/答题/合成）" detail:@"手动进入保护地自动走步、答题与派遣" icon:@"leaf.circle.fill" action:nil];
     UISwitch *patrolSwitch = [[UISwitch alloc] init]; patrolSwitch.on = AntForestManager.sharedInstance.enableAutoPatrol; patrolSwitch.translatesAutoresizingMaskIntoConstraints = NO; [patrolSwitch addTarget:self action:@selector(toggleAutoPatrol:) forControlEvents:UIControlEventValueChanged]; [patrol addSubview:patrolSwitch];
     
     [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:patrol];
@@ -1498,40 +1447,6 @@ static void portViewDidLoad(id self, SEL _cmd) {
     dispatch_once(&onceToken, ^{ initializeManager(); });
 }
 
-static void installForestPatrolAutoTrigger(id controller) {
-    if (![AntForestManager sharedInstance].enableAutoPatrol) return;
-    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
-    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if (![webView respondsToSelector:evaluate]) return;
-    
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    fmt.dateFormat = @"yyyy-MM-dd";
-    NSString *today = [fmt stringFromDate:[NSDate date]];
-    NSString *lastDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"lastAutoPatrolDoneDate"];
-    if ([today isEqualToString:lastDate]) return;
-    
-    NSString *script = [NSString stringWithFormat:@"(()=>{if(window.__afPatrolTriggered)return'already';"
-    "window.__afPatrolTriggered=1;"
-    "const today='%@';"
-    "if(localStorage.getItem('__af_patrol_done_date')===today)return'done-today';"
-    "setTimeout(()=>{"
-    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
-    "window.AlipayJSBridge.call('startApp',{"
-    "appId:'68687842',"
-    "param:{source:'ANT_FOREST_ly'}"
-    "});"
-    "}else{"
-    "window.location.href='alipays://platformapi/startapp?appId=68687842&source=ANT_FOREST_ly';"
-    "}"
-    "},3000);"
-    "return'scheduled';})()", today];
-    
-    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
-        NSLog(@"[AntForestPatrol] Forest Home Auto Trigger result: %@ error: %@", result, error);
-    });
-}
-
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     [[AFStepSimulator shared] installAvailableHooks];
@@ -1552,11 +1467,6 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
         });
-        if (manager.enableAutoPatrol) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                installForestPatrolAutoTrigger(self);
-            });
-        }
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1707,13 +1617,8 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
                 [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 智能高收益派遣动物（%@）", dict[@"animal"] ?: @"最优物种"]];
             } else if ([action isEqualToString:@"synthesize_animal"]) {
                 [manager recordStage:@"保护地巡护 · 自动一键合成物种碎片"];
-            } else if ([action isEqualToString:@"all_tasks_finished_auto_exit"]) {
-                NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-                fmt.dateFormat = @"yyyy-MM-dd";
-                NSString *today = [fmt stringFromDate:[NSDate date]];
-                [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastAutoPatrolDoneDate"];
-                [manager recordStage:@"保护地巡护 · 今日任务已全部自动完成并返回森林"];
-                exitPatrolController(currentPatrolController);
+            } else if ([action isEqualToString:@"all_tasks_finished"]) {
+                [manager recordStage:@"保护地巡护 · 今日巡护与步数已全部完成"];
             }
             if (handler) {
                 void (^completionBlock)(NSString *) = handler;
