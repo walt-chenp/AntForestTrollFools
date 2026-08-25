@@ -162,7 +162,7 @@ static id stepSimulatorHKStatisticsSumQuantity(id self, SEL _cmd) {
         if ([self.reportedAPIs containsObject:api]) return;
         [self.reportedAPIs addObject:api];
         NSLog(@"[AntForestStepSim] hit %@ real=%ld simulated=%ld", api, (long)realStep, (long)simulatedStep);
-        [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"收取 · 步数模拟：真实 %ld 步 → 模拟 %ld 步", (long)realStep, (long)simulatedStep]];
+        [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"步数模拟 · 真实 %ld 步 → 模拟 %ld 步", (long)realStep, (long)simulatedStep]];
     }
 }
 

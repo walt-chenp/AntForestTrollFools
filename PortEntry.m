@@ -757,10 +757,10 @@ static void installEarnEnergyCollector(id controller) {
 - (void)showSchedule { [self.navigationController pushViewController:[[AntForestSchedulePanel alloc] init] animated:YES]; }
 - (void)showStepSimulator { [self.navigationController pushViewController:[[AntForestStepSimulatorPanel alloc] init] animated:YES]; }
 - (void)showWater { [self.navigationController pushViewController:[[AntForestWaterPanel alloc] init] animated:YES]; }
-- (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 自动复活好友过期能量已%@", sender.on ? @"开启" : @"关闭"]]; }
-- (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 赚能量（打地鼠玩法）已%@", sender.on ? @"开启" : @"关闭"]]; }
-- (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 神奇海洋自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
-- (void)toggleAutoPatrol:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrol = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrol"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"收取 · 保护地自动巡护已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"复活能量 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"打地鼠 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoPatrol:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrol = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrol"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"保护地巡护 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
 @end
@@ -1584,23 +1584,23 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
             AntForestManager *manager = [AntForestManager sharedInstance];
             
             if ([action isEqualToString:@"patrol_forward"]) {
-                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：自动走步（剩余机会 %@ 次）", dict[@"leftChance"] ?: @"1"]];
+                [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 自动走步（剩余机会 %@ 次）", dict[@"leftChance"] ?: @"1"]];
             } else if ([action isEqualToString:@"quiz_found"]) {
-                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：智能满分答题（题目：%@）", dict[@"q"] ?: @"科普问答"]];
+                [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 智能满分答题（题目：%@）", dict[@"q"] ?: @"科普问答"]];
             } else if ([action isEqualToString:@"exchange_step"]) {
-                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：自动兑换步数（剩余 %ld 步，今日已兑 %ld 步）", (long)[dict[@"leftStep"] integerValue], (long)[dict[@"usedStep"] integerValue]]];
+                [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 自动兑换步数（剩余 %ld 步，今日已兑 %ld 步）", (long)[dict[@"leftStep"] integerValue], (long)[dict[@"usedStep"] integerValue]]];
             } else if ([action isEqualToString:@"skip_dispatch_already_active"]) {
-                [manager recordStage:@"收取 · 保护地巡护：已有动物在岗巡护中，自动保护当前动物"];
+                [manager recordStage:@"保护地巡护 · 已有动物在岗巡护中，自动保护当前动物"];
             } else if ([action isEqualToString:@"dispatch_animal"]) {
-                [manager recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护：智能高收益派遣动物（%@）", dict[@"animal"] ?: @"最优物种"]];
+                [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 智能高收益派遣动物（%@）", dict[@"animal"] ?: @"最优物种"]];
             } else if ([action isEqualToString:@"synthesize_animal"]) {
-                [manager recordStage:@"收取 · 保护地巡护：自动一键合成物种碎片"];
+                [manager recordStage:@"保护地巡护 · 自动一键合成物种碎片"];
             } else if ([action isEqualToString:@"all_tasks_finished_auto_exit"]) {
                 NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
                 fmt.dateFormat = @"yyyy-MM-dd";
                 NSString *today = [fmt stringFromDate:[NSDate date]];
                 [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastAutoPatrolDoneDate"];
-                [manager recordStage:@"收取 · 保护地巡护：今日任务已全部自动完成并返回森林"];
+                [manager recordStage:@"保护地巡护 · 今日任务已全部自动完成并返回森林"];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
                     while (topVC.presentedViewController) topVC = topVC.presentedViewController;
