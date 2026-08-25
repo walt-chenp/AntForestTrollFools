@@ -224,6 +224,18 @@ static void installPatrolAutoPilot(id controller) {
     "}}"
     "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的']);},800);"
     "}"
+    "function checkAllDoneAndExit(){"
+    "if(patrolState.leftChance===0&&(patrolState.usedStep>=10000||patrolState.leftStep<2000)){"
+    "sendLog({type:'AUTO-PATROL',action:'all_tasks_finished_auto_exit'});"
+    "try{localStorage.setItem('__af_patrol_done_date',new Date().toISOString().slice(0,10));}catch(e){}"
+    "setTimeout(()=>{"
+    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
+    "window.AlipayJSBridge.call('popWindow');"
+    "window.AlipayJSBridge.call('exitApp');"
+    "}"
+    "},1500);"
+    "}"
+    "}"
     "function autoPatrolStep(){"
     "if(patrolState.isBusy)return;"
     "const now=Date.now();"
@@ -241,6 +253,9 @@ static void installPatrolAutoPilot(id controller) {
     "findAndClick(['确认兑换','确定','兑换','我知道了']);"
     "setTimeout(()=>{patrolState.isBusy=false;},1000);"
     "},800);"
+    "}else if(patrolState.leftChance===0){"
+    "checkAllDoneAndExit();"
+    "}"
     "}"
     "function dispatchSmartAnimal(){"
     "const bodyText=document.body?document.body.innerText||'':'';"
@@ -1412,6 +1427,35 @@ static void portViewDidLoad(id self, SEL _cmd) {
     dispatch_once(&onceToken, ^{ initializeManager(); });
 }
 
+static void installForestPatrolAutoTrigger(id controller) {
+    if (![AntForestManager sharedInstance].enableAutoPatrol) return;
+    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if (![webView respondsToSelector:evaluate]) return;
+    
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    fmt.dateFormat = @"yyyy-MM-dd";
+    NSString *today = [fmt stringFromDate:[NSDate date]];
+    NSString *lastDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"lastAutoPatrolDoneDate"];
+    if ([today isEqualToString:lastDate]) return;
+    
+    NSString *script = [NSString stringWithFormat:@"(()=>{if(window.__afPatrolTriggered)return'already';"
+    "window.__afPatrolTriggered=1;"
+    "const today='%@';"
+    "if(localStorage.getItem('__af_patrol_done_date')===today)return'done-today';"
+    "setTimeout(()=>{"
+    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call){"
+    "window.AlipayJSBridge.call('pushWindow',{url:'https://68687842.h5app.alipay.com/www/protect.html'});"
+    "}"
+    "},2000);"
+    "return'scheduled';})()", today];
+    
+    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+    runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
+        NSLog(@"[AntForestPatrol] Forest Home Auto Trigger result: %@ error: %@", result, error);
+    });
+}
+
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     [[AFStepSimulator shared] installAvailableHooks];
@@ -1432,6 +1476,11 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installGiftFullProbe(self);
         });
+        if (manager.enableAutoPatrol) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                installForestPatrolAutoTrigger(self);
+            });
+        }
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1560,6 +1609,25 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
             NSString *payload = [str substringFromIndex:11];
             NSLog(@"\n🔍 [PatrolProbe-HOOK]\n📦 %@", payload);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[PATROL-HOOK] %@", payload]];
+            if ([payload containsString:@"all_tasks_finished_auto_exit"]) {
+                NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+                fmt.dateFormat = @"yyyy-MM-dd";
+                NSString *today = [fmt stringFromDate:[NSDate date]];
+                [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastAutoPatrolDoneDate"];
+                [[AntForestManager sharedInstance] recordStage:@"收取 · 保护地巡护：今日任务已全部自动完成并返回森林"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+                    while (topVC.presentedViewController) topVC = topVC.presentedViewController;
+                    if ([topVC isKindOfClass:[UINavigationController class]]) {
+                        topVC = [(UINavigationController *)topVC topViewController];
+                    }
+                    if (topVC.navigationController && topVC.navigationController.viewControllers.count > 1) {
+                        [topVC.navigationController popViewControllerAnimated:YES];
+                    } else if (topVC.presentingViewController) {
+                        [topVC dismissViewControllerAnimated:YES completion:nil];
+                    }
+                });
+            }
             if (handler) {
                 void (^completionBlock)(NSString *) = handler;
                 completionBlock(nil);
