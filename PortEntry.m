@@ -1719,17 +1719,35 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     if (manager.enableAutoCollect && manager.enableSelfCollect && isMyHomeResponse(value, manager)) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(700 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{ tryAutoCollectWaterGift(); });
     }
-    return originalTransformResponseData(self, _cmd, value);
+    if (originalTransformResponseData) {
+        return originalTransformResponseData(self, _cmd, value);
+    }
+    return value;
 }
 
 static void portUpdateBridgeReadyStatus(id self, SEL _cmd, id value) {
-    originalUpdateBridgeReadyStatus(self, _cmd, value);
-    if ([self respondsToSelector:@selector(isBridgeReady)] && !((BOOL (*)(id, SEL))objc_msgSend)(self, @selector(isBridgeReady))) return;
-    id controller = forestControllerForBridge(self);
-    NSURL *url = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
-    if (isForestHomeURL(url) && !isEarnEnergyURL(url)) {
-        objc_setAssociatedObject(controller, ForestHomeBridgeKey, self, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        finishForestHomeStart(controller, self);
+    if (originalUpdateBridgeReadyStatus) {
+        originalUpdateBridgeReadyStatus(self, _cmd, value);
+    }
+    static BOOL isUpdatingBridge = NO;
+    if (isUpdatingBridge) return;
+    isUpdatingBridge = YES;
+    @try {
+        if ([self respondsToSelector:@selector(isBridgeReady)] && !((BOOL (*)(id, SEL))objc_msgSend)(self, @selector(isBridgeReady))) {
+            isUpdatingBridge = NO;
+            return;
+        }
+        id controller = forestControllerForBridge(self);
+        NSURL *url = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
+        if (isForestHomeURL(url) && !isEarnEnergyURL(url)) {
+            objc_setAssociatedObject(controller, ForestHomeBridgeKey, self, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                finishForestHomeStart(controller, self);
+            });
+        }
+    } @catch (NSException *e) {
+    } @finally {
+        isUpdatingBridge = NO;
     }
 }
 
