@@ -1200,7 +1200,10 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [lowerType containsString:@"baoxian"] ||
         [lowerType containsString:@"watering"] ||
         [lowerType containsString:@"jiaoshui"] ||
-        [lowerType containsString:@"exchange_vitality"]) {
+        [lowerType containsString:@"exchange_vitality"] ||
+        [lowerType isEqualToString:@"energyrain"] ||
+        [lowerType containsString:@"continuous_collect"] ||
+        [lowerType containsString:@"energy_xuanjiao"]) {
         return NO;
     }
     if ([lowerTitle containsString:@"保障"] ||
@@ -1238,23 +1241,10 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     // 4. 活动寻宝任务列表 (ANTFOREST_ACTIVITY_DRAW_TASK)
     NSString *activityDrawArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum4];
     [self.jsBridge _doFlushMessageQueue:activityDrawArg url:arg2];
-    
-    // 5. 寻宝抽奖信息查询
-    [self queryDrawInfo];
 }
 
 -(void)queryDrawInfo {
-    if (!self.enableAutoRewardTasks || !self.jsBridge) return;
-    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
-    NSString *randNum1 = [AntForestManager getNumberRandom:15];
-    NSString *randNum2 = [AntForestManager getNumberRandom:15];
-    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&sceneCode=ANTFOREST_ACTIVITY_DRAW&source=task_entry&chInfo=task_entry";
-    
-    NSString *drawArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryActivity\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum1];
-    [self.jsBridge _doFlushMessageQueue:drawArg1 url:arg2];
-
-    NSString *drawArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryActivity\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
-    [self.jsBridge _doFlushMessageQueue:drawArg2 url:arg2];
+    // 抽奖信息已由 home.html 首页返回的 drawEntranceVO 全量提供，无需额外发送 RPC
 }
 
 static BOOL isLotteryDrawing = NO;
@@ -1481,7 +1471,8 @@ static BOOL isLotteryDrawing = NO;
             NSDictionary *rights = [t[@"taskRights"] isKindOfClass:NSDictionary.class] ? t[@"taskRights"] : nil;
             NSInteger rightsTimes = [rights[@"rightsTimes"] integerValue];
             NSInteger awardCount = [rights[@"awardCount"] integerValue];
-            if ([taskStatus isEqualToString:@"FINISHED"] || rightsTimes > 0) {
+            NSInteger alreadyReceive = [rights[@"alreadyReceiveAwardCount"] integerValue];
+            if (![taskStatus isEqualToString:@"RECEIVED"] && alreadyReceive == 0 && ([taskStatus isEqualToString:@"FINISHED"] || rightsTimes > 0)) {
                 [accTasks addObject:@{
                     @"action": @"receive",
                     @"taskType": taskType,
