@@ -1257,17 +1257,28 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     [self.jsBridge _doFlushMessageQueue:drawArg2 url:arg2];
 }
 
+static BOOL isLotteryDrawing = NO;
+
 -(void)triggerLotteryDraw:(NSString *)sceneCode activityId:(NSString *)activityId {
     if (!self.enableAutoRewardTasks || !self.jsBridge) return;
+    if (isLotteryDrawing) return;
+    isLotteryDrawing = YES;
+    
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_NORMAL_DRAW";
-    NSString *actId = activityId.length ? activityId : @"default";
+    NSString *actId = activityId.length ? activityId : ([scene containsString:@"ACTIVITY"] ? @"20260722" : @"2026081601");
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.draw\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"activityId\":\"%@\",\"requestType\":\"rpc\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, actId, timeStamp, randNum];
-    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync";
+    NSString *outBizNo = [NSString stringWithFormat:@"%@_%@_%@", scene, timeStamp, [AntForestManager getNumberRandom:6]];
+    
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.draw\",\"requestData\":[{\"sceneCode\":\"%@\",\"activityId\":\"%@\",\"drawTimes\":1,\"outBizNo\":\"%@\",\"source\":\"ANTFOREST\",\"requestType\":\"rpc\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, actId, outBizNo, timeStamp, randNum];
+    NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&sceneCode=%@&source=task_entry&chInfo=task_entry", scene];
     
     [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：正在执行抽奖（%@）...", [scene containsString:@"ACTIVITY"] ? @"活动版" : @"普通版"]];
     [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        isLotteryDrawing = NO;
+    });
 }
 
 -(void)signVitalityTask:(NSString *)signId {
