@@ -124,13 +124,22 @@ static void tryAutoCollectWaterGift(void) {
     if (!manager.enableAutoCollect || !manager.enableSelfCollect || !giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt < 45) return;
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![giftProbeWebView respondsToSelector:evaluate]) return;
-    // ponytail: one 4-second recheck covers delayed Canvas rendering; attempt cap still bounds a pathological page.
-    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';const x=Math.round(r.left+r.width*.242),y=Math.round(r.top+r.height*.218);if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}const tap=()=>{const t={identifier:Date.now()%1000000,target:c,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};let attempts=0,misses=0,rechecked=0;window.__afGiftAutoHits=0;window.__afGiftAutoTapResult='';window.__afGiftAutoRunning=1;const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};const probe=(confirm)=>{const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;tap();setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before){misses=0;step()}else if(confirm)done();else{misses++;step()}},1800)};const step=()=>{if(attempts>=60)return done();if(misses>=3){if(rechecked)return done();rechecked=1;return setTimeout(()=>probe(1),4000)}probe(0)};step();return 'started:'+x+','+y})()";
+    
+    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';"
+    "const points=[{x:Math.round(r.left+r.width*.242),y:Math.round(r.top+r.height*.218)},{x:Math.round(r.left+r.width*.78),y:Math.round(r.top+r.height*.65)},{x:Math.round(r.left+r.width*.22),y:Math.round(r.top+r.height*.65)}];"
+    "if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}"
+    "const tap=(pt)=>{const t={identifier:Date.now()%1000000,target:c,clientX:pt.x,clientY:pt.y,pageX:pt.x,pageY:pt.y,screenX:pt.x,screenY:pt.y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};"
+    "let attempts=0,misses=0,rechecked=0;window.__afGiftAutoHits=0;window.__afGiftAutoTapResult='';window.__afGiftAutoRunning=1;"
+    "const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};"
+    "const probe=(confirm)=>{const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;points.forEach(pt=>tap(pt));setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before){misses=0;step()}else if(confirm)done();else{misses++;step()}},1800)};"
+    "const step=()=>{if(attempts>=60)return done();if(misses>=3){if(rechecked)return done();rechecked=1;return setTimeout(()=>probe(1),4000)}probe(0)};"
+    "step();return 'started:multi-points'})()";
+    
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
     runJavaScript(giftProbeWebView, evaluate, script, ^(id result, NSError *error) {
         if (error || ![(NSString *)result hasPrefix:@"started:"]) return;
         lastWaterGiftTapAt = NSDate.date.timeIntervalSince1970;
-        [manager recordStage:@"收取 · 浇水赠能：开始智能连续领取"];
+        [manager recordStage:@"收取 · 浇水赠能/动物能量：开始智能连续多点领取"];
         reportWaterGiftTapResult();
     });
 }
@@ -146,7 +155,7 @@ static void reportWaterGiftTapResult(void) {
             NSArray<NSString *> *parts = [[status substringFromIndex:5] componentsSeparatedByString:@":"];
             NSString *attempts = parts.count > 0 ? parts[0] : @"0";
             NSString *hits = parts.count > 1 ? parts[1] : @"0";
-            [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"收取 · 浇水赠能：智能领取结束（命中 %@ 个，点击 %@ 次）", hits, attempts]];
+            [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"收取 · 浇水赠能/动物能量：智能领取结束（命中 %@ 个，点击 %@ 次）", hits, attempts]];
             return;
         }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ reportWaterGiftTapResult(); });
@@ -183,13 +192,18 @@ static void installEnergyRainCollector(id controller) {
 }
 
 static BOOL isPatrolURL(NSURL *url, id controller) {
-    NSString *str = url.absoluteString;
-    if ([str containsString:@"68687842"] || [str containsString:@"protect.html"] || [str containsString:@"animalBook.html"] || [str containsString:@"protectedArea.html"] || [str containsString:@"patrol"]) {
+    NSString *str = url.absoluteString ? url.absoluteString : @"";
+    if ([str containsString:@"68687842"] ||
+        [str containsString:@"protect"] ||
+        [str containsString:@"animal"] ||
+        [str containsString:@"patrol"] ||
+        [str containsString:@"reserve"] ||
+        [str containsString:@"h5_patrol"]) {
         return YES;
     }
     if ([controller respondsToSelector:@selector(title)]) {
         NSString *t = [controller title];
-        if ([t containsString:@"保护地"] || [t containsString:@"巡护"]) return YES;
+        if ([t containsString:@"保护地"] || [t containsString:@"巡护"] || [t containsString:@"动物"]) return YES;
     }
     if ([controller respondsToSelector:@selector(appId)]) {
         id appIdObj = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(appId));
@@ -199,7 +213,7 @@ static BOOL isPatrolURL(NSURL *url, id controller) {
     if ([controller respondsToSelector:@selector(curUrl)]) {
         id curUrl = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(curUrl));
         NSString *cStr = [curUrl isKindOfClass:NSURL.class] ? [(NSURL *)curUrl absoluteString] : [curUrl description];
-        if ([cStr containsString:@"68687842"] || [cStr containsString:@"protect.html"]) return YES;
+        if ([cStr containsString:@"68687842"] || [cStr containsString:@"protect"] || [cStr containsString:@"animal"] || [cStr containsString:@"patrol"]) return YES;
     }
     return NO;
 }
@@ -215,13 +229,14 @@ static void installPatrolAutoPilot(id controller) {
     "function sendLog(data){try{prompt('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
     "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0,reportedDone:false};"
     "function findAndClick(keywords){"
-    "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img'));"
+    "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img,i,em,[role=\"button\"]'));"
     "for(let el of els){"
     "const txt=(el.innerText||el.textContent||'').trim();"
     "const alt=(el.getAttribute('alt')||'').trim();"
     "const aria=(el.getAttribute('aria-label')||'').trim();"
+    "const title=(el.getAttribute('title')||'').trim();"
     "for(let kw of keywords){"
-    "if(txt===kw||alt===kw||aria===kw||(kw.length>=2&&(txt.includes(kw)||alt.includes(kw)))){ "
+    "if(txt===kw||alt===kw||aria===kw||title===kw||(kw.length>=2&&(txt.includes(kw)||alt.includes(kw)||aria.includes(kw)))){ "
     "const rect=el.getBoundingClientRect();"
     "if(rect.width>0&&rect.height>0&&el.offsetParent!==null){"
     "el.click();return true;"
@@ -239,19 +254,19 @@ static void installPatrolAutoPilot(id controller) {
     "setTimeout(()=>{findAndClick(['确定','确认','提交']);},400);}"
     "},600);}"
     "}}"
-    "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取']);},800);"
+    "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取','完成','我知道啦','知道了']);},800);"
     "}"
     "function autoPatrolStep(){"
     "if(patrolState.isBusy)return;"
     "const now=Date.now();"
-    "if(now-patrolState.lastPatrolTime<2000)return;"
-    "findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取']);"
+    "if(now-patrolState.lastPatrolTime<1500)return;"
+    "findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取','完成','我知道啦','知道了']);"
     "if(patrolState.leftChance>0||patrolState.leftChance===-1){"
-    "const clicked=findAndClick(['开始巡护','继续巡护','巡护','立即巡护','去巡护','前进']);"
+    "const clicked=findAndClick(['开始巡护','继续巡护','巡护','立即巡护','去巡护','前进','探索','去探索','走步']);"
     "if(clicked){"
     "patrolState.isBusy=true;patrolState.lastPatrolTime=now;patrolState.noBtnCount=0;"
     "sendLog({type:'AUTO-PATROL',action:'patrol_forward',leftChance:patrolState.leftChance});"
-    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},2500);"
+    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},2000);"
     "return;"
     "}else{"
     "patrolState.noBtnCount++;"
@@ -299,7 +314,7 @@ static void installPatrolAutoPilot(id controller) {
     "}"
     "}"
     "}"
-    "if(location.href.includes('animalBook.html')){"
+    "if(location.href.includes('animalBook.html')||location.href.includes('protect')){"
     "sendLog({type:'AUTO-PATROL',action:'synthesize_animal'});"
     "findAndClick(['立即合成','合成物种','一键合成','合成']);"
     "setTimeout(dispatchSmartAnimal,600);"
@@ -323,7 +338,7 @@ static void installPatrolAutoPilot(id controller) {
     "}"
     "if(res.events)handleEvents(res.events);"
     "}"
-    "setTimeout(autoPatrolStep,1000);"
+    "setTimeout(autoPatrolStep,800);"
     "if(origCb)origCb(res);"
     "};"
     "return _call.call(this,name,params,cb);"
@@ -331,12 +346,12 @@ static void installPatrolAutoPilot(id controller) {
     "return _call.apply(this,arguments);"
     "};"
     "sendLog({type:'STATUS',msg:'AlipayJSBridge Patrol Hooked & AutoPilot Active'});"
-    "setTimeout(autoPatrolStep,1000);"
-    "setInterval(autoPatrolStep,2500);"
+    "setTimeout(autoPatrolStep,800);"
+    "setInterval(autoPatrolStep,1800);"
     "};"
     "hookBridge();"
     "return'autopilot-injected';})()";
-
+    
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
     runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
         NSLog(@"[AntForestPatrol] hook script result: %@ error: %@", result, error);

@@ -1165,7 +1165,6 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
     
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
-    NSString *randNum2=[AntForestManager getNumberRandom:16];
     NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.queryFriendList\",\"requestData\":[{\"source\":\"ANT_FOREST_ly'\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"queryFriendList\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
     NSString *arg2 = @"https://2021003115672468.h5app.alipay.com/www/index.html";
     if([self jsBridge]) {
@@ -1186,11 +1185,12 @@ static BOOL vitalityTaskRunning = NO;
 
 static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     if (!taskType.length) return NO;
-    // 永久排除用户指定和高风险/消耗资产任务
+    // 仅排除可能产生额外金融签约的高风险任务与服务端不支持 RPC 调用的任务
     if ([taskType isEqualToString:@"ZHRW_haoyibaomzx_202601"] ||
         [taskType isEqualToString:@"ZHRW_haoyibaoseyl_202512"] ||
-        [taskType isEqualToString:@"ONE_CLICK_WATERING_V1"] ||
-        [taskType isEqualToString:@"NORMAL_DRAW_EXCHANGE_VITALITY"]) {
+        [taskType isEqualToString:@"FOREST_CONTINUOUS_COLLECT_ENERGY_7"] ||
+        [taskType isEqualToString:@"ENERGYRAIN"] ||
+        [taskType isEqualToString:@"ENERGY_XUANJIAO"]) {
         return NO;
     }
     NSString *lowerType = taskType.lowercaseString;
@@ -1198,10 +1198,8 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     if ([lowerType containsString:@"haoyibao"] ||
         [lowerType containsString:@"insure"] ||
         [lowerType containsString:@"baoxian"] ||
-        [lowerType containsString:@"watering"] ||
-        [lowerType containsString:@"jiaoshui"] ||
-        [lowerType containsString:@"exchange_vitality"] ||
-        [lowerType isEqualToString:@"energyrain"] ||
+        [lowerType containsString:@"jiebei"] ||
+        [lowerType containsString:@"huabei"] ||
         [lowerType containsString:@"continuous_collect"] ||
         [lowerType containsString:@"energy_xuanjiao"]) {
         return NO;
@@ -1209,8 +1207,9 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     if ([lowerTitle containsString:@"保障"] ||
         [lowerTitle containsString:@"保险"] ||
         [lowerTitle containsString:@"好医保"] ||
-        [lowerTitle containsString:@"浇水"] ||
-        [lowerTitle containsString:@"消耗活力值"]) {
+        [lowerTitle containsString:@"借呗"] ||
+        [lowerTitle containsString:@"花呗"] ||
+        [lowerTitle containsString:@"信用卡"]) {
         return NO;
     }
     return YES;
@@ -1230,7 +1229,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     [self recordStage:@"收取 · 领奖励：请求主线与寻宝任务列表"];
     [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
     
-    // 2. 森林全量任务 (含落叶等)
+    // 2. 森林主线日常任务 (ANTFOREST)
     NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"requestData\":[{\"version\":\"20230501\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
     [self.jsBridge _doFlushMessageQueue:forestArg1 url:arg2];
     
@@ -1248,26 +1247,53 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
 }
 
 static BOOL isLotteryDrawing = NO;
+static NSInteger remainingDrawCount = 0;
+static NSString *currentDrawSceneCode = @"ANTFOREST_NORMAL_DRAW";
+static NSString *currentDrawActivityId = @"";
 
 -(void)triggerLotteryDraw:(NSString *)sceneCode activityId:(NSString *)activityId {
     if (!self.enableAutoRewardTasks || !self.jsBridge) return;
     if (isLotteryDrawing) return;
     isLotteryDrawing = YES;
     
-    NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_NORMAL_DRAW";
-    NSString *actId = activityId.length ? activityId : ([scene containsString:@"ACTIVITY"] ? @"20260722" : @"2026081601");
+    NSString *scene = sceneCode.length ? sceneCode : (currentDrawSceneCode.length ? currentDrawSceneCode : @"ANTFOREST_NORMAL_DRAW");
+    NSString *actId = activityId.length ? activityId : currentDrawActivityId;
+    currentDrawSceneCode = scene;
+    currentDrawActivityId = actId;
+    
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *outBizNo = [NSString stringWithFormat:@"%@_%@_%@", scene, timeStamp, [AntForestManager getNumberRandom:6]];
     
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.draw\",\"requestData\":[{\"sceneCode\":\"%@\",\"activityId\":\"%@\",\"drawTimes\":1,\"outBizNo\":\"%@\",\"source\":\"ANTFOREST\",\"requestType\":\"rpc\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, actId, outBizNo, timeStamp, randNum];
-    NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&sceneCode=%@&source=task_entry&chInfo=task_entry", scene];
+    NSMutableDictionary *reqDict = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"sceneCode": scene,
+        @"drawGroup": @"antforestDraw",
+        @"source": @"ANTFOREST",
+        @"requestType": @"rpc",
+        @"drawTimes": @1,
+        @"outBizNo": outBizNo
+    }];
+    if (actId.length) reqDict[@"activityId"] = actId;
     
-    [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：正在执行抽奖（%@）...", [scene containsString:@"ACTIVITY"] ? @"活动版" : @"普通版"]];
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:@[reqDict] options:0 error:nil];
+    NSString *reqStr = jsonData ? [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding] : @"[]";
+    
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.draw\",\"requestData\":%@,\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", reqStr, timeStamp, randNum];
+    NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&sceneCode=%@&source=task_entry&chInfo=task_entry&drawGroup=antforestDraw", scene];
+    
+    [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：正在执行抽奖（%@，剩余 %ld 次）...", [scene containsString:@"ACTIVITY"] ? @"活动版" : @"普通版", (long)MAX(1, remainingDrawCount)]];
     [self.jsBridge _doFlushMessageQueue:arg1 url:arg2];
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // 兼容发送 com.alipay.antiep.draw
+    NSString *argCom = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.draw\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":%@,\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", reqStr, timeStamp, [AntForestManager getNumberRandom:15]];
+    [self.jsBridge _doFlushMessageQueue:argCom url:arg2];
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         isLotteryDrawing = NO;
+        if (remainingDrawCount > 1) {
+            remainingDrawCount--;
+            [self triggerLotteryDraw:scene activityId:actId];
+        }
     });
 }
 
@@ -1381,13 +1407,15 @@ static BOOL isLotteryDrawing = NO;
     }
     if (data[@"drawActivity"] && [data[@"drawActivity"] isKindOfClass:NSDictionary.class]) {
         NSDictionary *act = data[@"drawActivity"];
+        if (drawBalance <= 0) drawBalance = [act[@"balance"] integerValue];
         if (act[@"sceneCode"]) drawSceneCode = act[@"sceneCode"];
         if (act[@"activityId"]) drawActivityId = act[@"activityId"];
     }
     
     if (drawBalance > 0) {
+        remainingDrawCount = drawBalance;
         [self recordStage:[NSString stringWithFormat:@"收取 · 森林寻宝：检测到剩余抽奖机会 %ld 次，正在自动抽奖...", (long)drawBalance]];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self triggerLotteryDraw:drawSceneCode activityId:drawActivityId];
         });
     }
@@ -2295,6 +2323,28 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         [[AntForestManager sharedInstance] addLog:log];
                     }
                 }
+                
+                // 匹配 wateringBubbles（包含好友浇水赠能、保护地巡护动物每日巡护能量球）
+                NSArray *wateringBubbles = [dict objectForKey:@"wateringBubbles"];
+                if ([wateringBubbles isKindOfClass:NSArray.class]) {
+                    for (NSDictionary *wb in wateringBubbles) {
+                        if (![wb isKindOfClass:NSDictionary.class]) continue;
+                        NSNumber *bidNum = wb[@"id"];
+                        if (bidNum && [bidNum longLongValue] > 0) {
+                            NSString *bid = [bidNum stringValue];
+                            NSString *bizType = wb[@"bizType"] ?: @"";
+                            NSString *fullEnergy = [NSString stringWithFormat:@"%@", wb[@"fullEnergy"] ?: @""];
+                            NSString *targetUid = wb[@"userId"] ?: userId ?: self.myUserId;
+                            NSString *log = [NSString stringWithFormat:@"%@\n找到赠能/巡护能量球(%@g) 收取, %@", [[AntForestManager sharedInstance] getUserName:targetUid], fullEnergy, bid];
+                            [[AntForestManager sharedInstance] addLog:log];
+                            [self recordStage:[NSString stringWithFormat:@"收取 · 发现赠能/巡护能量（%@g，ID：%@）并自动收取", fullEnergy, bid]];
+                            dispatch_async(globalSerialQueueCollect, ^{
+                                [[AntForestManager sharedInstance] collectBubbles:targetUid bubblesId:bid];
+                            });
+                        }
+                    }
+                }
+                
                 if (mine && selfPriorityPending) {
                     // 这个串行队列中的屏障排在本人的 collect 请求之后，好友请求只能在此后入队。
                     NSUInteger cycle = selfPriorityCycle;
