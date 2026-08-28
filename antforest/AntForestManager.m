@@ -1599,6 +1599,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         return;
     }
     vitalityTaskRunning = YES;
+    PSDJsBridge *bridge = self.rewardTaskBridge;
     NSDictionary *item = [vitalityTaskQueue firstObject];
     [vitalityTaskQueue removeObjectAtIndex:0];
     
@@ -1646,25 +1647,32 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         NSString *jumpUrl = item[@"jumpUrl"] ?: @"";
         NSInteger seconds = [item[@"browseSeconds"] integerValue];
         if (seconds <= 0) seconds = 15;
-        [self recordStage:[NSString stringWithFormat:@"%@：正在后台静默浏览“%@”（停留 %ld 秒）...", scenePrefix, title, (long)seconds]];
+        [self recordStage:[NSString stringWithFormat:@"%@：正在后台自动执行“%@”（保持运行 %ld 秒）...", scenePrefix, title, (long)seconds]];
         [self applyVitalityTask:taskType sceneCode:sceneCode];
         
-        // 尝试提取并加载真实目标链接
         NSString *targetHttpUrl = nil;
+        NSString *targetAppId = nil;
+        NSString *targetPage = nil;
+        NSString *targetQuery = nil;
+        
         if ([jumpUrl hasPrefix:@"http://"] || [jumpUrl hasPrefix:@"https://"]) {
             targetHttpUrl = jumpUrl;
-        } else if ([jumpUrl containsString:@"url="]) {
-            NSRange r = [jumpUrl rangeOfString:@"url="];
-            if (r.location != NSNotFound) {
-                NSString *sub = [jumpUrl substringFromIndex:r.location + r.length];
-                NSRange amp = [sub rangeOfString:@"&"];
-                if (amp.location != NSNotFound) {
-                    sub = [sub substringToIndex:amp.location];
+        } else if ([jumpUrl containsString:@"alipays://"] || [jumpUrl containsString:@"alipay://"]) {
+            NSURLComponents *components = [NSURLComponents componentsWithString:jumpUrl];
+            for (NSURLQueryItem *qItem in components.queryItems) {
+                if ([qItem.name isEqualToString:@"appId"]) {
+                    targetAppId = qItem.value;
+                } else if ([qItem.name isEqualToString:@"page"]) {
+                    targetPage = qItem.value;
+                } else if ([qItem.name isEqualToString:@"query"]) {
+                    targetQuery = qItem.value;
+                } else if ([qItem.name isEqualToString:@"url"]) {
+                    targetHttpUrl = [qItem.value stringByRemovingPercentEncoding];
                 }
-                targetHttpUrl = [sub stringByRemovingPercentEncoding];
             }
         }
         
+        // 1. 如果是 H5 页面链接，使用静默 WKWebView 加载
         if (targetHttpUrl.length) {
             NSURL *targetURL = [NSURL URLWithString:targetHttpUrl];
             if (targetURL) {
@@ -1682,12 +1690,48 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
             }
         }
         
-        // 停留指定时长后完成任务并领奖
+        // 2. 如果是小程序 / 小游戏任务（如疯狂水世界 appId=2021004124677717），通过支付宝微应用容器启动
+        if (targetAppId.length) {
+            NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+            NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+            
+            // ① JSBridge startApp 通道
+            NSString *startAppArg = [NSString stringWithFormat:@"[{\"handlerName\":\"startApp\",\"data\":{\"appId\":\"%@\",\"param\":{\"page\":\"%@\",\"query\":\"%@\",\"chInfo\":\"ANTFOREST\",\"startMultApp\":\"YES\",\"appClearTop\":\"false\"}},\"callbackId\":\"startApp_%@\"}]", targetAppId, targetPage ?: @"", targetQuery ?: @"", timeStamp];
+            [bridge _doFlushMessageQueue:startAppArg url:urlLottery];
+            
+            // ② DTContext 原生应用框架调度
+            Class dtContextClass = NSClassFromString(@"DTContext");
+            if (dtContextClass && [dtContextClass respondsToSelector:@selector(sharedContext)]) {
+                id context = ((id (*)(id, SEL))objc_msgSend)(dtContextClass, @selector(sharedContext));
+                if (context && [context respondsToSelector:@selector(startApplication:params:animated:)]) {
+                    NSMutableDictionary *params = [NSMutableDictionary dictionary];
+                    if (targetPage.length) params[@"page"] = targetPage;
+                    if (targetQuery.length) params[@"query"] = targetQuery;
+                    params[@"chInfo"] = @"ANTFOREST";
+                    params[@"startMultApp"] = @"YES";
+                    ((BOOL (*)(id, SEL, id, id, BOOL))objc_msgSend)(context, @selector(startApplication:params:animated:), targetAppId, params, NO);
+                }
+            }
+        }
+        
+        // 停留指定时长后完成任务、退出小程序并领奖
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((seconds + 1.0) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (self.silentBrowseWebView) {
                 [self.silentBrowseWebView stopLoading];
                 [self.silentBrowseWebView removeFromSuperview];
                 self.silentBrowseWebView = nil;
+            }
+            if (targetAppId.length) {
+                Class dtContextClass = NSClassFromString(@"DTContext");
+                if (dtContextClass && [dtContextClass respondsToSelector:@selector(sharedContext)]) {
+                    id context = ((id (*)(id, SEL))objc_msgSend)(dtContextClass, @selector(sharedContext));
+                    if (context && [context respondsToSelector:@selector(findApplicationByName:)]) {
+                        id app = ((id (*)(id, SEL, id))objc_msgSend)(context, @selector(findApplicationByName:), targetAppId);
+                        if (app && [app respondsToSelector:@selector(exit:)]) {
+                            ((void (*)(id, SEL, BOOL))objc_msgSend)(app, @selector(exit:), NO);
+                        }
+                    }
+                }
             }
             [self finishVitalityTask:taskType sceneCode:sceneCode taskTitle:title];
             [self receiveVitalityTaskAward:taskType sceneCode:sceneCode taskTitle:title awardName:awardName];
