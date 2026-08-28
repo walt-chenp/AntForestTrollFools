@@ -1392,6 +1392,13 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     return YES;
 }
 
+- (NSString *)effectiveUrlForBridge:(PSDJsBridge *)bridge {
+    if (bridge && bridge == self.rewardTaskBridge && self.rewardTaskBridge != self.jsBridge) {
+        return @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+    }
+    return @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+}
+
 -(void)queryVitalityTaskList {
     if (!self.rewardTaskBridge && self.jsBridge) {
         self.rewardTaskBridge = self.jsBridge;
@@ -1413,30 +1420,30 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *randNum2 = [AntForestManager getNumberRandom:15];
     NSString *randNum3 = [AntForestManager getNumberRandom:15];
     NSString *randNum4 = [AntForestManager getNumberRandom:15];
-    NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+    NSString *url = [self effectiveUrlForBridge:bridge];
     
     [self recordStage:@"首页后台：后台领奖励任务桥接已就绪，读取任务列表"];
     
     // 1. 主线日常任务列表 (ANTFOREST_VITALITY_TASK / ANTFOREST_ENERGY_TASK / ANTFOREST)
     NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_VITALITY_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum1];
     NSString *arg1Com = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.queryTaskList\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_VITALITY_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"rpc\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:arg1 url:urlLottery];
-    [bridge _doFlushMessageQueue:arg1Com url:urlLottery];
+    [bridge _doFlushMessageQueue:arg1 url:url];
+    [bridge _doFlushMessageQueue:arg1Com url:url];
     
     NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"requestData\":[{\"version\":\"20241025\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
-    [bridge _doFlushMessageQueue:forestArg1 url:urlLottery];
+    [bridge _doFlushMessageQueue:forestArg1 url:url];
     
     // 2. 普通寻宝任务列表 (ANTFOREST_NORMAL_DRAW_TASK)
     NSString *normalDrawArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum3];
     NSString *normalDrawCom = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.queryTaskList\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"rpc\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:normalDrawArg url:urlLottery];
-    [bridge _doFlushMessageQueue:normalDrawCom url:urlLottery];
+    [bridge _doFlushMessageQueue:normalDrawArg url:url];
+    [bridge _doFlushMessageQueue:normalDrawCom url:url];
     
     // 3. 活动寻宝任务列表 (ANTFOREST_ACTIVITY_DRAW_TASK)
     NSString *activityDrawArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.queryTaskList\",\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW_TASK\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum4];
     NSString *activityDrawCom = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.queryTaskList\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"rpc\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:activityDrawArg url:urlLottery];
-    [bridge _doFlushMessageQueue:activityDrawCom url:urlLottery];
+    [bridge _doFlushMessageQueue:activityDrawArg url:url];
+    [bridge _doFlushMessageQueue:activityDrawCom url:url];
 
 }
 
@@ -1449,7 +1456,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.sign\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"source\":\"ANTFOREST\",\"sceneCode\":\"ANTFOREST_ENERGY_TASK_SIGN\",\"requestType\":\"rpc\",\"userId\":\"%@\",\"entityId\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.myUserId ?: @"", signId, timeStamp, randNum];
-    NSString *url = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+    NSString *url = [self effectiveUrlForBridge:bridge];
     [bridge _doFlushMessageQueue:arg1 url:url];
 }
 
@@ -1463,7 +1470,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.applyTask\",\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, randNum];
-    NSString *url = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+    NSString *url = [self effectiveUrlForBridge:bridge];
     [bridge _doFlushMessageQueue:arg1 url:url];
 }
 
@@ -1497,15 +1504,15 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *jsDirect2 = [NSString stringWithFormat:@"[{\"handlerName\":\"exchangeVitality\",\"data\":{\"caQuotaId\":\"%@\",\"useAssetsCount\":20,\"source\":\"ANTFOREST\"},\"callbackId\":\"jsapi_%@\"}]", quota, timeStamp];
     
     // 5. 原生 RPC 通道与 JSBridge 直接调度
-    NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
-    [bridge _doFlushMessageQueue:argACW1 url:urlLottery];
-    [bridge _doFlushMessageQueue:argACW2 url:urlLottery];
-    [bridge _doFlushMessageQueue:argForest1 url:urlLottery];
-    [bridge _doFlushMessageQueue:argForest2 url:urlLottery];
-    [bridge _doFlushMessageQueue:argRPC url:urlLottery];
-    [bridge _doFlushMessageQueue:argH5 url:urlLottery];
-    [bridge _doFlushMessageQueue:jsDirect1 url:urlLottery];
-    [bridge _doFlushMessageQueue:jsDirect2 url:urlLottery];
+    NSString *url = [self effectiveUrlForBridge:bridge];
+    [bridge _doFlushMessageQueue:argACW1 url:url];
+    [bridge _doFlushMessageQueue:argACW2 url:url];
+    [bridge _doFlushMessageQueue:argForest1 url:url];
+    [bridge _doFlushMessageQueue:argForest2 url:url];
+    [bridge _doFlushMessageQueue:argRPC url:url];
+    [bridge _doFlushMessageQueue:argH5 url:url];
+    [bridge _doFlushMessageQueue:jsDirect1 url:url];
+    [bridge _doFlushMessageQueue:jsDirect2 url:url];
 }
 
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title {
@@ -1521,7 +1528,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.finishTask\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@\",\"requestType\":\"rpc\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, timeStamp, randNum];
     NSString *randNum2 = [AntForestManager getNumberRandom:15];
     NSString *argH5 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.finishTask\",\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, timeStamp, randNum2];
-    NSString *url = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+    NSString *url = [self effectiveUrlForBridge:bridge];
     [bridge _doFlushMessageQueue:arg1 url:url];
     [bridge _doFlushMessageQueue:argH5 url:url];
     
@@ -1548,7 +1555,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"ignoreLimit\":0,\"requestType\":\"rpc\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, randNum];
     NSString *randNum2 = [AntForestManager getNumberRandom:15];
     NSString *argH5 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antiep.h5.receiveTaskAward\",\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"source\":\"ANTFOREST\"}],\"appName\":\"antiep\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, randNum2];
-    NSString *url = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+    NSString *url = [self effectiveUrlForBridge:bridge];
     [bridge _doFlushMessageQueue:arg1 url:url];
     [bridge _doFlushMessageQueue:argH5 url:url];
 }
@@ -1646,7 +1653,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         // 1. 如果是小程序 / 小游戏任务（如疯狂水世界 appId=2021006129632086、狂暴西游等），通过静默 RPC 协议直接提交游戏事件，不弹窗、不跳转
         if (targetAppId.length) {
             NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
-            NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
+            NSString *urlLottery = [self effectiveUrlForBridge:bridge];
             
             // 提交进入游戏动作与首帧事件
             NSString *rand1 = [AntForestManager getNumberRandom:15];
