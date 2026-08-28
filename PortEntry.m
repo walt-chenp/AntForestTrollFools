@@ -13,8 +13,8 @@ static id (*originalTransformResponseData)(id, SEL, id);
 static void (*originalUpdateBridgeReadyStatus)(id, SEL, id);
 static NSTimeInterval lastWaterGiftTapAt;
 static const void *GiftFullProbeKey = &GiftFullProbeKey;
-static __weak id giftProbeWebView;
 
+static id findWebViewInController(id controller);
 static BOOL hookMethod(Class cls, SEL selector, IMP replacement, IMP *original);
 static void tryAutoCollectWaterGift(void);
 static void reportWaterGiftTapResult(void);
@@ -32,6 +32,19 @@ static BOOL shouldRevealLeafOnNextForestAppearance = YES;
 
 static BOOL isForestHomeURL(NSURL *url) {
     return [url.absoluteString containsString:@"180020010001247580"];
+}
+
+static BOOL isSelfForestHomeURL(NSURL *url) {
+    if (!isForestHomeURL(url)) return NO;
+    NSString *urlString = url.absoluteString ?: @"";
+    if ([urlString containsString:@"userId="]) {
+        NSString *myUid = [[AntForestManager sharedInstance] myUserId];
+        if (myUid.length && [urlString containsString:[NSString stringWithFormat:@"userId=%@", myUid]]) {
+            return YES;
+        }
+        return NO; // 包含非本人 userId 说明是好友森林页面
+    }
+    return YES; // 无 userId 参数即本人森林首页
 }
 
 static BOOL isEnergyRainURL(NSURL *url) {
@@ -82,7 +95,7 @@ static void finishForestHomeStart(id controller, id bridge) {
 static void startForestHomeWhenBridgeReady(id controller) {
     if (objc_getAssociatedObject(controller, ForestHomeStartKey)) return;
     objc_setAssociatedObject(controller, ForestHomeStartKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    __weak id weakController = controller;
+    __unsafe_unretained id weakController = controller;
     __block NSUInteger attempts = 0;
     __block void (^waitForBridge)(void);
     waitForBridge = ^{
@@ -110,75 +123,83 @@ static BOOL isForestResponse(id value) {
     if (![value isKindOfClass:NSDictionary.class]) return NO;
     NSDictionary *response = value;
     NSDictionary *data = [response[@"resData"] isKindOfClass:NSDictionary.class] ? response[@"resData"] : nil;
-    return (response[@"bubbles"] && response[@"userBaseInfo"]) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
+    return ((response[@"bubbles"] || response[@"wateringBubbles"]) && (response[@"userBaseInfo"] || response[@"loginUserBaseInfo"] || response[@"userEnergy"])) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
 }
 
 static BOOL isMyHomeResponse(id value, AntForestManager *manager) {
     NSDictionary *response = [value isKindOfClass:NSDictionary.class] ? value : nil;
-    NSDictionary *base = [response[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"userBaseInfo"] : nil;
+    if (!response) return NO;
+    if (response[@"loginUserBaseInfo"] && !response[@"userBaseInfo"]) return YES;
+    NSDictionary *base = [response[@"loginUserBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"loginUserBaseInfo"] : ([response[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"userBaseInfo"] : nil);
     return manager.myUserId.length && [base[@"userId"] isEqualToString:manager.myUserId];
 }
 
 static void tryAutoCollectWaterGift(void) {
-    AntForestManager *manager = AntForestManager.sharedInstance;
-    if (!manager.enableAutoCollect || !manager.enableSelfCollect || !giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt < 45) return;
-    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if (![giftProbeWebView respondsToSelector:evaluate]) return;
-    
-    NSString *script = @"(()=>{if(window.__afGiftAutoRunning)return 'busy';const c=document.querySelector('canvas');if(!c)return 'no-canvas';const r=c.getBoundingClientRect();if(!r.width||!r.height)return 'empty-canvas';"
-    "const points=[{x:Math.round(r.left+r.width*.242),y:Math.round(r.top+r.height*.218)},{x:Math.round(r.left+r.width*.78),y:Math.round(r.top+r.height*.65)},{x:Math.round(r.left+r.width*.22),y:Math.round(r.top+r.height*.65)}];"
-    "if(!window.__afGiftAutoCallHook){const b=window.AlipayJSBridge;if(!b||!b.call)return 'no-bridge';const f=b.call;window.__afGiftAutoCallHook=1;b.call=function(n,d){const q=d&&typeof d==='object'?(Array.isArray(d.requestData)?d.requestData[0]:d.requestData):null;if(window.__afGiftAutoWaiting&&n==='rpc'&&d&&String(d.operationType||'').includes('collectEnergy')&&q&&!q.fromAct)window.__afGiftAutoHits=(window.__afGiftAutoHits||0)+1;return f.apply(this,arguments)}}"
-    "const tap=(pt)=>{const t={identifier:Date.now()%1000000,target:c,clientX:pt.x,clientY:pt.y,pageX:pt.x,pageY:pt.y,screenX:pt.x,screenY:pt.y};const send=(type,active)=>{let e;try{const q=new Touch(t);e=new TouchEvent(type,{bubbles:true,cancelable:true,touches:active?[q]:[],targetTouches:active?[q]:[],changedTouches:[q]})}catch(_){e=new Event(type,{bubbles:true,cancelable:true});Object.defineProperties(e,{touches:{value:active?[t]:[]},targetTouches:{value:active?[t]:[]},changedTouches:{value:[t]}})}c.dispatchEvent(e)};send('touchstart',true);setTimeout(()=>send('touchend',false),12)};"
-    "let attempts=0,misses=0,rechecked=0;window.__afGiftAutoHits=0;window.__afGiftAutoTapResult='';window.__afGiftAutoRunning=1;"
-    "const done=()=>{window.__afGiftAutoWaiting=0;window.__afGiftAutoRunning=0;window.__afGiftAutoTapResult='done:'+attempts+':'+(window.__afGiftAutoHits||0)};"
-    "const probe=(confirm)=>{const before=window.__afGiftAutoHits||0;attempts++;window.__afGiftAutoWaiting=1;points.forEach(pt=>tap(pt));setTimeout(()=>{window.__afGiftAutoWaiting=0;if((window.__afGiftAutoHits||0)>before){misses=0;step()}else if(confirm)done();else{misses++;step()}},1800)};"
-    "const step=()=>{if(attempts>=60)return done();if(misses>=3){if(rechecked)return done();rechecked=1;return setTimeout(()=>probe(1),4000)}probe(0)};"
-    "step();return 'started:multi-points'})()";
-    
-    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-    runJavaScript(giftProbeWebView, evaluate, script, ^(id result, NSError *error) {
-        if (error || ![(NSString *)result hasPrefix:@"started:"]) return;
-        lastWaterGiftTapAt = NSDate.date.timeIntervalSince1970;
-        [manager recordStage:@"收取 · 浇水赠能/动物能量：开始智能连续多点领取"];
-        reportWaterGiftTapResult();
-    });
+    // 彻底停用 Canvas 盲点坐标触摸，杜绝误触巡护动物跳转保护地小程序(68687842)或误触庄园
+    // 巡护动物能量已 100% 由 matchFriendIdAndBubbles 提取 propId/animalId 走原生 RPC 安全精准收割
+    [[AntForestManager sharedInstance] receiveAnimalPartnerEnergy];
 }
 
-static void reportWaterGiftTapResult(void) {
-    if (!giftProbeWebView || NSDate.date.timeIntervalSince1970 - lastWaterGiftTapAt > 65) return;
+static id findWebViewInController(id controller) {
+    if (!controller) return nil;
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if (![giftProbeWebView respondsToSelector:evaluate]) return;
-    void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-    runJavaScript(giftProbeWebView, evaluate, @"String(window.__afGiftAutoTapResult||'running')", ^(id result, NSError *error) {
-        NSString *status = [result isKindOfClass:NSString.class] ? result : @"";
-        if (!error && [status hasPrefix:@"done:"]) {
-            NSArray<NSString *> *parts = [[status substringFromIndex:5] componentsSeparatedByString:@":"];
-            NSString *attempts = parts.count > 0 ? parts[0] : @"0";
-            NSString *hits = parts.count > 1 ? parts[1] : @"0";
-            [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"收取 · 浇水赠能/动物能量：智能领取结束（命中 %@ 个，点击 %@ 次）", hits, attempts]];
-            return;
-        }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ reportWaterGiftTapResult(); });
-    });
-}
-
-static void installGiftFullProbe(id controller) {
-    if (objc_getAssociatedObject(controller, GiftFullProbeKey)) return;
-    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
-    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if (![webView respondsToSelector:evaluate]) {
-        NSLog(@"[AntForestWaterGiftProbe] fullProbe webView unavailable");
-        return;
+    if ([controller respondsToSelector:@selector(webView)]) {
+        id wv = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView));
+        if (wv && [wv respondsToSelector:evaluate]) return wv;
     }
-    objc_setAssociatedObject(controller, GiftFullProbeKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    giftProbeWebView = webView;
+    if ([controller respondsToSelector:@selector(psdContentView)]) {
+        id cv = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(psdContentView));
+        if (cv && [cv respondsToSelector:evaluate]) return cv;
+    }
+    if ([controller respondsToSelector:@selector(h5WebView)]) {
+        id hw = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(h5WebView));
+        if (hw && [hw respondsToSelector:evaluate]) return hw;
+    }
+    if ([controller respondsToSelector:@selector(view)]) {
+        UIView *v = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(view));
+        if ([v isKindOfClass:UIView.class]) {
+            if ([v respondsToSelector:evaluate]) return v;
+            for (UIView *sub in v.subviews) {
+                if ([sub respondsToSelector:evaluate]) return sub;
+                for (UIView *subSub in sub.subviews) {
+                    if ([subSub respondsToSelector:evaluate]) return subSub;
+                }
+            }
+        }
+    }
+    return nil;
+}
+
+static NSURL *urlFromController(id controller) {
+    if (!controller) return nil;
+    if ([controller respondsToSelector:@selector(curUrl)]) {
+        id u = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(curUrl));
+        if ([u isKindOfClass:NSURL.class]) return u;
+        if ([u isKindOfClass:NSString.class]) return [NSURL URLWithString:u];
+    }
+    if ([controller respondsToSelector:@selector(url)]) {
+        id u = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(url));
+        if ([u isKindOfClass:NSURL.class]) return u;
+        if ([u isKindOfClass:NSString.class]) return [NSURL URLWithString:u];
+    }
+    if ([controller respondsToSelector:@selector(currentUrl)]) {
+        id u = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(currentUrl));
+        if ([u isKindOfClass:NSURL.class]) return u;
+        if ([u isKindOfClass:NSString.class]) return [NSURL URLWithString:u];
+    }
+    id webView = findWebViewInController(controller);
+    if (webView && [webView respondsToSelector:@selector(URL)]) {
+        id u = ((id (*)(id, SEL))objc_msgSend)(webView, @selector(URL));
+        if ([u isKindOfClass:NSURL.class]) return u;
+    }
+    return nil;
 }
 
 static void installEnergyRainCollector(id controller) {
     static const void *collectorKey = &collectorKey;
     if (objc_getAssociatedObject(controller, collectorKey)) return;
     objc_setAssociatedObject(controller, collectorKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    id webView = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView));
+    id webView = findWebViewInController(controller);
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![webView respondsToSelector:evaluate]) {
         NSLog(@"[AntForestRain] collector unavailable");
@@ -191,133 +212,439 @@ static void installEnergyRainCollector(id controller) {
     });
 }
 
+@interface UITouch (PrivateSynthesis)
+- (void)setWindow:(UIWindow *)window;
+- (void)setView:(UIView *)view;
+- (void)setTapCount:(NSUInteger)tapCount;
+- (void)setIsTap:(BOOL)isTap;
+- (void)setTimestamp:(NSTimeInterval)timestamp;
+- (void)setPhase:(UITouchPhase)phase;
+- (void)setLocationInWindow:(CGPoint)location;
+@end
+
+static void simulateNativeTapOnView(UIView *view, CGPoint point) {
+    if (!view) return;
+    UIView *hitView = [view hitTest:point withEvent:nil] ?: view;
+    UIWindow *window = view.window;
+    if (!window) {
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if (w.isKeyWindow) { window = w; break; }
+        }
+    }
+    if (!window) window = [UIApplication sharedApplication].windows.firstObject;
+    CGPoint winPoint = [view convertPoint:point toView:window];
+    
+    UITouch *touch = [[NSClassFromString(@"UITouch") alloc] init];
+    if ([touch respondsToSelector:@selector(setWindow:)]) [touch setWindow:window];
+    if ([touch respondsToSelector:@selector(setView:)]) [touch setView:hitView];
+    if ([touch respondsToSelector:@selector(setTapCount:)]) [touch setTapCount:1];
+    if ([touch respondsToSelector:@selector(setIsTap:)]) [touch setIsTap:YES];
+    if ([touch respondsToSelector:@selector(setTimestamp:)]) [touch setTimestamp:[[NSDate date] timeIntervalSince1970]];
+    if ([touch respondsToSelector:@selector(setPhase:)]) [touch setPhase:UITouchPhaseBegan];
+    if ([touch respondsToSelector:@selector(setLocationInWindow:)]) [touch setLocationInWindow:winPoint];
+    
+    NSSet *touches = [NSSet setWithObject:touch];
+    
+    NSMutableSet *recognizers = [NSMutableSet set];
+    UIView *v = hitView;
+    while (v) {
+        if (v.gestureRecognizers) [recognizers addObjectsFromArray:v.gestureRecognizers];
+        v = v.superview;
+    }
+    
+    @try {
+        [hitView touchesBegan:touches withEvent:nil];
+        for (UIGestureRecognizer *gr in recognizers) {
+            if ([gr respondsToSelector:@selector(touchesBegan:withEvent:)]) {
+                [gr touchesBegan:touches withEvent:nil];
+            }
+        }
+    } @catch (NSException *e) {}
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.04 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([touch respondsToSelector:@selector(setPhase:)]) [touch setPhase:UITouchPhaseEnded];
+        if ([touch respondsToSelector:@selector(setTimestamp:)]) [touch setTimestamp:[[NSDate date] timeIntervalSince1970]];
+        @try {
+            [hitView touchesEnded:touches withEvent:nil];
+            for (UIGestureRecognizer *gr in recognizers) {
+                if ([gr respondsToSelector:@selector(touchesEnded:withEvent:)]) {
+                    [gr touchesEnded:touches withEvent:nil];
+                }
+            }
+        } @catch (NSException *e) {}
+    });
+}
+
+static __weak id currentForestHomeController = nil;
+
+static void dismissFriendAnimalPopup(id controller) {
+    if (!controller) return;
+    id webView = findWebViewInController(controller);
+    if (!webView) return;
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if ([webView respondsToSelector:evaluate]) {
+        NSString *js = @"(function(){"
+        "var allEls = Array.from(document.querySelectorAll('*'));"
+        "var isFriendAnimalModal = allEls.some(function(el){"
+        "  var t = (el.innerText||el.textContent||'').trim();"
+        "  return t.includes('嗨，我是') || t.includes('参与动物保护') || t.includes('河姆渡福猪') || t.includes('帮主人自动找能量');"
+        "});"
+        "if(isFriendAnimalModal){"
+        "  for(var i=0; i<allEls.length; i++){"
+        "    var el = allEls[i];"
+        "    var clz = (el.className || '').toString().toLowerCase();"
+        "    var src = (el.src || '').toLowerCase();"
+        "    var aria = (el.getAttribute('aria-label') || '').toLowerCase();"
+        "    var r = el.getBoundingClientRect();"
+        "    if(clz.includes('close') || src.includes('close') || aria.includes('关') || aria.includes('close') || (r.width > 20 && r.width < 75 && r.top > window.innerHeight*0.55 && Math.abs(r.left + r.width/2 - window.innerWidth/2) < 80)){"
+        "      try{ prompt('NATIVE_TAP:' + Math.round(r.left+r.width/2) + ',' + Math.round(r.top+r.height/2)); }catch(_){}"
+        "      try{"
+        "        var mOpts={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2};"
+        "        el.dispatchEvent(new MouseEvent('mousedown',mOpts));"
+        "        el.dispatchEvent(new MouseEvent('mouseup',mOpts));"
+        "        el.dispatchEvent(new MouseEvent('click',mOpts));"
+        "        el.click();"
+        "      }catch(_){}"
+        "      return 'friend_animal_modal_closed';"
+        "    }"
+        "  }"
+        "  try{ prompt('NATIVE_TAP:' + Math.round(window.innerWidth*0.5) + ',' + Math.round(window.innerHeight*0.75)); }catch(_){}"
+        "  return 'friend_animal_modal_tap_fallback';"
+        "}"
+        "return 'no_modal';"
+        "})();";
+        void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+        runJavaScript(webView, evaluate, js, ^(id result, NSError *error) {});
+    }
+}
+
+static void collectAnimalEnergyAtHome(id controller) {
+    if (![AntForestManager sharedInstance].enableSelfCollect && ![AntForestManager sharedInstance].enableAutoPatrol) return;
+    if (!controller) {
+        controller = currentForestHomeController;
+        if (!controller && [AntForestManager sharedInstance].jsBridge) {
+            controller = forestControllerForBridge([AntForestManager sharedInstance].jsBridge);
+        }
+        if (!controller) {
+            UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+            while (top.presentedViewController) top = top.presentedViewController;
+            controller = top;
+        }
+    }
+    if (!controller) return;
+    
+    // 严禁在好友森林页面执行
+    NSURL *url = urlFromController(controller);
+    if (url && !isSelfForestHomeURL(url)) return;
+    
+    id webView = findWebViewInController(controller);
+    if (!webView) return;
+    
+    // 仅在真实弹出“伙伴回保护地”或“立即派遣”弹窗时，协助点击【立即派遣】（不进行任何 Canvas 盲点，避免影响用户滑动屏幕）
+    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
+    if ([webView respondsToSelector:evaluate]) {
+        NSString *js = @"(function(){"
+        "var allEls=Array.from(document.querySelectorAll('*'));"
+        "var isModalOpen = allEls.some(function(el){"
+        "  var t=(el.innerText||el.textContent||'').trim();"
+        "  return t.includes('伙伴回保护地')||t.includes('立即派遣')||t.includes('获取更多伙伴');"
+        "});"
+        "if(isModalOpen){"
+        "  var dBtn = allEls.find(function(el){"
+        "    var t=(el.innerText||el.textContent||'').trim();"
+        "    return t==='立即派遣'||(t.includes('立即派遣')&&t.length<=10);"
+        "  });"
+        "  if(dBtn){"
+        "    var r=dBtn.getBoundingClientRect();"
+        "    if(r.width>0&&r.height>0&&r.top>50){"
+        "      try{"
+        "        var mOpts={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2};"
+        "        dBtn.dispatchEvent(new MouseEvent('mousedown',mOpts));"
+        "        dBtn.dispatchEvent(new MouseEvent('mouseup',mOpts));"
+        "        dBtn.dispatchEvent(new MouseEvent('click',mOpts));"
+        "        dBtn.click();"
+        "      }catch(_){}"
+        "      try{prompt('PATROL_LOG:'+JSON.stringify({type:'STATUS',msg:'保护地巡护：伙伴已回归，已自动为您点击【立即派遣】派出新伙伴！'}));}catch(_){}"
+        "      return'dispatched_modal';"
+        "    }"
+        "  }"
+        "}"
+        "return'no_action';"
+        "})();";
+        void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
+        runJavaScript(webView, evaluate, js, ^(id result, NSError *error) {});
+    }
+}
+
+static void installForestHomeCollector(id controller) {
+    if (![AntForestManager sharedInstance].enableSelfCollect && ![AntForestManager sharedInstance].enableAutoPatrol) return;
+    collectAnimalEnergyAtHome(controller);
+}
+
 static BOOL isPatrolURL(NSURL *url, id controller) {
     NSString *str = url.absoluteString ? url.absoluteString : @"";
     if ([str containsString:@"68687842"] ||
-        [str containsString:@"protect"] ||
-        [str containsString:@"animal"] ||
+        [str containsString:@"forest-patrol"] ||
         [str containsString:@"patrol"] ||
-        [str containsString:@"reserve"] ||
-        [str containsString:@"h5_patrol"]) {
+        [str containsString:@"protect-place"] ||
+        [str containsString:@"2021002145699416"]) {
         return YES;
-    }
-    if ([controller respondsToSelector:@selector(title)]) {
-        NSString *t = [controller title];
-        if ([t containsString:@"保护地"] || [t containsString:@"巡护"] || [t containsString:@"动物"]) return YES;
     }
     if ([controller respondsToSelector:@selector(appId)]) {
         id appIdObj = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(appId));
         NSString *appId = [appIdObj isKindOfClass:NSString.class] ? appIdObj : [appIdObj description];
         if ([appId containsString:@"68687842"]) return YES;
     }
-    if ([controller respondsToSelector:@selector(curUrl)]) {
-        id curUrl = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(curUrl));
-        NSString *cStr = [curUrl isKindOfClass:NSURL.class] ? [(NSURL *)curUrl absoluteString] : [curUrl description];
-        if ([cStr containsString:@"68687842"] || [cStr containsString:@"protect"] || [cStr containsString:@"animal"] || [cStr containsString:@"patrol"]) return YES;
+    if ([controller respondsToSelector:@selector(title)]) {
+        id titleObj = ((id (*)(id, SEL))objc_msgSend)(controller, @selector(title));
+        NSString *t = [titleObj isKindOfClass:NSString.class] ? titleObj : [titleObj description];
+        if ([t containsString:@"保护地"] || [t containsString:@"巡护"]) return YES;
     }
     return NO;
 }
 
 static void installPatrolAutoPilot(id controller) {
     if (![AntForestManager sharedInstance].enableAutoPatrol) return;
-    id webView = [controller respondsToSelector:@selector(webView)] ? ((id (*)(id, SEL))objc_msgSend)(controller, @selector(webView)) : nil;
+    id webView = findWebViewInController(controller);
     SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
     if (![webView respondsToSelector:evaluate]) return;
     
     NSString *script = @"(()=>{if(window.__afPatrolInstalled)return'already';"
     "window.__afPatrolInstalled=true;"
     "function sendLog(data){try{prompt('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
-    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0,reportedDone:false};"
-    "function findAndClick(keywords){"
-    "const els=Array.from(document.querySelectorAll('button,div,span,a,p,img,i,em,[role=\"button\"]'));"
+    "const d=new Date();"
+    "const todayStr=d.getFullYear()+''+String(d.getMonth()+1).padStart(2,'0')+''+String(d.getDate()).padStart(2,'0');"
+    "let patrolState={leftChance:-1,leftStep:0,usedStep:0,isBusy:false,lastPatrolTime:0,noBtnCount:0,reportedDone:false,exchangeLimitReached:(localStorage.getItem('af_patrol_step_limit_'+todayStr)==='1'),lastPatrolId:0,lastNodeIndex:0};"
+    "function triggerTap(el){"
+    "if(!el)return;"
+    "const r=el.getBoundingClientRect();"
+    "const x=Math.round(r.left+r.width/2);"
+    "const y=Math.round(r.top+r.height/2);"
+    "try{prompt('NATIVE_TAP:'+x+','+y);}catch(_){}"
+    "const topEl=document.elementFromPoint(x,y)||el;"
+    "const mOpts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y};"
+    "let tObj=null;"
+    "try{tObj=new Touch({identifier:Date.now()%1000000,target:topEl,clientX:x,clientY:y,pageX:x,pageY:y,screenX:x,screenY:y});}catch(_){}"
+    "const sendT=(typ,act)=>{"
+    "let te=null;"
+    "if(tObj){try{te=new TouchEvent(typ,{bubbles:true,cancelable:true,touches:act?[tObj]:[],targetTouches:act?[tObj]:[],changedTouches:[tObj]});}catch(_){}}"
+    "if(!te){try{te=new CustomEvent(typ,{bubbles:true,cancelable:true,detail:{clientX:x,clientY:y}});}catch(_){}}"
+    "if(te){topEl.dispatchEvent(te);if(el!==topEl)el.dispatchEvent(te);}"
+    "};"
+    "sendT('touchstart',true);"
+    "topEl.dispatchEvent(new MouseEvent('mousedown',mOpts));"
+    "if(el!==topEl)el.dispatchEvent(new MouseEvent('mousedown',mOpts));"
+    "setTimeout(()=>{"
+    "sendT('touchend',false);"
+    "topEl.dispatchEvent(new MouseEvent('mouseup',mOpts));"
+    "if(el!==topEl)el.dispatchEvent(new MouseEvent('mouseup',mOpts));"
+    "topEl.dispatchEvent(new MouseEvent('click',mOpts));"
+    "if(el!==topEl)el.dispatchEvent(new MouseEvent('click',mOpts));"
+    "try{topEl.click();}catch(_){}"
+    "try{el.click();}catch(_){}"
+    "},40);}"
+    "function triggerTapPoint(x,y){"
+    "const rx=Math.round(x), ry=Math.round(y);"
+    "try{prompt('NATIVE_TAP:'+rx+','+ry);}catch(_){}"
+    "const el=document.elementFromPoint(rx,ry)||document.body;"
+    "triggerTap(el);"
+    "}"
+    "function findAndClick(keywords,minTop,maxTop){"
+    "const els=Array.from(document.querySelectorAll('button,a,div,span,p,img,[role=\"button\"]'));"
     "for(let el of els){"
+    "if(el.children.length>3)continue;"
+    "const rect=el.getBoundingClientRect();"
+    "if(rect.width<=0||rect.height<=0||rect.top<(minTop||70))continue;"
+    "if(maxTop&&rect.bottom>maxTop)continue;"
     "const txt=(el.innerText||el.textContent||'').trim();"
     "const alt=(el.getAttribute('alt')||'').trim();"
     "const aria=(el.getAttribute('aria-label')||'').trim();"
-    "const title=(el.getAttribute('title')||'').trim();"
     "for(let kw of keywords){"
-    "if(txt===kw||alt===kw||aria===kw||title===kw||(kw.length>=2&&(txt.includes(kw)||alt.includes(kw)||aria.includes(kw)))){ "
+    "if(txt===kw||alt===kw||aria===kw||(kw.length>=2&&(txt===kw||aria===kw))){triggerTap(el);return true;}"
+    "}}"
+    "for(let el of els){"
+    "if(el.children.length>3)continue;"
     "const rect=el.getBoundingClientRect();"
-    "if(rect.width>0&&rect.height>0&&el.offsetParent!==null){"
-    "el.click();return true;"
-    "}}}"
-    "}return false;}"
+    "if(rect.width<=0||rect.height<=0||rect.top<(minTop||70))continue;"
+    "if(maxTop&&rect.bottom>maxTop)continue;"
+    "const txt=(el.innerText||el.textContent||'').trim();"
+    "for(let kw of keywords){"
+    "if(txt.includes(kw)&&txt.length<=kw.length+6){triggerTap(el);return true;}"
+    "}}"
+    "return false;}"
+    "function findAndClickClose(){"
+    "const mask=document.querySelector('[class*=\"mask\"],[class*=\"modal\"],[class*=\"dialog\"],[class*=\"popup\"],[class*=\"drawer\"],[role=\"dialog\"]');"
+    "if(!mask)return false;"
+    "const closeEls=Array.from(document.querySelectorAll('button,a,div,span,img,svg,[role=\"button\"]')).filter(el=>{"
+    "const cls=(el.className||'').toString();"
+    "const txt=(el.innerText||el.textContent||'').trim();"
+    "const aria=(el.getAttribute('aria-label')||'').trim();"
+    "const src=(el.getAttribute('src')||'').trim();"
+    "const r=el.getBoundingClientRect();"
+    "return (cls.includes('close')||cls.includes('close-btn')||txt==='✕'||txt==='×'||txt==='X'||aria.includes('关闭')||src.includes('close'))&&r.width>0&&r.height>0&&r.top>50;"
+    "});"
+    "if(closeEls.length>0){triggerTap(closeEls[0]);return true;}"
+    "const w=window.innerWidth, h=window.innerHeight;"
+    "const scanPoints=[[w*0.5, h*0.715],[w*0.5, h*0.81]];"
+    "for(let pt of scanPoints){"
+    "const el=document.elementFromPoint(pt[0], pt[1]);"
+    "if(el&&el!==document.body&&el!==document.documentElement&&el!==mask){triggerTap(el);return true;}"
+    "}"
+    "return false;}"
     "function handleEvents(events){"
     "if(events&&Array.isArray(events)){"
     "for(let ev of events){"
     "if(ev.eventType==='material'&&ev.materialInfo&&ev.materialInfo.materialType==='quiz'){"
-    "const detail=ev.materialDetail||{};const q=detail.N_question||{};const correctIdx=q.correct;"
+    "const detail=ev.materialDetail||{};const q=detail.N_question||{};"
+    "const correctIdx=(q.correct!==undefined)?q.correct:((q.right!==undefined)?q.right:0);"
     "sendLog({type:'AUTO-PATROL',action:'quiz_found',q:q.question,correct:correctIdx});"
     "setTimeout(()=>{"
-    "const opts=document.querySelectorAll('.option,[class*=\"option\"],[class*=\"answer\"],[class*=\"item\"]');"
-    "if(opts&&opts[correctIdx]){opts[correctIdx].click();"
-    "setTimeout(()=>{findAndClick(['确定','确认','提交']);},400);}"
-    "},600);}"
+    "answerQuiz(correctIdx);"
+    "},300);}"
     "}}"
-    "setTimeout(()=>{findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取','完成','我知道啦','知道了']);},800);"
+    "setTimeout(()=>{findAndClick(['继续前进','开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取','完成','我知道啦','知道了'],70);},800);"
+    "}"
+    "function answerQuiz(targetIdx){"
+    "const w=window.innerWidth, h=window.innerHeight;"
+    "const optY=targetIdx===1?h*0.91:h*0.835;"
+    "triggerTapPoint(w*0.5, optY);"
+    "const allOpts=Array.from(document.querySelectorAll('button, [role=\"button\"], [class*=\"option\"], [class*=\"answer\"], [class*=\"choice\"], [class*=\"item\"], [class*=\"btn\"], div, p, span')).filter(el=>{"
+    "const r=el.getBoundingClientRect();"
+    "const t=(el.innerText||el.textContent||'').trim();"
+    "return r.width>w*0.4&&r.height>=30&&r.height<=90&&r.top>h*0.65&&r.bottom<h*0.98&&t.length>=2&&t.length<=35&&!t.includes('继续')&&!t.includes('视频')&&!t.includes('返回');"
+    "});"
+    "const uniqueOpts=[];"
+    "for(let el of allOpts){"
+    "if(!uniqueOpts.some(u=>Math.abs(u.getBoundingClientRect().top-el.getBoundingClientRect().top)<15)){uniqueOpts.push(el);}"
+    "}"
+    "if(uniqueOpts.length>=2){"
+    "const selEl=uniqueOpts[targetIdx]||uniqueOpts[0];"
+    "triggerTap(selEl);"
+    "sendLog({type:'AUTO-PATROL',action:'quiz_answered_dom',idx:targetIdx});"
+    "}else{"
+    "sendLog({type:'AUTO-PATROL',action:'quiz_answered_coord',idx:targetIdx});"
+    "}"
+    "if(window.AlipayJSBridge&&window.AlipayJSBridge.call&&patrolState.lastPatrolId&&patrolState.lastNodeIndex!==undefined){"
+    "try{"
+    "window.AlipayJSBridge.call('rpc',{"
+    "operationType:'alipay.antforest.forest.h5.patrolKeepGoing',"
+    "requestData:[{"
+    "patrolId:patrolState.lastPatrolId,"
+    "nodeIndex:patrolState.lastNodeIndex,"
+    "reactParam:{answer:targetIdx===0?'correct':'wrong'},"
+    "version:'20231123',"
+    "timezoneId:'Asia/Shanghai',"
+    "source:'ant_forest'"
+    "}]"
+    "});"
+    "}catch(_){}"
+    "}"
+    "return true;"
     "}"
     "function autoPatrolStep(){"
     "if(patrolState.isBusy)return;"
-    "const now=Date.now();"
-    "if(now-patrolState.lastPatrolTime<1500)return;"
-    "findAndClick(['开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取','完成','我知道啦','知道了']);"
-    "if(patrolState.leftChance>0||patrolState.leftChance===-1){"
-    "const clicked=findAndClick(['开始巡护','继续巡护','巡护','立即巡护','去巡护','前进','探索','去探索','走步']);"
-    "if(clicked){"
-    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;patrolState.noBtnCount=0;"
-    "sendLog({type:'AUTO-PATROL',action:'patrol_forward',leftChance:patrolState.leftChance});"
-    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},2000);"
+    "if(patrolState.leftChance===0&&patrolState.exchangeLimitReached){"
+    "if(!patrolState.reportedDone){"
+    "patrolState.reportedDone=true;"
+    "sendLog({type:'STATUS',msg:'保护地巡护：今日 5 次步数兑换已满且巡护机会已用完，进入冷却期（明日继续）'});"
+    "}"
     "return;"
-    "}else{"
-    "patrolState.noBtnCount++;"
     "}"
+    "const now=Date.now();"
+    "if(now-patrolState.lastPatrolTime<1000)return;"
+    "const w=window.innerWidth, h=window.innerHeight;"
+    "const topBack=document.querySelector('[class*=\"back\"],[aria-label*=\"返回\"],[class*=\"nav-back\"]');"
+    "const isVideoPage=window.location.href.includes('video')||window.location.href.includes('player')||window.location.href.includes('shortvideo')||document.querySelector('video,[class*=\"video-player\"],[class*=\"player\"]');"
+    "if(isVideoPage&&!window.location.href.includes('patrol')){"
+    "if(topBack){triggerTap(topBack);}else{triggerTapPoint(24,55);}"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "setTimeout(()=>{patrolState.isBusy=false;},1200);"
+    "return;"
     "}"
-    "if(patrolState.leftChance===0||patrolState.noBtnCount>=3){"
-    "if(patrolState.usedStep<10000&&patrolState.leftStep>=2000){"
-    "const exClicked=findAndClick(['兑换巡护机会','兑换步数','兑换']);"
+    "const isReplaceModal=Array.from(document.querySelectorAll('*')).some(el=>{"
+    "const t=(el.innerText||el.textContent||'').trim();"
+    "return t.includes('已经有动物在巡护')||t.includes('是否直接替换');"
+    "});"
+    "if(isReplaceModal){"
+    "findAndClick(['取消','暂不替换'],70);"
+    "sendLog({type:'STATUS',msg:'保护地巡护：森林中已有动物巡护中，自动保留当前伙伴，取消替换。'});"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "setTimeout(()=>{patrolState.isBusy=false;findAndClickClose();},1500);"
+    "return;"
+    "}"
+    "const isLimitModal=Array.from(document.querySelectorAll('*')).some(el=>{"
+    "const t=(el.innerText||el.textContent||'').trim();"
+    "return t.includes('兑换次数已达上限')||t.includes('明天继续来哦')||t.includes('每天步数最多可兑换');"
+    "});"
+    "if(isLimitModal){"
+    "patrolState.exchangeLimitReached=true;"
+    "try{localStorage.setItem('af_patrol_step_limit_'+todayStr,'1');}catch(_){}"
+    "const closed=findAndClick(['知道了','我知道了','确定'],70);"
+    "if(!closed){"
+    "triggerTapPoint(w*0.5, h*0.605);"
+    "setTimeout(()=>{triggerTapPoint(w*0.5, h*0.715);},200);"
+    "}"
+    "if(!patrolState.reportedDone){"
+    "patrolState.reportedDone=true;"
+    "sendLog({type:'STATUS',msg:'保护地巡护：今日步数兑换已达上限，进入冷却期（明日继续）'});"
+    "}"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "setTimeout(()=>{patrolState.isBusy=false;},1500);"
+    "return;"
+    "}"
+    "const dispatchAction=findAndClick(['立即派遣','派遣','去派遣','派去巡护'],70);"
+    "if(dispatchAction){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "sendLog({type:'STATUS',msg:'保护地巡护：发现可派遣动物，已自动点击【派遣】！'});"
+    "setTimeout(()=>{patrolState.isBusy=false;findAndClick(['确定','确认','立即派遣'],70);},1200);"
+    "return;"
+    "}"
+    "const priorityAction=findAndClick(['继续前进','立即兑换','确认兑换','立即合成','追寻踪迹','开心收下','收下','我知道了','确定','领取','立即收下','好的','去领取','完成','我知道啦','知道了','完成答题'],70);"
+    "if(priorityAction){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;patrolState.noBtnCount=0;"
+    "setTimeout(()=>{patrolState.isBusy=false;},1200);"
+    "return;"
+    "}"
+    "const isQuizVisible=Array.from(document.querySelectorAll('*')).some(el=>{"
+    "const t=(el.innerText||el.textContent||'').trim();"
+    "return t.includes('关系呢')||t.includes('选一选')||t.includes('答案')||t.includes('下列哪项')||t.includes('是什么')||t.includes('古名叫什么')||t.includes('为什么呢')||t.includes('科普问答');"
+    "});"
+    "if(isQuizVisible){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "answerQuiz(0);"
+    "setTimeout(()=>{patrolState.isBusy=false;},1200);"
+    "return;"
+    "}"
+    "const clicked=findAndClick(['开始巡护','继续巡护','前进','立即巡护','去巡护','探索','去探索','走步'],window.innerHeight*0.5);"
+    "if(clicked){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "sendLog({type:'AUTO-PATROL',action:'patrol_forward'});"
+    "setTimeout(()=>{patrolState.isBusy=false;handleEvents(null);},1800);"
+    "return;"
+    "}"
+    "if(!patrolState.exchangeLimitReached){"
+    "const exClicked=findAndClick(['兑换巡护机会','兑换步数','兑换'],window.innerHeight*0.8);"
     "if(exClicked){"
     "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
-    "sendLog({type:'AUTO-PATROL',action:'exchange_step',leftStep:patrolState.leftStep,usedStep:patrolState.usedStep});"
+    "sendLog({type:'AUTO-PATROL',action:'exchange_step'});"
     "setTimeout(()=>{"
-    "findAndClick(['确认兑换','确定','兑换','我知道了']);"
-    "setTimeout(()=>{patrolState.isBusy=false;patrolState.noBtnCount=0;},1000);"
-    "},800);"
+    "const exDone=findAndClick(['立即兑换','确认兑换','确定','兑换','我知道了'],70);"
+    "if(!exDone){triggerTapPoint(w*0.5, h*0.605);}"
+    "setTimeout(()=>{patrolState.isBusy=false;},1500);"
+    "},700);"
     "return;"
     "}"
     "}"
-    "if((patrolState.noBtnCount>=4||patrolState.leftChance===0)&&!patrolState.reportedDone){"
-    "patrolState.reportedDone=true;"
-    "sendLog({type:'AUTO-PATROL',action:'all_tasks_finished'});"
+    "const bottomBtn=document.elementFromPoint(window.innerWidth*0.5, window.innerHeight*0.93);"
+    "if(bottomBtn&&bottomBtn!==document.body&&bottomBtn!==document.documentElement){"
+    "const txt=(bottomBtn.innerText||bottomBtn.textContent||'').trim();"
+    "if(txt.includes('开始巡护')||txt.includes('继续巡护')||txt.includes('走步')||txt.includes('前进')||(!patrolState.exchangeLimitReached&&txt.includes('兑换'))){"
+    "patrolState.isBusy=true;patrolState.lastPatrolTime=now;"
+    "triggerTap(bottomBtn);"
+    "setTimeout(()=>{patrolState.isBusy=false;},1500);"
+    "return;"
     "}"
     "}"
-    "}"
-    "function dispatchSmartAnimal(){"
-    "const bodyText=document.body?document.body.innerText||'':'';"
-    "if(bodyText.includes('巡护中')||bodyText.includes('正在巡护')||bodyText.includes('已在巡护')||bodyText.includes('已派遣')){"
-    "sendLog({type:'AUTO-PATROL',action:'skip_dispatch_already_active'});return;"
-    "}"
-    "const cards=Array.from(document.querySelectorAll('[class*=\"card\"],[class*=\"animal\"],[class*=\"item\"]'));"
-    "const highYields=['88g','100g','云豹','亚洲金猫','金钱豹','雪豹','东北虎','荒漠猫'];"
-    "const midYields=['60g','豺','赤斑羚','羚牛','藏羚羊','原羚','黑颈鹤'];"
-    "for(let kw of highYields){"
-    "for(let card of cards){"
-    "const txt=card.innerText||card.textContent||'';"
-    "if(txt.includes('巡护中')||txt.includes('已派遣'))return;"
-    "if(txt.includes(kw)){card.click();sendLog({type:'AUTO-PATROL',action:'dispatch_animal',animal:kw});setTimeout(()=>{findAndClick(['派它巡护森林','立即派遣','派遣']);},300);return;}"
-    "}"
-    "}"
-    "for(let kw of midYields){"
-    "for(let card of cards){"
-    "const txt=card.innerText||card.textContent||'';"
-    "if(txt.includes('巡护中')||txt.includes('已派遣'))return;"
-    "if(txt.includes(kw)){card.click();sendLog({type:'AUTO-PATROL',action:'dispatch_animal',animal:kw});setTimeout(()=>{findAndClick(['派它巡护森林','立即派遣','派遣']);},300);return;}"
-    "}"
-    "}"
-    "}"
-    "if(location.href.includes('animalBook.html')||location.href.includes('protect')){"
-    "sendLog({type:'AUTO-PATROL',action:'synthesize_animal'});"
-    "findAndClick(['立即合成','合成物种','一键合成','合成']);"
-    "setTimeout(dispatchSmartAnimal,600);"
     "}"
     "function hookBridge(){"
     "if(!window.AlipayJSBridge||!window.AlipayJSBridge.call){setTimeout(hookBridge,150);return;}"
@@ -331,26 +658,31 @@ static void installPatrolAutoPilot(id controller) {
     "sendLog({type:'RPC-RES',op:op,res:res});"
     "if(res){"
     "const up=res.userPatrol||(res.resData&&res.resData.userPatrol);"
-    "if(up&&up.chance){"
+    "const upperLimit=res.chanceFromStepUpperLimit||(res.resData&&res.resData.chanceFromStepUpperLimit)||5;"
+    "const stepUnit=res.chanceStepUnit||(res.resData&&res.resData.chanceStepUnit)||2000;"
+    "if(up){"
+    "if(up.patrolId)patrolState.lastPatrolId=up.patrolId;"
+    "if(up.currentNode!==undefined)patrolState.lastNodeIndex=up.currentNode;"
+    "if(up.chance){"
     "patrolState.leftChance=up.chance.leftChance!==undefined?up.chance.leftChance:0;"
     "patrolState.leftStep=up.chance.leftStep||0;"
     "patrolState.usedStep=up.chance.usedStep||0;"
+    "if(patrolState.usedStep>=upperLimit*stepUnit){"
+    "patrolState.exchangeLimitReached=true;"
+    "try{localStorage.setItem('af_patrol_step_limit_'+todayStr,'1');}catch(_){}"
+    "}"
+    "}"
     "}"
     "if(res.events)handleEvents(res.events);"
     "}"
-    "setTimeout(autoPatrolStep,800);"
+    "setTimeout(autoPatrolStep,600);"
     "if(origCb)origCb(res);"
-    "};"
-    "return _call.call(this,name,params,cb);"
-    "}"
-    "return _call.apply(this,arguments);"
-    "};"
     "sendLog({type:'STATUS',msg:'AlipayJSBridge Patrol Hooked & AutoPilot Active'});"
-    "setTimeout(autoPatrolStep,800);"
-    "setInterval(autoPatrolStep,1800);"
+    "setTimeout(autoPatrolStep,600);"
+    "setInterval(autoPatrolStep,1000);"
     "};"
     "hookBridge();"
-    "return'autopilot-injected';})()";
+    "return'patrol-autopilot-installed';})()";
     
     void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
     runJavaScript(webView, evaluate, script, ^(id result, NSError *error) {
@@ -447,29 +779,37 @@ static void installEarnEnergyCollector(id controller) {
     self.title = @"定时收取设置";
     self.editingIndex = NSNotFound;
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
-    UIBarButtonItem *close = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
-    self.navigationItem.rightBarButtonItem = close;
+
     UIView *enabledCard = [[UIView alloc] init]; enabledCard.backgroundColor = UIColor.systemBackgroundColor; enabledCard.layer.cornerRadius = 16; enabledCard.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *enabledTitle = [[UILabel alloc] init]; enabledTitle.text = @"启用每日定时收取"; enabledTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; enabledTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *enabledDetail = [[UILabel alloc] init]; enabledDetail.text = @"仅收取好友与自己的成熟能量"; enabledDetail.font = [UIFont systemFontOfSize:13]; enabledDetail.textColor = UIColor.secondaryLabelColor; enabledDetail.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledTitle = [[UILabel alloc] init]; enabledTitle.text = @"启用每日定时收取"; enabledTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; enabledTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledDetail = [[UILabel alloc] init]; enabledDetail.text = @"仅收取好友与自己的成熟能量"; enabledDetail.font = [UIFont systemFontOfSize:12]; enabledDetail.textColor = UIColor.secondaryLabelColor; enabledDetail.translatesAutoresizingMaskIntoConstraints = NO;
     UISwitch *enabled = [[UISwitch alloc] init]; enabled.on = [AntForestManager sharedInstance].enableScheduledCollect; [enabled addTarget:self action:@selector(toggle:) forControlEvents:UIControlEventValueChanged]; enabled.translatesAutoresizingMaskIntoConstraints = NO;
     [enabledCard addSubview:enabledTitle]; [enabledCard addSubview:enabledDetail]; [enabledCard addSubview:enabled];
+
     self.picker = [[UIDatePicker alloc] init];
     self.picker.datePickerMode = UIDatePickerModeTime;
-    self.picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
+    if (@available(iOS 13.4, *)) {
+        self.picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
+    }
     self.saveButton = [UIButton buttonWithType:UIButtonTypeSystem];
     [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal];
-    self.saveButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    self.saveButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    self.saveButton.backgroundColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    [self.saveButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    self.saveButton.layer.cornerRadius = 8;
+    self.saveButton.contentEdgeInsets = UIEdgeInsetsMake(6, 14, 6, 14);
     [self.saveButton addTarget:self action:@selector(addTime) forControlEvents:UIControlEventTouchUpInside];
+
     UIView *addCard = [[UIView alloc] init]; addCard.backgroundColor = UIColor.systemBackgroundColor; addCard.layer.cornerRadius = 16; addCard.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *addTitle = [[UILabel alloc] init]; addTitle.text = @"添加收取时间"; addTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; addTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *addTitle = [[UILabel alloc] init]; addTitle.text = @"添加定时收取时间"; addTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; addTitle.translatesAutoresizingMaskIntoConstraints = NO;
     UIStackView *bar = [[UIStackView alloc] initWithArrangedSubviews:@[self.picker, self.saveButton]];
     bar.spacing = 16; bar.alignment = UIStackViewAlignmentCenter; bar.translatesAutoresizingMaskIntoConstraints = NO;
     [addCard addSubview:addTitle]; [addCard addSubview:bar];
-    UILabel *sectionTitle = [[UILabel alloc] init]; sectionTitle.text = @"已添加时间"; sectionTitle.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]; sectionTitle.textColor = UIColor.secondaryLabelColor; sectionTitle.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UILabel *sectionTitle = [[UILabel alloc] init]; sectionTitle.text = @"已添加的定时时间"; sectionTitle.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]; sectionTitle.textColor = UIColor.secondaryLabelColor; sectionTitle.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.backgroundColor = UIColor.clearColor; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.emptyLabel = [[UILabel alloc] init]; self.emptyLabel.text = @"尚未添加定时任务"; self.emptyLabel.font = [UIFont systemFontOfSize:15]; self.emptyLabel.textColor = UIColor.secondaryLabelColor; self.emptyLabel.textAlignment = NSTextAlignmentCenter; self.emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.emptyLabel = [[UILabel alloc] init]; self.emptyLabel.text = @"尚未添加定时任务"; self.emptyLabel.font = [UIFont systemFontOfSize:14]; self.emptyLabel.textColor = UIColor.secondaryLabelColor; self.emptyLabel.textAlignment = NSTextAlignmentCenter; self.emptyLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:enabledCard]; [self.view addSubview:addCard]; [self.view addSubview:sectionTitle]; [self.view addSubview:self.tableView]; [self.view addSubview:self.emptyLabel];
     [NSLayoutConstraint activateConstraints:@[
         [enabledCard.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [enabledCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [enabledCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [enabledCard.heightAnchor constraintEqualToConstant:70],
@@ -517,16 +857,80 @@ static void installEarnEnergyCollector(id controller) {
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return [AntForestManager sharedInstance].scheduledTimes.count; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"time"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"time"];
-    cell.textLabel.text = [AntForestManager sharedInstance].scheduledTimes[indexPath.row]; cell.textLabel.font = [UIFont monospacedDigitSystemFontOfSize:20 weight:UIFontWeightSemibold];
-    cell.accessoryView = nil;
+    NSString *timeStr = [AntForestManager sharedInstance].scheduledTimes[indexPath.row];
+    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:timeStr attributes:@{
+        NSFontAttributeName: [UIFont monospacedDigitSystemFontOfSize:18 weight:UIFontWeightSemibold],
+        NSForegroundColorAttributeName: UIColor.labelColor
+    }];
+    NSAttributedString *hint = [[NSAttributedString alloc] initWithString:@"   点击修改" attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightRegular],
+        NSForegroundColorAttributeName: UIColor.secondaryLabelColor
+    }];
+    [attr appendAttributedString:hint];
+    cell.textLabel.attributedText = attr;
+    cell.imageView.image = [UIImage systemImageNamed:@"clock.fill"];
+    cell.imageView.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    
+    UIButton *trashBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    trashBtn.frame = CGRectMake(0, 0, 36, 36);
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightRegular];
+    [trashBtn setImage:[UIImage systemImageNamed:@"trash" withConfiguration:config] forState:UIControlStateNormal];
+    trashBtn.tintColor = [UIColor colorWithRed:0.90 green:0.25 blue:0.25 alpha:1.0];
+    trashBtn.tag = indexPath.row;
+    [trashBtn addTarget:self action:@selector(handleDeleteButton:) forControlEvents:UIControlEventTouchUpInside];
+    cell.accessoryView = trashBtn;
     return cell;
 }
+- (void)handleDeleteButton:(UIButton *)sender {
+    NSInteger row = sender.tag;
+    NSMutableArray *times = [[AntForestManager sharedInstance].scheduledTimes mutableCopy];
+    if (row < times.count) {
+        [times removeObjectAtIndex:row];
+        [AntForestManager sharedInstance].scheduledTimes = times;
+        [NSUserDefaults.standardUserDefaults setObject:times forKey:@"scheduledCollectTimes"];
+        [self.tableView reloadData];
+        [self updateEmptyState];
+    }
+}
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
-    self.picker.date = [formatter dateFromString:[AntForestManager sharedInstance].scheduledTimes[indexPath.row]] ?: NSDate.date;
-    self.editingIndex = indexPath.row;
-    [self.saveButton setTitle:@"保存修改" forState:UIControlStateNormal];
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *currentTime = [AntForestManager sharedInstance].scheduledTimes[indexPath.row];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm";
+    NSDate *currentDate = [formatter dateFromString:currentTime] ?: [NSDate date];
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"修改定时收取时间"
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.preferredContentSize = CGSizeMake(270, 160);
+    UIDatePicker *picker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 0, 270, 160)];
+    picker.datePickerMode = UIDatePickerModeTime;
+    if (@available(iOS 13.4, *)) {
+        picker.preferredDatePickerStyle = UIDatePickerStyleWheels;
+    }
+    picker.date = currentDate;
+    [vc.view addSubview:picker];
+    [alert setValue:vc forKey:@"contentViewController"];
+    
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存修改" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        NSString *newTime = [formatter stringFromDate:picker.date];
+        NSMutableArray *times = [[AntForestManager sharedInstance].scheduledTimes mutableCopy] ?: NSMutableArray.array;
+        if (indexPath.row < times.count) {
+            [times removeObjectAtIndex:indexPath.row];
+        }
+        if (![times containsObject:newTime]) {
+            [times addObject:newTime];
+        }
+        [times sortUsingSelector:@selector(compare:)];
+        [AntForestManager sharedInstance].scheduledTimes = times;
+        [NSUserDefaults.standardUserDefaults setObject:times forKey:@"scheduledCollectTimes"];
+        [weakSelf.tableView reloadData];
+        [weakSelf updateEmptyState];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (style != UITableViewCellEditingStyleDelete) return;
@@ -539,18 +943,51 @@ static void installEarnEnergyCollector(id controller) {
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"定时浇水";
+    self.title = @"定时浇水设置";
     self.editingIndex = NSNotFound;
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
-    self.picker = [[UIDatePicker alloc] init]; self.picker.datePickerMode = UIDatePickerModeTime; self.picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
-    self.saveButton = [UIButton buttonWithType:UIButtonTypeSystem]; [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal]; self.saveButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; [self.saveButton addTarget:self action:@selector(addTime) forControlEvents:UIControlEventTouchUpInside];
-    UIStackView *add = [[UIStackView alloc] initWithArrangedSubviews:@[self.picker, self.saveButton]]; add.spacing = 16; add.alignment = UIStackViewAlignmentCenter; add.translatesAutoresizingMaskIntoConstraints = NO;
-    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped]; self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:add]; [self.view addSubview:self.tableView];
+    
+    UIView *addCard = [[UIView alloc] init]; addCard.backgroundColor = UIColor.systemBackgroundColor; addCard.layer.cornerRadius = 16; addCard.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *addTitle = [[UILabel alloc] init]; addTitle.text = @"添加定时浇水时间"; addTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; addTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    self.picker = [[UIDatePicker alloc] init]; self.picker.datePickerMode = UIDatePickerModeTime;
+    if (@available(iOS 13.4, *)) {
+        self.picker.preferredDatePickerStyle = UIDatePickerStyleCompact;
+    }
+    self.saveButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal];
+    self.saveButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    self.saveButton.backgroundColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    [self.saveButton setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    self.saveButton.layer.cornerRadius = 8;
+    self.saveButton.contentEdgeInsets = UIEdgeInsetsMake(6, 14, 6, 14);
+    [self.saveButton addTarget:self action:@selector(addTime) forControlEvents:UIControlEventTouchUpInside];
+    
+    UIStackView *bar = [[UIStackView alloc] initWithArrangedSubviews:@[self.picker, self.saveButton]];
+    bar.spacing = 16; bar.alignment = UIStackViewAlignmentCenter; bar.translatesAutoresizingMaskIntoConstraints = NO;
+    [addCard addSubview:addTitle]; [addCard addSubview:bar];
+    
+    UILabel *sectionTitle = [[UILabel alloc] init]; sectionTitle.text = @"已添加的定时时间"; sectionTitle.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]; sectionTitle.textColor = UIColor.secondaryLabelColor; sectionTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.backgroundColor = UIColor.clearColor; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    [self.view addSubview:addCard]; [self.view addSubview:sectionTitle]; [self.view addSubview:self.tableView];
     [NSLayoutConstraint activateConstraints:@[
-        [add.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [add.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [self.tableView.topAnchor constraintEqualToAnchor:add.bottomAnchor constant:12], [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
+        [addCard.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16],
+        [addCard.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [addCard.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [addCard.heightAnchor constraintEqualToConstant:74],
+        [addTitle.topAnchor constraintEqualToAnchor:addCard.topAnchor constant:12],
+        [addTitle.leadingAnchor constraintEqualToAnchor:addCard.leadingAnchor constant:16],
+        [bar.topAnchor constraintEqualToAnchor:addTitle.bottomAnchor constant:6],
+        [bar.leadingAnchor constraintEqualToAnchor:addCard.leadingAnchor constant:16],
+        [sectionTitle.topAnchor constraintEqualToAnchor:addCard.bottomAnchor constant:18],
+        [sectionTitle.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
+        [self.tableView.topAnchor constraintEqualToAnchor:sectionTitle.bottomAnchor constant:2],
+        [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
+        [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor],
     ]];
 }
 
@@ -564,17 +1001,85 @@ static void installEarnEnergyCollector(id controller) {
     [times sortUsingSelector:@selector(compare:)];
     AntForestManager.sharedInstance.waterScheduledTimes = times;
     [NSUserDefaults.standardUserDefaults setObject:times forKey:@"waterScheduledTimes"];
-    self.editingIndex = NSNotFound; [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal]; [self.tableView reloadData];
+    self.editingIndex = NSNotFound;
+    [self.saveButton setTitle:@"添加时间" forState:UIControlStateNormal];
+    [self.tableView reloadData];
 }
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return AntForestManager.sharedInstance.waterScheduledTimes.count; }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"waterTime"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"waterTime"];
-    cell.textLabel.text = AntForestManager.sharedInstance.waterScheduledTimes[indexPath.row]; cell.textLabel.font = [UIFont monospacedDigitSystemFontOfSize:20 weight:UIFontWeightSemibold]; return cell;
+    NSString *timeStr = AntForestManager.sharedInstance.waterScheduledTimes[indexPath.row];
+    NSMutableAttributedString *attr = [[NSMutableAttributedString alloc] initWithString:timeStr attributes:@{
+        NSFontAttributeName: [UIFont monospacedDigitSystemFontOfSize:18 weight:UIFontWeightSemibold],
+        NSForegroundColorAttributeName: UIColor.labelColor
+    }];
+    NSAttributedString *hint = [[NSAttributedString alloc] initWithString:@"   点击修改" attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightRegular],
+        NSForegroundColorAttributeName: UIColor.secondaryLabelColor
+    }];
+    [attr appendAttributedString:hint];
+    cell.textLabel.attributedText = attr;
+    cell.imageView.image = [UIImage systemImageNamed:@"clock.fill"];
+    cell.imageView.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    
+    UIButton *trashBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    trashBtn.frame = CGRectMake(0, 0, 36, 36);
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:16 weight:UIImageSymbolWeightRegular];
+    [trashBtn setImage:[UIImage systemImageNamed:@"trash" withConfiguration:config] forState:UIControlStateNormal];
+    trashBtn.tintColor = [UIColor colorWithRed:0.90 green:0.25 blue:0.25 alpha:1.0];
+    trashBtn.tag = indexPath.row;
+    [trashBtn addTarget:self action:@selector(handleDeleteButton:) forControlEvents:UIControlEventTouchUpInside];
+    cell.accessoryView = trashBtn;
+    return cell;
+}
+- (void)handleDeleteButton:(UIButton *)sender {
+    NSInteger row = sender.tag;
+    NSMutableArray *times = [AntForestManager.sharedInstance.waterScheduledTimes mutableCopy];
+    if (row < times.count) {
+        [times removeObjectAtIndex:row];
+        AntForestManager.sharedInstance.waterScheduledTimes = times;
+        [NSUserDefaults.standardUserDefaults setObject:times forKey:@"waterScheduledTimes"];
+        [self.tableView reloadData];
+    }
 }
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init]; formatter.dateFormat = @"HH:mm";
-    self.picker.date = [formatter dateFromString:AntForestManager.sharedInstance.waterScheduledTimes[indexPath.row]] ?: NSDate.date;
-    self.editingIndex = indexPath.row; [self.saveButton setTitle:@"保存修改" forState:UIControlStateNormal]; [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    NSString *currentTime = AntForestManager.sharedInstance.waterScheduledTimes[indexPath.row];
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm";
+    NSDate *currentDate = [formatter dateFromString:currentTime] ?: [NSDate date];
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"修改定时浇水时间"
+                                                                   message:nil
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.preferredContentSize = CGSizeMake(270, 160);
+    UIDatePicker *picker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 0, 270, 160)];
+    picker.datePickerMode = UIDatePickerModeTime;
+    if (@available(iOS 13.4, *)) {
+        picker.preferredDatePickerStyle = UIDatePickerStyleWheels;
+    }
+    picker.date = currentDate;
+    [vc.view addSubview:picker];
+    [alert setValue:vc forKey:@"contentViewController"];
+    
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存修改" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        NSString *newTime = [formatter stringFromDate:picker.date];
+        NSMutableArray *times = [AntForestManager.sharedInstance.waterScheduledTimes mutableCopy] ?: NSMutableArray.array;
+        if (indexPath.row < times.count) {
+            [times removeObjectAtIndex:indexPath.row];
+        }
+        if (![times containsObject:newTime]) {
+            [times addObject:newTime];
+        }
+        [times sortUsingSelector:@selector(compare:)];
+        AntForestManager.sharedInstance.waterScheduledTimes = times;
+        [NSUserDefaults.standardUserDefaults setObject:times forKey:@"waterScheduledTimes"];
+        [weakSelf.tableView reloadData];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)indexPath {
     if (style != UITableViewCellEditingStyleDelete) return;
@@ -590,17 +1095,109 @@ static void installEarnEnergyCollector(id controller) {
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"开始浇水" style:UIBarButtonItemStyleDone target:self action:@selector(confirmStart)];
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil]; self.searchController.searchResultsUpdater = self; self.searchController.obscuresBackgroundDuringPresentation = NO; self.searchController.searchBar.placeholder = @"搜索好友"; self.navigationItem.searchController = self.searchController;
-    UIView *options = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 224)];
-    UILabel *launchLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 12, 260, 25)]; launchLabel.text = @"打开蚂蚁森林自动浇水"; launchLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    UISwitch *launchSwitch = [[UISwitch alloc] initWithFrame:CGRectZero]; launchSwitch.on = AntForestManager.sharedInstance.enableWaterOnLaunch; launchSwitch.center = CGPointMake(options.bounds.size.width - 46, 24); launchSwitch.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [launchSwitch addTarget:self action:@selector(toggleWaterOnLaunch:) forControlEvents:UIControlEventValueChanged];
-    UILabel *autoLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 50, 180, 25)]; autoLabel.text = @"启用定时自动浇水"; autoLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    UISwitch *autoSwitch = [[UISwitch alloc] initWithFrame:CGRectZero]; autoSwitch.on = AntForestManager.sharedInstance.enableAutoWater; autoSwitch.center = CGPointMake(options.bounds.size.width - 46, 62); autoSwitch.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [autoSwitch addTarget:self action:@selector(toggleAutoWater:) forControlEvents:UIControlEventValueChanged];
-    UISegmentedControl *amount = [[UISegmentedControl alloc] initWithItems:@[@"10g", @"18g", @"33g", @"66g"]]; NSInteger index = MAX(0, MIN(3, AntForestManager.sharedInstance.waterEnergyId - 39)); amount.selectedSegmentIndex = index; amount.frame = CGRectMake(20, 87, options.bounds.size.width - 40, 32); amount.autoresizingMask = UIViewAutoresizingFlexibleWidth; [amount addTarget:self action:@selector(changeAmount:) forControlEvents:UIControlEventValueChanged];
-    UILabel *reminderLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 130, 220, 25)]; reminderLabel.text = @"提醒 TA 来收（7 天未收退回）"; reminderLabel.font = [UIFont systemFontOfSize:15];
-    UISwitch *reminder = [[UISwitch alloc] initWithFrame:CGRectZero]; reminder.on = AntForestManager.sharedInstance.waterReminderEnabled; reminder.center = CGPointMake(options.bounds.size.width - 46, 142); reminder.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [reminder addTarget:self action:@selector(toggleReminder:) forControlEvents:UIControlEventValueChanged];
-    UIButton *schedule = [UIButton buttonWithType:UIButtonTypeSystem]; [schedule setTitle:@"定时浇水设置" forState:UIControlStateNormal]; schedule.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; schedule.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft; schedule.frame = CGRectMake(20, 166, options.bounds.size.width - 40, 40); schedule.autoresizingMask = UIViewAutoresizingFlexibleWidth; [schedule addTarget:self action:@selector(showSchedule) forControlEvents:UIControlEventTouchUpInside];
-    UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(220, 166, options.bounds.size.width - 240, 40)]; hint.text = @"每位好友每日最多 3 次"; hint.textAlignment = NSTextAlignmentRight; hint.textColor = UIColor.secondaryLabelColor; hint.font = [UIFont systemFontOfSize:13]; hint.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-    [options addSubview:launchLabel]; [options addSubview:launchSwitch]; [options addSubview:autoLabel]; [options addSubview:autoSwitch]; [options addSubview:amount]; [options addSubview:reminderLabel]; [options addSubview:reminder]; [options addSubview:schedule]; [options addSubview:hint];
+    
+    UIView *options = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 240)];
+    
+    UIView *card1 = [[UIView alloc] init];
+    card1.backgroundColor = UIColor.systemBackgroundColor;
+    card1.layer.cornerRadius = 16;
+    card1.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UILabel *launchLabel = [[UILabel alloc] init]; launchLabel.text = @"打开蚂蚁森林自动浇水"; launchLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]; launchLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *launchDetail = [[UILabel alloc] init]; launchDetail.text = @"进入森林首页时触发一次"; launchDetail.font = [UIFont systemFontOfSize:12]; launchDetail.textColor = UIColor.secondaryLabelColor; launchDetail.translatesAutoresizingMaskIntoConstraints = NO;
+    UISwitch *launchSwitch = [[UISwitch alloc] init]; launchSwitch.on = AntForestManager.sharedInstance.enableWaterOnLaunch; [launchSwitch addTarget:self action:@selector(toggleWaterOnLaunch:) forControlEvents:UIControlEventValueChanged]; launchSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UIView *div1 = [[UIView alloc] init]; div1.backgroundColor = UIColor.systemGray5Color; div1.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UILabel *autoLabel = [[UILabel alloc] init]; autoLabel.text = @"启用定时自动浇水"; autoLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]; autoLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *autoDetail = [[UILabel alloc] init]; autoDetail.text = @"按设定时刻在后台定时浇水"; autoDetail.font = [UIFont systemFontOfSize:12]; autoDetail.textColor = UIColor.secondaryLabelColor; autoDetail.translatesAutoresizingMaskIntoConstraints = NO;
+    UISwitch *autoSwitch = [[UISwitch alloc] init]; autoSwitch.on = AntForestManager.sharedInstance.enableAutoWater; [autoSwitch addTarget:self action:@selector(toggleAutoWater:) forControlEvents:UIControlEventValueChanged]; autoSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    [card1 addSubview:launchLabel]; [card1 addSubview:launchDetail]; [card1 addSubview:launchSwitch];
+    [card1 addSubview:div1];
+    [card1 addSubview:autoLabel]; [card1 addSubview:autoDetail]; [card1 addSubview:autoSwitch];
+    
+    UIView *card2 = [[UIView alloc] init];
+    card2.backgroundColor = UIColor.systemBackgroundColor;
+    card2.layer.cornerRadius = 16;
+    card2.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UILabel *amountTitle = [[UILabel alloc] init]; amountTitle.text = @"每次浇水量"; amountTitle.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]; amountTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UISegmentedControl *amount = [[UISegmentedControl alloc] initWithItems:@[@"10g", @"18g", @"33g", @"66g"]];
+    NSInteger index = MAX(0, MIN(3, AntForestManager.sharedInstance.waterEnergyId - 39));
+    amount.selectedSegmentIndex = index;
+    [amount addTarget:self action:@selector(changeAmount:) forControlEvents:UIControlEventValueChanged];
+    amount.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UIView *div2 = [[UIView alloc] init]; div2.backgroundColor = UIColor.systemGray5Color; div2.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UIButton *scheduleBtn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [scheduleBtn setTitle:@"定时浇水设置" forState:UIControlStateNormal];
+    scheduleBtn.titleLabel.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
+    scheduleBtn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
+    [scheduleBtn addTarget:self action:@selector(showSchedule) forControlEvents:UIControlEventTouchUpInside];
+    scheduleBtn.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UIImageView *chevron = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevron.tintColor = UIColor.systemGray3Color;
+    chevron.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    [card2 addSubview:amountTitle]; [card2 addSubview:amount];
+    [card2 addSubview:div2];
+    [card2 addSubview:scheduleBtn]; [card2 addSubview:chevron];
+    
+    [options addSubview:card1]; [options addSubview:card2];
+    
+    [NSLayoutConstraint activateConstraints:@[
+        [card1.topAnchor constraintEqualToAnchor:options.topAnchor constant:10],
+        [card1.leadingAnchor constraintEqualToAnchor:options.leadingAnchor constant:16],
+        [card1.trailingAnchor constraintEqualToAnchor:options.trailingAnchor constant:-16],
+        [card1.heightAnchor constraintEqualToConstant:120],
+        
+        [launchLabel.topAnchor constraintEqualToAnchor:card1.topAnchor constant:12],
+        [launchLabel.leadingAnchor constraintEqualToAnchor:card1.leadingAnchor constant:16],
+        [launchDetail.topAnchor constraintEqualToAnchor:launchLabel.bottomAnchor constant:3],
+        [launchDetail.leadingAnchor constraintEqualToAnchor:launchLabel.leadingAnchor],
+        [launchSwitch.centerYAnchor constraintEqualToAnchor:launchLabel.bottomAnchor constant:1],
+        [launchSwitch.trailingAnchor constraintEqualToAnchor:card1.trailingAnchor constant:-16],
+        
+        [div1.topAnchor constraintEqualToAnchor:card1.topAnchor constant:60],
+        [div1.leadingAnchor constraintEqualToAnchor:card1.leadingAnchor constant:16],
+        [div1.trailingAnchor constraintEqualToAnchor:card1.trailingAnchor constant:-16],
+        [div1.heightAnchor constraintEqualToConstant:1],
+        
+        [autoLabel.topAnchor constraintEqualToAnchor:div1.bottomAnchor constant:10],
+        [autoLabel.leadingAnchor constraintEqualToAnchor:card1.leadingAnchor constant:16],
+        [autoDetail.topAnchor constraintEqualToAnchor:autoLabel.bottomAnchor constant:3],
+        [autoDetail.leadingAnchor constraintEqualToAnchor:autoLabel.leadingAnchor],
+        [autoSwitch.centerYAnchor constraintEqualToAnchor:autoLabel.bottomAnchor constant:1],
+        [autoSwitch.trailingAnchor constraintEqualToAnchor:card1.trailingAnchor constant:-16],
+        
+        [card2.topAnchor constraintEqualToAnchor:card1.bottomAnchor constant:10],
+        [card2.leadingAnchor constraintEqualToAnchor:options.leadingAnchor constant:16],
+        [card2.trailingAnchor constraintEqualToAnchor:options.trailingAnchor constant:-16],
+        [card2.heightAnchor constraintEqualToConstant:98],
+        
+        [amountTitle.topAnchor constraintEqualToAnchor:card2.topAnchor constant:12],
+        [amountTitle.leadingAnchor constraintEqualToAnchor:card2.leadingAnchor constant:16],
+        [amount.centerYAnchor constraintEqualToAnchor:amountTitle.centerYAnchor],
+        [amount.trailingAnchor constraintEqualToAnchor:card2.trailingAnchor constant:-16],
+        [amount.widthAnchor constraintEqualToConstant:200],
+        
+        [div2.topAnchor constraintEqualToAnchor:card2.topAnchor constant:48],
+        [div2.leadingAnchor constraintEqualToAnchor:card2.leadingAnchor constant:16],
+        [div2.trailingAnchor constraintEqualToAnchor:card2.trailingAnchor constant:-16],
+        [div2.heightAnchor constraintEqualToConstant:1],
+        
+        [scheduleBtn.topAnchor constraintEqualToAnchor:div2.bottomAnchor constant:8],
+        [scheduleBtn.leadingAnchor constraintEqualToAnchor:card2.leadingAnchor constant:16],
+        [scheduleBtn.trailingAnchor constraintEqualToAnchor:card2.trailingAnchor constant:-36],
+        [scheduleBtn.heightAnchor constraintEqualToConstant:34],
+        
+        [chevron.centerYAnchor constraintEqualToAnchor:scheduleBtn.centerYAnchor],
+        [chevron.trailingAnchor constraintEqualToAnchor:card2.trailingAnchor constant:-16],
+    ]];
+    
     self.tableView = [[UITableView alloc] initWithFrame:self.view.bounds style:UITableViewStyleInsetGrouped]; self.tableView.dataSource = self; self.tableView.delegate = self; self.tableView.tableHeaderView = options; self.tableView.allowsMultipleSelection = YES; self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView]; [NSLayoutConstraint activateConstraints:@[[self.tableView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor], [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor], [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor], [self.tableView.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor]]];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadFriends) name:@"WaterFriendListUpdated" object:nil];
@@ -639,8 +1236,8 @@ static void installEarnEnergyCollector(id controller) {
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section { return 46; }
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, tableView.bounds.size.width, 46)];
-    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 7, header.bounds.size.width - 110, 32)]; title.autoresizingMask = UIViewAutoresizingFlexibleWidth; title.text = [NSString stringWithFormat:@"好友列表（已选 %lu 位）", (unsigned long)AntForestManager.sharedInstance.waterFriendIds.count]; title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; title.textColor = UIColor.secondaryLabelColor;
-    UIButton *refresh = [UIButton buttonWithType:UIButtonTypeSystem]; refresh.frame = CGRectMake(header.bounds.size.width - 84, 4, 68, 36); refresh.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [refresh setTitle:@"刷新" forState:UIControlStateNormal]; refresh.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; [refresh addTarget:self action:@selector(refreshFriends) forControlEvents:UIControlEventTouchUpInside];
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 7, header.bounds.size.width - 110, 32)]; title.autoresizingMask = UIViewAutoresizingFlexibleWidth; title.text = [NSString stringWithFormat:@"好友列表（已选 %lu 位）", (unsigned long)AntForestManager.sharedInstance.waterFriendIds.count]; title.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold]; title.textColor = UIColor.secondaryLabelColor;
+    UIButton *refresh = [UIButton buttonWithType:UIButtonTypeSystem]; refresh.frame = CGRectMake(header.bounds.size.width - 84, 4, 68, 36); refresh.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin; [refresh setTitle:@"刷新" forState:UIControlStateNormal]; refresh.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold]; [refresh addTarget:self action:@selector(refreshFriends) forControlEvents:UIControlEventTouchUpInside];
     [header addSubview:title]; [header addSubview:refresh]; return header;
 }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -658,42 +1255,74 @@ static void installEarnEnergyCollector(id controller) {
     [super viewDidLoad];
     self.title = @"步数模拟设置";
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone target:self action:@selector(close)];
     AFStepSimulator *simulator = AFStepSimulator.shared;
     [simulator installAvailableHooks];
+    
     UIView *card = [[UIView alloc] init]; card.backgroundColor = UIColor.systemBackgroundColor; card.layer.cornerRadius = 16; card.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *enabledTitle = [[UILabel alloc] init]; enabledTitle.text = @"启用步数模拟"; enabledTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; enabledTitle.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *enabledDetail = [[UILabel alloc] init]; enabledDetail.text = @"关闭后立即恢复支付宝读取到的真实步数"; enabledDetail.font = [UIFont systemFontOfSize:13]; enabledDetail.textColor = UIColor.secondaryLabelColor; enabledDetail.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledTitle = [[UILabel alloc] init]; enabledTitle.text = @"启用步数模拟"; enabledTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; enabledTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *enabledDetail = [[UILabel alloc] init]; enabledDetail.text = @"关闭后立即恢复支付宝读取到的真实步数"; enabledDetail.font = [UIFont systemFontOfSize:12]; enabledDetail.textColor = UIColor.secondaryLabelColor; enabledDetail.translatesAutoresizingMaskIntoConstraints = NO;
     self.enabledSwitch = [[UISwitch alloc] init]; self.enabledSwitch.on = simulator.enabled; self.enabledSwitch.translatesAutoresizingMaskIntoConstraints = NO;
     [self.enabledSwitch addTarget:self action:@selector(toggleEnabled:) forControlEvents:UIControlEventValueChanged];
+    
     UIView *rangeCard = [[UIView alloc] init]; rangeCard.backgroundColor = UIColor.systemBackgroundColor; rangeCard.layer.cornerRadius = 16; rangeCard.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *rangeTitle = [[UILabel alloc] init]; rangeTitle.text = @"步数范围"; rangeTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; rangeTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *rangeTitle = [[UILabel alloc] init]; rangeTitle.text = @"步数范围"; rangeTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; rangeTitle.translatesAutoresizingMaskIntoConstraints = NO;
     self.minField = [self numberFieldWithText:[NSString stringWithFormat:@"%ld", (long)simulator.minStep] placeholder:@"最小值"];
     self.maxField = [self numberFieldWithText:[NSString stringWithFormat:@"%ld", (long)simulator.maxStep] placeholder:@"最大值"];
-    UILabel *separator = [[UILabel alloc] init]; separator.text = @"至"; separator.textColor = UIColor.secondaryLabelColor; separator.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *separator = [[UILabel alloc] init]; separator.text = @"至"; separator.textColor = UIColor.secondaryLabelColor; separator.font = [UIFont systemFontOfSize:14]; separator.translatesAutoresizingMaskIntoConstraints = NO;
     UIStackView *range = [[UIStackView alloc] initWithArrangedSubviews:@[self.minField, separator, self.maxField]]; range.axis = UILayoutConstraintAxisHorizontal; range.spacing = 10; range.alignment = UIStackViewAlignmentCenter; range.translatesAutoresizingMaskIntoConstraints = NO;
     [self.minField.widthAnchor constraintEqualToConstant:112].active = YES; [self.maxField.widthAnchor constraintEqualToConstant:112].active = YES;
-    UILabel *modeTitle = [[UILabel alloc] init]; modeTitle.text = @"生成方式"; modeTitle.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; modeTitle.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UIView *rangeDiv = [[UIView alloc] init]; rangeDiv.backgroundColor = UIColor.systemGray5Color; rangeDiv.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UILabel *modeTitle = [[UILabel alloc] init]; modeTitle.text = @"生成方式"; modeTitle.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; modeTitle.translatesAutoresizingMaskIntoConstraints = NO;
     self.modeControl = [[UISegmentedControl alloc] initWithItems:@[@"日稳定", @"每次随机"]]; self.modeControl.selectedSegmentIndex = simulator.mode; self.modeControl.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *hint = [[UILabel alloc] init]; hint.text = @"日稳定：同一天读数一致；随机：每次读取变化。"; hint.font = [UIFont systemFontOfSize:13]; hint.textColor = UIColor.secondaryLabelColor; hint.numberOfLines = 0; hint.translatesAutoresizingMaskIntoConstraints = NO;
-    self.statusLabel = [[UILabel alloc] init]; self.statusLabel.font = [UIFont systemFontOfSize:13]; self.statusLabel.textColor = UIColor.secondaryLabelColor; self.statusLabel.numberOfLines = 0; self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *hint = [[UILabel alloc] init]; hint.text = @"日稳定：同一天读数一致；每次随机：每次读取实时变动。"; hint.font = [UIFont systemFontOfSize:12]; hint.textColor = UIColor.secondaryLabelColor; hint.numberOfLines = 0; hint.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    UIView *modeDiv = [[UIView alloc] init]; modeDiv.backgroundColor = UIColor.systemGray5Color; modeDiv.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    self.statusLabel = [[UILabel alloc] init]; self.statusLabel.font = [UIFont systemFontOfSize:12]; self.statusLabel.textColor = UIColor.secondaryLabelColor; self.statusLabel.numberOfLines = 0; self.statusLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self refreshStatus];
-    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem]; [save setTitle:@"保存设置" forState:UIControlStateNormal]; save.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; [save addTarget:self action:@selector(save) forControlEvents:UIControlEventTouchUpInside]; save.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:card]; [self.view addSubview:rangeCard]; [card addSubview:enabledTitle]; [card addSubview:enabledDetail]; [card addSubview:self.enabledSwitch]; [rangeCard addSubview:rangeTitle]; [rangeCard addSubview:range]; [rangeCard addSubview:modeTitle]; [rangeCard addSubview:self.modeControl]; [rangeCard addSubview:hint]; [rangeCard addSubview:self.statusLabel]; [self.view addSubview:save];
+    
+    UIButton *save = [UIButton buttonWithType:UIButtonTypeSystem];
+    [save setTitle:@"保存设置" forState:UIControlStateNormal];
+    save.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    save.backgroundColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    [save setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    save.layer.cornerRadius = 14;
+    save.layer.masksToBounds = YES;
+    [save addTarget:self action:@selector(save) forControlEvents:UIControlEventTouchUpInside];
+    save.translatesAutoresizingMaskIntoConstraints = NO;
+    
+    [self.view addSubview:card]; [self.view addSubview:rangeCard]; [card addSubview:enabledTitle]; [card addSubview:enabledDetail]; [card addSubview:self.enabledSwitch];
+    [rangeCard addSubview:rangeTitle]; [rangeCard addSubview:range];
+    [rangeCard addSubview:rangeDiv];
+    [rangeCard addSubview:modeTitle]; [rangeCard addSubview:self.modeControl]; [rangeCard addSubview:hint];
+    [rangeCard addSubview:modeDiv];
+    [rangeCard addSubview:self.statusLabel]; [self.view addSubview:save];
+    
     [NSLayoutConstraint activateConstraints:@[
-        [card.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [card.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [card.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [card.heightAnchor constraintEqualToConstant:76],
-        [enabledTitle.topAnchor constraintEqualToAnchor:card.topAnchor constant:15], [enabledTitle.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [enabledDetail.topAnchor constraintEqualToAnchor:enabledTitle.bottomAnchor constant:5], [enabledDetail.leadingAnchor constraintEqualToAnchor:enabledTitle.leadingAnchor], [self.enabledSwitch.centerYAnchor constraintEqualToAnchor:card.centerYAnchor], [self.enabledSwitch.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [card.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:16], [card.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16], [card.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16], [card.heightAnchor constraintEqualToConstant:70],
+        [enabledTitle.topAnchor constraintEqualToAnchor:card.topAnchor constant:14], [enabledTitle.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [enabledDetail.topAnchor constraintEqualToAnchor:enabledTitle.bottomAnchor constant:4], [enabledDetail.leadingAnchor constraintEqualToAnchor:enabledTitle.leadingAnchor], [self.enabledSwitch.centerYAnchor constraintEqualToAnchor:card.centerYAnchor], [self.enabledSwitch.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        
         [rangeCard.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:12], [rangeCard.leadingAnchor constraintEqualToAnchor:card.leadingAnchor], [rangeCard.trailingAnchor constraintEqualToAnchor:card.trailingAnchor],
-        [rangeTitle.topAnchor constraintEqualToAnchor:rangeCard.topAnchor constant:16], [rangeTitle.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [range.topAnchor constraintEqualToAnchor:rangeTitle.bottomAnchor constant:12], [range.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16],
-        [modeTitle.topAnchor constraintEqualToAnchor:range.bottomAnchor constant:20], [modeTitle.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [self.modeControl.topAnchor constraintEqualToAnchor:modeTitle.bottomAnchor constant:10], [self.modeControl.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [self.modeControl.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16],
-        [hint.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:12], [hint.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [hint.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16],
-        [self.statusLabel.topAnchor constraintEqualToAnchor:hint.bottomAnchor constant:10], [self.statusLabel.leadingAnchor constraintEqualToAnchor:hint.leadingAnchor], [self.statusLabel.trailingAnchor constraintEqualToAnchor:hint.trailingAnchor], [self.statusLabel.bottomAnchor constraintEqualToAnchor:rangeCard.bottomAnchor constant:-16],
-        [save.topAnchor constraintEqualToAnchor:rangeCard.bottomAnchor constant:22], [save.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+        [rangeTitle.topAnchor constraintEqualToAnchor:rangeCard.topAnchor constant:14], [rangeTitle.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [range.topAnchor constraintEqualToAnchor:rangeTitle.bottomAnchor constant:10], [range.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16],
+        
+        [rangeDiv.topAnchor constraintEqualToAnchor:range.bottomAnchor constant:14], [rangeDiv.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [rangeDiv.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16], [rangeDiv.heightAnchor constraintEqualToConstant:1],
+        
+        [modeTitle.topAnchor constraintEqualToAnchor:rangeDiv.bottomAnchor constant:14], [modeTitle.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16],
+        [self.modeControl.topAnchor constraintEqualToAnchor:modeTitle.bottomAnchor constant:10], [self.modeControl.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [self.modeControl.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16],
+        [hint.topAnchor constraintEqualToAnchor:self.modeControl.bottomAnchor constant:8], [hint.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [hint.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16],
+        
+        [modeDiv.topAnchor constraintEqualToAnchor:hint.bottomAnchor constant:12], [modeDiv.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [modeDiv.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16], [modeDiv.heightAnchor constraintEqualToConstant:1],
+        
+        [self.statusLabel.topAnchor constraintEqualToAnchor:modeDiv.bottomAnchor constant:10], [self.statusLabel.leadingAnchor constraintEqualToAnchor:rangeCard.leadingAnchor constant:16], [self.statusLabel.trailingAnchor constraintEqualToAnchor:rangeCard.trailingAnchor constant:-16], [self.statusLabel.bottomAnchor constraintEqualToAnchor:rangeCard.bottomAnchor constant:-14],
+        
+        [save.topAnchor constraintEqualToAnchor:rangeCard.bottomAnchor constant:24], [save.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:20], [save.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20], [save.heightAnchor constraintEqualToConstant:48],
     ]];
 }
 
 - (UITextField *)numberFieldWithText:(NSString *)text placeholder:(NSString *)placeholder {
-    UITextField *field = [[UITextField alloc] init]; field.text = text; field.placeholder = placeholder; field.keyboardType = UIKeyboardTypeNumberPad; field.textAlignment = NSTextAlignmentCenter; field.borderStyle = UITextBorderStyleRoundedRect; field.translatesAutoresizingMaskIntoConstraints = NO; return field;
+    UITextField *field = [[UITextField alloc] init]; field.text = text; field.placeholder = placeholder; field.keyboardType = UIKeyboardTypeNumberPad; field.textAlignment = NSTextAlignmentCenter; field.borderStyle = UITextBorderStyleRoundedRect; field.font = [UIFont monospacedDigitSystemFontOfSize:16 weight:UIFontWeightMedium]; field.translatesAutoresizingMaskIntoConstraints = NO; return field;
 }
 
 - (void)refreshStatus { self.statusLabel.text = [NSString stringWithFormat:@"Hook 状态：%@", AFStepSimulator.shared.hookStatusText]; }
@@ -715,6 +1344,9 @@ static void installEarnEnergyCollector(id controller) {
     AFStepSimulator *simulator = AFStepSimulator.shared;
     [simulator updateEnabled:simulator.enabled minStep:minStep maxStep:maxStep mode:(AFStepSimulatorMode)self.modeControl.selectedSegmentIndex];
     [self refreshStatus];
+    UIAlertController *okAlert = [UIAlertController alertControllerWithTitle:@"保存成功" message:@"步数模拟配置已生效" preferredStyle:UIAlertControllerStyleAlert];
+    [okAlert addAction:[UIAlertAction actionWithTitle:@"好的" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:okAlert animated:YES completion:nil];
 }
 
 @end
@@ -745,9 +1377,9 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
     UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
-    UIButton *reward = [self settingsButtonWithTitle:@"自动领奖励（任务中心）" detail:@"自动签到、做浏览任务与领阶梯能量" icon:@"gift.fill" action:nil];
+    UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:@"自动签到、浏览任务、阶梯大奖与寻宝抽奖任务" icon:@"gift.fill" action:nil];
     UISwitch *rewardSwitch = [[UISwitch alloc] init]; rewardSwitch.on = AntForestManager.sharedInstance.enableAutoRewardTasks; rewardSwitch.translatesAutoresizingMaskIntoConstraints = NO; [rewardSwitch addTarget:self action:@selector(toggleAutoRewardTasks:) forControlEvents:UIControlEventValueChanged]; [reward addSubview:rewardSwitch];
-    UIButton *patrol = [self settingsButtonWithTitle:@"保护地巡护（走步/答题/合成）" detail:@"手动进入保护地自动走步、答题与派遣" icon:@"leaf.circle.fill" action:nil];
+    UIButton *patrol = [self settingsButtonWithTitle:@"保护地巡护" detail:@"自动走步兑换、答题与动物派遣" icon:@"pawprint.fill" action:nil];
     UISwitch *patrolSwitch = [[UISwitch alloc] init]; patrolSwitch.on = AntForestManager.sharedInstance.enableAutoPatrol; patrolSwitch.translatesAutoresizingMaskIntoConstraints = NO; [patrolSwitch addTarget:self action:@selector(toggleAutoPatrol:) forControlEvents:UIControlEventValueChanged]; [patrol addSubview:patrolSwitch];
     
     [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:reward]; [contentView addSubview:patrol];
@@ -779,14 +1411,18 @@ static void installEarnEnergyCollector(id controller) {
 - (UIButton *)settingsButtonWithTitle:(NSString *)title detail:(NSString *)detail icon:(NSString *)icon action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem]; button.backgroundColor = UIColor.systemBackgroundColor; button.layer.cornerRadius = 16; button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft; button.translatesAutoresizingMaskIntoConstraints = NO; if (action) [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:icon]]; image.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0]; image.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *titleLabel = [[UILabel alloc] init]; titleLabel.text = title; titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]; titleLabel.textColor = UIColor.labelColor; titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *detailLabel = [[UILabel alloc] init]; detailLabel.text = detail; detailLabel.font = [UIFont systemFontOfSize:13]; detailLabel.textColor = UIColor.secondaryLabelColor; detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *titleLabel = [[UILabel alloc] init]; titleLabel.text = title; titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; titleLabel.textColor = UIColor.labelColor; titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *detailLabel = [[UILabel alloc] init]; detailLabel.text = detail; detailLabel.font = [UIFont systemFontOfSize:12]; detailLabel.textColor = UIColor.secondaryLabelColor; detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    detailLabel.adjustsFontSizeToFitWidth = YES;
+    detailLabel.minimumScaleFactor = 0.8;
     UIImageView *chevron = action ? [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]] : nil; chevron.tintColor = UIColor.systemGray3Color; chevron.translatesAutoresizingMaskIntoConstraints = NO;
     [button addSubview:image]; [button addSubview:titleLabel]; [button addSubview:detailLabel]; if (chevron) [button addSubview:chevron];
     [NSLayoutConstraint activateConstraints:@[
         [image.leadingAnchor constraintEqualToAnchor:button.leadingAnchor constant:18], [image.centerYAnchor constraintEqualToAnchor:button.centerYAnchor], [image.widthAnchor constraintEqualToConstant:22], [image.heightAnchor constraintEqualToConstant:22],
         [titleLabel.topAnchor constraintEqualToAnchor:button.topAnchor constant:14], [titleLabel.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:12],
-        [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:5], [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:button.trailingAnchor constant:-76],
+        [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:4], [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [detailLabel.trailingAnchor constraintLessThanOrEqualToAnchor:button.trailingAnchor constant:-76],
     ]];
     if (chevron) [NSLayoutConstraint activateConstraints:@[[chevron.trailingAnchor constraintEqualToAnchor:button.trailingAnchor constant:-18], [chevron.centerYAnchor constraintEqualToAnchor:button.centerYAnchor]]];
     return button;
@@ -798,7 +1434,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"复活能量 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"打地鼠 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
-- (void)toggleAutoRewardTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRewardTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRewardTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"领奖励 · 任务中心自动处理已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoRewardTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRewardTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRewardTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"领奖励与森林寻宝 · 自动处理已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoPatrol:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrol = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrol"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"保护地巡护 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
@@ -823,23 +1459,9 @@ static void installEarnEnergyCollector(id controller) {
     title.textColor = [UIColor colorWithRed:0.09 green:0.23 blue:0.16 alpha:1.0];
     title.translatesAutoresizingMaskIntoConstraints = NO;
 
-    UIButton *clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [clearButton setTitle:@"清空日志" forState:UIControlStateNormal];
-    clearButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
-    [clearButton addTarget:self action:@selector(clearLogs) forControlEvents:UIControlEventTouchUpInside];
-    clearButton.translatesAutoresizingMaskIntoConstraints = NO;
-
-    UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
-    copyButton.accessibilityLabel = @"复制日志";
-    [copyButton addTarget:self action:@selector(copyDiagnosticLogs:) forControlEvents:UIControlEventTouchUpInside];
-    copyButton.translatesAutoresizingMaskIntoConstraints = NO;
-
-    UIButton *settingsButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [settingsButton setImage:[UIImage systemImageNamed:@"gearshape"] forState:UIControlStateNormal];
-    settingsButton.accessibilityLabel = @"功能设置";
-    [settingsButton addTarget:self action:@selector(showSettings) forControlEvents:UIControlEventTouchUpInside];
-    settingsButton.translatesAutoresizingMaskIntoConstraints = NO;
+    UIButton *settingsButton = [self topBarButtonWithIcon:@"gearshape.fill" action:@selector(showSettings) accessibilityLabel:@"功能设置"];
+    UIButton *copyButton = [self topBarButtonWithIcon:@"doc.on.doc.fill" action:@selector(copyDiagnosticLogs:) accessibilityLabel:@"复制日志"];
+    UIButton *clearButton = [self topBarButtonWithIcon:@"trash.fill" action:@selector(clearLogs) accessibilityLabel:@"清空日志"];
 
     UIStackView *stats = [[UIStackView alloc] init];
     stats.axis = UILayoutConstraintAxisHorizontal;
@@ -864,21 +1486,32 @@ static void installEarnEnergyCollector(id controller) {
     UIView *autoIcon = [self iconWithName:@"bag.fill" size:24];
     UILabel *autoLabel = [[UILabel alloc] init];
     autoLabel.text = @"自动收取";
-    autoLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    autoLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    autoLabel.textColor = UIColor.labelColor;
+    UILabel *autoDetail = [[UILabel alloc] init];
+    autoDetail.text = @"智能扫描成熟能量并自动拾取";
+    autoDetail.font = [UIFont systemFontOfSize:12];
+    autoDetail.textColor = UIColor.secondaryLabelColor;
+    autoDetail.adjustsFontSizeToFitWidth = YES;
+    autoDetail.minimumScaleFactor = 0.8;
+    UIStackView *autoText = [[UIStackView alloc] initWithArrangedSubviews:@[autoLabel, autoDetail]];
+    autoText.axis = UILayoutConstraintAxisVertical;
+    autoText.spacing = 3;
     UISwitch *autoSwitch = [[UISwitch alloc] init];
     autoSwitch.on = ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoCollect;
     [autoSwitch addTarget:self action:@selector(toggleAutoCollect:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *autoLeading = [[UIStackView alloc] initWithArrangedSubviews:@[autoIcon, autoLabel]];
+    UIStackView *autoLeading = [[UIStackView alloc] initWithArrangedSubviews:@[autoIcon, autoText]];
     autoLeading.spacing = 10;
     autoLeading.alignment = UIStackViewAlignmentCenter;
     self.statusLabel = [[UILabel alloc] init];
     self.statusLabel.text = autoSwitch.on ? @"运行中" : @"已关闭";
-    self.statusLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    self.statusLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
     self.statusLabel.textColor = [UIColor secondaryLabelColor];
     UIStackView *autoTrailing = [[UIStackView alloc] initWithArrangedSubviews:@[autoSwitch, self.statusLabel]];
     autoTrailing.axis = UILayoutConstraintAxisVertical;
     autoTrailing.alignment = UIStackViewAlignmentCenter;
     autoTrailing.spacing = 2;
+    [autoTrailing.widthAnchor constraintEqualToConstant:51].active = YES;
     UIStackView *autoRow = [[UIStackView alloc] initWithArrangedSubviews:@[autoLeading, autoTrailing]];
     autoRow.alignment = UIStackViewAlignmentCenter;
     autoRow.distribution = UIStackViewDistributionEqualSpacing;
@@ -887,11 +1520,21 @@ static void installEarnEnergyCollector(id controller) {
     UIView *selfIcon = [self iconWithName:@"person.fill" size:24];
     UILabel *selfLabel = [[UILabel alloc] init];
     selfLabel.text = @"收取自己能量";
-    selfLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    selfLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    selfLabel.textColor = UIColor.labelColor;
+    UILabel *selfDetail = [[UILabel alloc] init];
+    selfDetail.text = @"优先收取本人森林产生的成熟能量";
+    selfDetail.font = [UIFont systemFontOfSize:12];
+    selfDetail.textColor = UIColor.secondaryLabelColor;
+    selfDetail.adjustsFontSizeToFitWidth = YES;
+    selfDetail.minimumScaleFactor = 0.8;
+    UIStackView *selfText = [[UIStackView alloc] initWithArrangedSubviews:@[selfLabel, selfDetail]];
+    selfText.axis = UILayoutConstraintAxisVertical;
+    selfText.spacing = 3;
     UISwitch *selfSwitch = [[UISwitch alloc] init];
     selfSwitch.on = [AntForestManager sharedInstance].enableSelfCollect;
     [selfSwitch addTarget:self action:@selector(toggleSelfCollect:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *selfLeading = [[UIStackView alloc] initWithArrangedSubviews:@[selfIcon, selfLabel]];
+    UIStackView *selfLeading = [[UIStackView alloc] initWithArrangedSubviews:@[selfIcon, selfText]];
     selfLeading.spacing = 10; selfLeading.alignment = UIStackViewAlignmentCenter;
     UIStackView *selfRow = [[UIStackView alloc] initWithArrangedSubviews:@[selfLeading, selfSwitch]];
     selfRow.alignment = UIStackViewAlignmentCenter; selfRow.distribution = UIStackViewDistributionEqualSpacing; selfRow.translatesAutoresizingMaskIntoConstraints = NO;
@@ -899,11 +1542,21 @@ static void installEarnEnergyCollector(id controller) {
     UIView *rainIcon = [self iconWithName:@"cloud.rain.fill" size:24];
     UILabel *rainLabel = [[UILabel alloc] init];
     rainLabel.text = @"自动能量雨";
-    rainLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    rainLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    rainLabel.textColor = UIColor.labelColor;
+    UILabel *rainDetail = [[UILabel alloc] init];
+    rainDetail.text = @"手动进入能量雨后自动点击能量雨滴";
+    rainDetail.font = [UIFont systemFontOfSize:12];
+    rainDetail.textColor = UIColor.secondaryLabelColor;
+    rainDetail.adjustsFontSizeToFitWidth = YES;
+    rainDetail.minimumScaleFactor = 0.8;
+    UIStackView *rainText = [[UIStackView alloc] initWithArrangedSubviews:@[rainLabel, rainDetail]];
+    rainText.axis = UILayoutConstraintAxisVertical;
+    rainText.spacing = 3;
     UISwitch *rainSwitch = [[UISwitch alloc] init];
     rainSwitch.on = ((AntForestManager *)[AntForestManager sharedInstance]).enableAutoRain;
     [rainSwitch addTarget:self action:@selector(toggleAutoRain:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *rainLeading = [[UIStackView alloc] initWithArrangedSubviews:@[rainIcon, rainLabel]];
+    UIStackView *rainLeading = [[UIStackView alloc] initWithArrangedSubviews:@[rainIcon, rainText]];
     rainLeading.spacing = 10;
     rainLeading.alignment = UIStackViewAlignmentCenter;
     UIStackView *rainRow = [[UIStackView alloc] initWithArrangedSubviews:@[rainLeading, rainSwitch]];
@@ -914,7 +1567,17 @@ static void installEarnEnergyCollector(id controller) {
     UIView *loopIcon = [self iconWithName:@"clock.arrow.circlepath" size:24];
     UILabel *loopLabel = [[UILabel alloc] init];
     loopLabel.text = @"后台循环";
-    loopLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    loopLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    loopLabel.textColor = UIColor.labelColor;
+    UILabel *loopDetail = [[UILabel alloc] init];
+    loopDetail.text = @"按设定间隔在后台定时静默轮询";
+    loopDetail.font = [UIFont systemFontOfSize:12];
+    loopDetail.textColor = UIColor.secondaryLabelColor;
+    loopDetail.adjustsFontSizeToFitWidth = YES;
+    loopDetail.minimumScaleFactor = 0.8;
+    UIStackView *loopText = [[UIStackView alloc] initWithArrangedSubviews:@[loopLabel, loopDetail]];
+    loopText.axis = UILayoutConstraintAxisVertical;
+    loopText.spacing = 3;
     UIButton *intervalButton = [UIButton buttonWithType:UIButtonTypeSystem];
     intervalButton.layer.borderWidth = 1; intervalButton.layer.borderColor = UIColor.systemGray5Color.CGColor; intervalButton.layer.cornerRadius = 10;
     intervalButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
@@ -924,7 +1587,7 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *loopSwitch = [[UISwitch alloc] init];
     loopSwitch.on = [AntForestManager sharedInstance].enableBackgroundLoop;
     [loopSwitch addTarget:self action:@selector(toggleBackgroundLoop:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *loopLeading = [[UIStackView alloc] initWithArrangedSubviews:@[loopIcon, loopLabel]];
+    UIStackView *loopLeading = [[UIStackView alloc] initWithArrangedSubviews:@[loopIcon, loopText]];
     loopLeading.spacing = 10; loopLeading.alignment = UIStackViewAlignmentCenter;
     [intervalButton.widthAnchor constraintEqualToConstant:70].active = YES;
     UIStackView *loopControls = [[UIStackView alloc] initWithArrangedSubviews:@[intervalButton, loopSwitch]];
@@ -982,12 +1645,12 @@ static void installEarnEnergyCollector(id controller) {
         [titleIcon.widthAnchor constraintEqualToConstant:30], [titleIcon.heightAnchor constraintEqualToConstant:30],
         [title.topAnchor constraintEqualToAnchor:grabber.bottomAnchor constant:18],
         [title.leadingAnchor constraintEqualToAnchor:titleIcon.trailingAnchor constant:10],
-        [title.trailingAnchor constraintLessThanOrEqualToAnchor:settingsButton.leadingAnchor constant:-8],
-        [settingsButton.trailingAnchor constraintEqualToAnchor:copyButton.leadingAnchor constant:-10],
+        [title.trailingAnchor constraintLessThanOrEqualToAnchor:settingsButton.leadingAnchor constant:-10],
+        [settingsButton.trailingAnchor constraintEqualToAnchor:copyButton.leadingAnchor constant:-8],
         [settingsButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [copyButton.trailingAnchor constraintEqualToAnchor:clearButton.leadingAnchor constant:-10],
+        [copyButton.trailingAnchor constraintEqualToAnchor:clearButton.leadingAnchor constant:-8],
         [copyButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
-        [clearButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-24],
+        [clearButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-20],
         [clearButton.centerYAnchor constraintEqualToAnchor:title.centerYAnchor],
         [stats.topAnchor constraintEqualToAnchor:title.bottomAnchor constant:18],
         [stats.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:24],
@@ -995,25 +1658,37 @@ static void installEarnEnergyCollector(id controller) {
         [card.topAnchor constraintEqualToAnchor:stats.bottomAnchor constant:18],
         [card.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [card.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [autoRow.topAnchor constraintEqualToAnchor:card.topAnchor constant:16],
-        [autoRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
-        [autoRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
-        [selfRow.topAnchor constraintEqualToAnchor:autoRow.bottomAnchor constant:10],
-        [selfRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
-        [selfRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
-        [divider0.topAnchor constraintEqualToAnchor:selfRow.topAnchor constant:-5],
+        
+        [autoRow.topAnchor constraintEqualToAnchor:card.topAnchor constant:12],
+        [autoRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [autoRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [autoLeading.trailingAnchor constraintLessThanOrEqualToAnchor:autoTrailing.leadingAnchor constant:-10],
+        
+        [selfRow.topAnchor constraintEqualToAnchor:autoRow.bottomAnchor constant:14],
+        [selfRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [selfRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [selfLeading.trailingAnchor constraintLessThanOrEqualToAnchor:selfSwitch.leadingAnchor constant:-10],
+        
+        [divider0.topAnchor constraintEqualToAnchor:selfRow.topAnchor constant:-7],
         [divider0.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider0.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider0.heightAnchor constraintEqualToConstant:1],
-        [rainRow.topAnchor constraintEqualToAnchor:selfRow.bottomAnchor constant:10],
-        [rainRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
-        [rainRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
-        [divider1.topAnchor constraintEqualToAnchor:rainRow.topAnchor constant:-5],
+        
+        [rainRow.topAnchor constraintEqualToAnchor:selfRow.bottomAnchor constant:14],
+        [rainRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [rainRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [rainLeading.trailingAnchor constraintLessThanOrEqualToAnchor:rainSwitch.leadingAnchor constant:-10],
+        
+        [divider1.topAnchor constraintEqualToAnchor:rainRow.topAnchor constant:-7],
         [divider1.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider1.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider1.heightAnchor constraintEqualToConstant:1],
-        [loopRow.topAnchor constraintEqualToAnchor:rainRow.bottomAnchor constant:10],
-        [loopRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:20],
-        [loopRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-20],
-        [divider2.topAnchor constraintEqualToAnchor:loopRow.topAnchor constant:-5],
+        
+        [loopRow.topAnchor constraintEqualToAnchor:rainRow.bottomAnchor constant:14],
+        [loopRow.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16],
+        [loopRow.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16],
+        [loopLeading.trailingAnchor constraintLessThanOrEqualToAnchor:loopControls.leadingAnchor constant:-10],
+        
+        [divider2.topAnchor constraintEqualToAnchor:loopRow.topAnchor constant:-7],
         [divider2.leadingAnchor constraintEqualToAnchor:card.leadingAnchor constant:16], [divider2.trailingAnchor constraintEqualToAnchor:card.trailingAnchor constant:-16], [divider2.heightAnchor constraintEqualToConstant:1],
-        [card.bottomAnchor constraintEqualToAnchor:loopRow.bottomAnchor constant:16],
+        
+        [card.bottomAnchor constraintEqualToAnchor:loopRow.bottomAnchor constant:12],
         [self.tableView.topAnchor constraintEqualToAnchor:card.bottomAnchor constant:8],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
@@ -1040,6 +1715,23 @@ static void installEarnEnergyCollector(id controller) {
         return badge;
     }
     return imageView;
+}
+
+- (UIButton *)topBarButtonWithIcon:(NSString *)iconName action:(SEL)action accessibilityLabel:(NSString *)label {
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightSemibold];
+    UIImage *img = [UIImage systemImageNamed:iconName withConfiguration:config];
+    [btn setImage:img forState:UIControlStateNormal];
+    btn.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0];
+    btn.backgroundColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:0.08];
+    btn.layer.cornerRadius = 17;
+    btn.layer.masksToBounds = YES;
+    btn.accessibilityLabel = label;
+    if (action) [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    btn.translatesAutoresizingMaskIntoConstraints = NO;
+    [btn.widthAnchor constraintEqualToConstant:34].active = YES;
+    [btn.heightAnchor constraintEqualToConstant:34].active = YES;
+    return btn;
 }
 
 - (UILabel *)statLabelWithPrefix:(NSString *)prefix {
@@ -1150,10 +1842,10 @@ static void installEarnEnergyCollector(id controller) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     NSArray *logs = manager.logRecord.reverseObjectEnumerator.allObjects;
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(NSString *log, __unused NSDictionary *bindings) {
-        return [log containsString:@"收取 ·"];
+        return log.length > 0 && ![log containsString:@"[Diag]"] && ![log containsString:@"诊断 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，自动领奖励=%@，保护地巡护=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，领奖励与森林寻宝=%@，保护地巡护=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
                       getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoPatrol ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     NSMutableString *fullOutput = [NSMutableString stringWithString:header];
     if (records.count) {
@@ -1473,39 +2165,54 @@ static void portViewDidLoad(id self, SEL _cmd) {
 static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     originalViewDidAppear(self, _cmd, animated);
     [[AFStepSimulator shared] installAvailableHooks];
-    NSURL *url = [self respondsToSelector:@selector(url)] ? [self url] : nil;
+    NSURL *url = urlFromController(self);
     AntForestManager *manager = [AntForestManager sharedInstance];
     BOOL earnEnergy = isEarnEnergyURL(url);
     BOOL forestHome = isForestHomeURL(url) && !earnEnergy;
-    id pageBridge = forestHome ? forestBridgeFromController(self) : nil;
+    BOOL isSelfHome = isSelfForestHomeURL(url) && !earnEnergy;
+    id pageBridge = isSelfHome ? forestBridgeFromController(self) : nil;
     if (pageBridge && manager.jsBridge != pageBridge) {
         manager.jsBridge = pageBridge;
         [manager recordStage:@"诊断 · 已绑定森林首页 H5 Bridge"];
     }
-    if (forestHome) [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
-    BOOL revealLeaf = forestHome && shouldRevealLeafOnNextForestAppearance;
+    if (isSelfHome) {
+        currentForestHomeController = self;
+        [manager recordStage:[NSString stringWithFormat:@"诊断 · 森林首页出现：桥接=%d", manager.jsBridge != nil]];
+    }
+    BOOL revealLeaf = isSelfHome && shouldRevealLeafOnNextForestAppearance;
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
-    if (forestHome && (manager.enableWaterOnLaunch || manager.enableAutoCollect)) startForestHomeWhenBridgeReady(self);
-    if (forestHome) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            installGiftFullProbe(self);
-        });
+    if (isSelfHome && (manager.enableWaterOnLaunch || manager.enableAutoCollect)) {
+        startForestHomeWhenBridgeReady(self);
+        NSArray<NSNumber *> *delays = @[@500, @1200, @2200, @3500];
+        for (NSNumber *d in delays) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([d integerValue] * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                installForestHomeCollector(self);
+            });
+        }
+    } else if (forestHome && !isSelfHome) {
+        // 在好友森林页面：严禁运行首页动物收集脉冲，自动扫描并关闭“河姆渡福猪”等动物引导弹窗
+        NSArray<NSNumber *> *delays = @[@200, @600, @1200, @2000, @3200];
+        for (NSNumber *d in delays) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([d integerValue] * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                dismissFriendAnimalPopup(self);
+            });
+        }
     }
     if (isEnergyRainURL(url) && manager.enableAutoRain) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             installEnergyRainCollector(self);
         });
     }
-    if (isPatrolURL(url, self)) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-            installPatrolAutoPilot(self);
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-            installPatrolAutoPilot(self);
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-            installPatrolAutoPilot(self);
-        });
+    if (isPatrolURL(url, self) || manager.enableAutoPatrol) {
+        NSArray<NSNumber *> *delays = @[@300, @800, @1500, @2500, @4000];
+        for (NSNumber *d in delays) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([d integerValue] * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                NSURL *cur = urlFromController(self);
+                if (isPatrolURL(cur, self)) {
+                    installPatrolAutoPilot(self);
+                }
+            });
+        }
     }
     if (earnEnergy && manager.enableAutoEarn) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1617,6 +2324,22 @@ static void (*originalRunJsTextInput)(id, SEL, id, id, id, id, id);
 static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defText, id frame, id handler) {
     @try {
         NSString *str = [prompt isKindOfClass:NSString.class] ? prompt : [prompt description];
+        if ([str hasPrefix:@"NATIVE_TAP:"]) {
+            NSString *coordStr = [str substringFromIndex:11];
+            NSArray *parts = [coordStr componentsSeparatedByString:@","];
+            if (parts.count == 2 && [webView isKindOfClass:UIView.class]) {
+                CGFloat x = [parts[0] doubleValue];
+                CGFloat y = [parts[1] doubleValue];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    simulateNativeTapOnView((UIView *)webView, CGPointMake(x, y));
+                });
+            }
+            if (handler) {
+                void (^completionBlock)(NSString *) = handler;
+                completionBlock(nil);
+            }
+            return;
+        }
         if ([str hasPrefix:@"PATROL_LOG:"]) {
             NSString *payload = [str substringFromIndex:11];
             NSLog(@"\n🔍 [PatrolProbe-HOOK]\n📦 %@", payload);
@@ -1625,10 +2348,16 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
             NSDictionary *dict = nil;
             NSData *d = [payload dataUsingEncoding:NSUTF8StringEncoding];
             if (d) dict = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+            NSString *type = [dict isKindOfClass:NSDictionary.class] ? dict[@"type"] : nil;
+            NSString *msg = [dict isKindOfClass:NSDictionary.class] ? dict[@"msg"] : nil;
             NSString *action = [dict isKindOfClass:NSDictionary.class] ? dict[@"action"] : nil;
             AntForestManager *manager = [AntForestManager sharedInstance];
             
-            if ([action isEqualToString:@"patrol_forward"]) {
+            if ([type isEqualToString:@"STATUS"] && msg.length) {
+                if (![msg containsString:@"AlipayJSBridge"]) {
+                    [manager recordStage:msg];
+                }
+            } else if ([action isEqualToString:@"patrol_forward"]) {
                 [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 自动走步（剩余机会 %@ 次）", dict[@"leftChance"] ?: @"1"]];
             } else if ([action isEqualToString:@"quiz_found"]) {
                 [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 智能满分答题（题目：%@）", dict[@"q"] ?: @"科普问答"]];
@@ -1794,6 +2523,11 @@ static void installHooks(void) {
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
             shouldRevealLeafOnNextForestAppearance = YES;
             [[AFStepSimulator shared] installAvailableHooks];
+        }];
+        [[NSNotificationCenter defaultCenter] addObserverForName:@"AntForestCollectAnimalEnergyNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
+            if (currentForestHomeController) {
+                collectAnimalEnergyAtHome(currentForestHomeController);
+            }
         }];
         [[AFStepSimulator shared] installAvailableHooks];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [[AFStepSimulator shared] installAvailableHooks]; });

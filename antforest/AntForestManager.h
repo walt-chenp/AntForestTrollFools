@@ -58,6 +58,9 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval;
 -(void)startScheduledCollectTimer;
 -(void)startScheduledWaterTimer;
+-(void)receiveAnimalPartnerEnergy;
+-(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId;
+-(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId energy:(NSInteger)energy name:(NSString *)name isCollected:(BOOL)isCollected;
 -(void)stopAutoCollectTimer;
 
 -(void)cleanFriendsOcean:(NSString*)uid;
@@ -91,10 +94,6 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)signVitalityTask:(NSString *)signId;
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title;
 -(void)receiveVitalityTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName;
-
-// 森林寻宝：自动抽奖与寻宝专属任务
--(void)queryDrawInfo;
--(void)triggerLotteryDraw:(NSString *)sceneCode activityId:(NSString *)activityId;
 
 // 好友浇水：仅由“好友浇水设置”手动或定时触发，与自动收取独立。
 -(void)refreshWaterFriends;
