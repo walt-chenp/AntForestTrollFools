@@ -1690,48 +1690,39 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
             }
         }
         
-        // 2. 如果是小程序 / 小游戏任务（如疯狂水世界 appId=2021004124677717），通过支付宝微应用容器启动
+        // 2. 如果是小程序 / 小游戏任务（如疯狂水世界 appId=2021004124677717），通过静默 RPC 协议直接提交游戏事件，不弹窗、不跳转
         if (targetAppId.length) {
             NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
             NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
             
-            // ① JSBridge startApp 通道
-            NSString *startAppArg = [NSString stringWithFormat:@"[{\"handlerName\":\"startApp\",\"data\":{\"appId\":\"%@\",\"param\":{\"page\":\"%@\",\"query\":\"%@\",\"chInfo\":\"ANTFOREST\",\"startMultApp\":\"YES\",\"appClearTop\":\"false\"}},\"callbackId\":\"startApp_%@\"}]", targetAppId, targetPage ?: @"", targetQuery ?: @"", timeStamp];
-            [bridge _doFlushMessageQueue:startAppArg url:urlLottery];
+            // 提交进入游戏动作与首帧事件
+            NSString *rand1 = [AntForestManager getNumberRandom:15];
+            NSString *argEnter = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.gamecenteruprod.biz.rpc.v3.submitUserAction\",\"requestData\":[{\"source\":\"gameFramework\",\"actionCode\":\"enterGame\",\"gameId\":\"%@\",\"paladinxVersion\":\"2.2.7\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", targetAppId, timeStamp, rand1];
+            [bridge _doFlushMessageQueue:argEnter url:urlLottery];
             
-            // ② DTContext 原生应用框架调度
-            Class dtContextClass = NSClassFromString(@"DTContext");
-            if (dtContextClass && [dtContextClass respondsToSelector:@selector(sharedContext)]) {
-                id context = ((id (*)(id, SEL))objc_msgSend)(dtContextClass, @selector(sharedContext));
-                if (context && [context respondsToSelector:@selector(startApplication:params:animated:)]) {
-                    NSMutableDictionary *params = [NSMutableDictionary dictionary];
-                    if (targetPage.length) params[@"page"] = targetPage;
-                    if (targetQuery.length) params[@"query"] = targetQuery;
-                    params[@"chInfo"] = @"ANTFOREST";
-                    params[@"startMultApp"] = @"YES";
-                    ((BOOL (*)(id, SEL, id, id, BOOL))objc_msgSend)(context, @selector(startApplication:params:animated:), targetAppId, params, NO);
-                }
-            }
+            NSString *rand2 = [AntForestManager getNumberRandom:15];
+            NSString *argFrame = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.gameevent.biz.rpc.submitEvent\",\"requestData\":[{\"appId\":\"%@\",\"eventId\":\"GAME_FIRST_FRAME\",\"idempotentNo\":\"platform_%@_0\",\"source\":\"paladinx_auto\",\"eventAttrMap\":{\"ALIVE_ENTER\":\"0\",\"CPS_ID\":\"unknown\",\"SCENE_ID\":\"lianyun_senlin_leyuan\",\"CH_INFO\":\"ANTFOREST\",\"PALADINX_VERSION\":\"2.2.7\",\"PLAY_SCENE\":\"NORMAL\",\"GAME_VERSION\":\"1.7.5\"}}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", targetAppId, timeStamp, rand2];
+            [bridge _doFlushMessageQueue:argFrame url:urlLottery];
+            
+            // 模拟 3 秒后触发游戏游玩与动作结算
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                NSString *ts2 = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+                NSString *rand3 = [AntForestManager getNumberRandom:15];
+                NSString *argPlay = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.gamecenteruprod.biz.rpc.v3.submitUserAction\",\"requestData\":[{\"source\":\"gameFramework\",\"actionCode\":\"playGame\",\"gameId\":\"%@\",\"paladinxVersion\":\"2.2.7\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", targetAppId, ts2, rand3];
+                [bridge _doFlushMessageQueue:argPlay url:urlLottery];
+                
+                NSString *rand4 = [AntForestManager getNumberRandom:15];
+                NSString *argEventPlay = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.gameevent.biz.rpc.submitEvent\",\"requestData\":[{\"appId\":\"%@\",\"eventId\":\"GAME_PLAY\",\"idempotentNo\":\"platform_%@_1\",\"source\":\"paladinx_auto\",\"eventAttrMap\":{\"ALIVE_ENTER\":\"0\",\"CPS_ID\":\"unknown\",\"SCENE_ID\":\"lianyun_senlin_leyuan\",\"CH_INFO\":\"ANTFOREST\",\"PALADINX_VERSION\":\"2.2.7\",\"PLAY_SCENE\":\"NORMAL\",\"GAME_VERSION\":\"1.7.5\"}}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", targetAppId, ts2, rand4];
+                [bridge _doFlushMessageQueue:argEventPlay url:urlLottery];
+            });
         }
         
-        // 停留指定时长后完成任务、退出小程序并领奖
+        // 停留指定时长后完成任务并领奖
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((seconds + 1.0) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (self.silentBrowseWebView) {
                 [self.silentBrowseWebView stopLoading];
                 [self.silentBrowseWebView removeFromSuperview];
                 self.silentBrowseWebView = nil;
-            }
-            if (targetAppId.length) {
-                Class dtContextClass = NSClassFromString(@"DTContext");
-                if (dtContextClass && [dtContextClass respondsToSelector:@selector(sharedContext)]) {
-                    id context = ((id (*)(id, SEL))objc_msgSend)(dtContextClass, @selector(sharedContext));
-                    if (context && [context respondsToSelector:@selector(findApplicationByName:)]) {
-                        id app = ((id (*)(id, SEL, id))objc_msgSend)(context, @selector(findApplicationByName:), targetAppId);
-                        if (app && [app respondsToSelector:@selector(exit:)]) {
-                            ((void (*)(id, SEL, BOOL))objc_msgSend)(app, @selector(exit:), NO);
-                        }
-                    }
-                }
             }
             [self finishVitalityTask:taskType sceneCode:sceneCode taskTitle:title];
             [self receiveVitalityTaskAward:taskType sceneCode:sceneCode taskTitle:title awardName:awardName];
