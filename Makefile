@@ -13,6 +13,7 @@ all: $(TARGET) $(IOS14_TARGET)
 
 test:
 	sh tests/check_water_gift_recheck.sh
+	sh tests/check_reward_patrol_paths.sh
 
 $(TARGET): $(SOURCES)
 	@mkdir -p build

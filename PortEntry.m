@@ -56,6 +56,27 @@ static BOOL isEarnEnergyURL(NSURL *url) {
     return [url.absoluteString containsString:@"forceWhackMole=Y"];
 }
 
+static id rewardBridgeFromController(id controller) {
+    if (!controller) return nil;
+    NSMutableArray *objects = [NSMutableArray arrayWithObject:controller];
+    for (NSString *name in @[ @"contentView", @"rvkContentView" ]) {
+        SEL selector = NSSelectorFromString(name);
+        if ([controller respondsToSelector:selector]) {
+            id contentView = ((id (*)(id, SEL))objc_msgSend)(controller, selector);
+            if (contentView) [objects addObject:contentView];
+        }
+    }
+    for (id object in objects) {
+        for (NSString *name in @[ @"jsBridge", @"bridge" ]) {
+            SEL selector = NSSelectorFromString(name);
+            if (![object respondsToSelector:selector]) continue;
+            id bridge = ((id (*)(id, SEL))objc_msgSend)(object, selector);
+            if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) return bridge;
+        }
+    }
+    return nil;
+}
+
 static id forestBridgeFromController(id controller) {
     for (NSString *name in @[@"jsBridge", @"bridge"]) {
         SEL selector = NSSelectorFromString(name);
@@ -64,6 +85,34 @@ static id forestBridgeFromController(id controller) {
         if ([bridge isKindOfClass:NSClassFromString(@"PSDJsBridge")]) return bridge;
     }
     return nil;
+}
+
+static void startSilentRewardContext(id forestController) {
+    AntForestManager *manager = AntForestManager.sharedInstance;
+    if (!manager.enableAutoRewardTasks) return;
+    if (manager.rewardTaskBridge) {
+        [manager queryVitalityTaskList];
+        return;
+    }
+    id session = nil;
+    for (NSString *name in @[ @"rvkSession", @"session" ]) {
+        SEL selector = NSSelectorFromString(name);
+        if ([forestController respondsToSelector:selector]) {
+            session = ((id (*)(id, SEL))objc_msgSend)(forestController, selector);
+            if (session) break;
+        }
+    }
+    SEL daemonSelector = NSSelectorFromString(@"daemonView");
+    id daemonView = [session respondsToSelector:daemonSelector] ? ((id (*)(id, SEL))objc_msgSend)(session, daemonSelector) : nil;
+    id bridge = rewardBridgeFromController(daemonView) ?: forestBridgeFromController(forestController) ?: manager.jsBridge;
+    BOOL ready = bridge && (![bridge respondsToSelector:@selector(isBridgeReady)] || ((BOOL (*)(id, SEL))objc_msgSend)(bridge, @selector(isBridgeReady)));
+    NSLog(@"[AntForestPort][RewardSessionProbe] controller=%@ session=%@ daemon=%@ bridge=%@ ready=%d", forestController ? NSStringFromClass([forestController class]) : @"nil", session ? NSStringFromClass([session class]) : @"nil", daemonView ? NSStringFromClass([daemonView class]) : @"nil", bridge ? NSStringFromClass([bridge class]) : @"nil", ready);
+    [manager recordStage:[NSString stringWithFormat:@"首页后台：会话探针 session=%@ daemon=%@ bridge=%d ready=%d", session ? NSStringFromClass([session class]) : @"无", daemonView ? NSStringFromClass([daemonView class]) : @"无", bridge != nil, ready]];
+    if (bridge) {
+        manager.rewardTaskBridge = bridge;
+        [manager recordStage:@"首页后台：后台会话奖励桥接已就绪"];
+        [manager queryVitalityTaskList];
+    }
 }
 
 static id forestControllerForBridge(id bridge) {
@@ -81,6 +130,7 @@ static void finishForestHomeStart(id controller, id bridge) {
     manager.jsBridge = bridge;
     objc_setAssociatedObject(controller, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
+    startSilentRewardContext(controller);
     if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
     else if (manager.enableAutoCollect) {
         if (manager.isScanRunning) {
@@ -2245,7 +2295,7 @@ static BOOL isNoiseProbeLog(NSString *log) {
     return NO;
 }
 
-static void (*originalCallRPC)(id, SEL, id, id);
+static const void *PortRPCOriginalIMPKey = &PortRPCOriginalIMPKey;
 static void portCallRPC(id self, SEL _cmd, id rpcConfig, id completeBlock) {
     @try {
         NSString *str = nil;
@@ -2262,7 +2312,30 @@ static void portCallRPC(id self, SEL _cmd, id rpcConfig, id completeBlock) {
         }
     } @catch (NSException *e) {}
     
-    if (originalCallRPC) originalCallRPC(self, _cmd, rpcConfig, completeBlock);
+    IMP original = NULL;
+    for (Class cls = object_getClass(self); cls && !original; cls = class_getSuperclass(cls)) {
+        original = [objc_getAssociatedObject(cls, PortRPCOriginalIMPKey) pointerValue];
+    }
+    if (original) ((void (*)(id, SEL, id, id))original)(self, _cmd, rpcConfig, completeBlock);
+}
+
+static BOOL hookRPCProbeMethod(Class cls) {
+    SEL selector = @selector(callRPC:completeBlock:);
+    unsigned int methodCount = 0;
+    Method *methods = class_copyMethodList(cls, &methodCount);
+    Method target = NULL;
+    for (unsigned int i = 0; i < methodCount; i++) {
+        if (method_getName(methods[i]) == selector) { target = methods[i]; break; }
+    }
+    if (!target || method_getImplementation(target) == (IMP)portCallRPC) {
+        free(methods);
+        return NO;
+    }
+    IMP original = method_getImplementation(target);
+    objc_setAssociatedObject(cls, PortRPCOriginalIMPKey, [NSValue valueWithPointer:original], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    method_setImplementation(target, (IMP)portCallRPC);
+    free(methods);
+    return YES;
 }
 
 static void (*originalDoFlushMessageQueue)(id, SEL, id, id);
@@ -2559,9 +2632,17 @@ static void installHooks(void) {
             hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
         }
         
-        Class h5RpcClass = NSClassFromString(@"H5RPCCaller") ?: NSClassFromString(@"RVKRPCCaller") ?: NSClassFromString(@"PSDRPCCaller");
-        if (h5RpcClass) {
-            hookMethod(h5RpcClass, @selector(callRPC:completeBlock:), (IMP)portCallRPC, (IMP *)&originalCallRPC);
+        int classCount = objc_getClassList(NULL, 0);
+        Class *classes = classCount > 0 ? (__unsafe_unretained Class *)calloc((size_t)classCount, sizeof(Class)) : NULL;
+        if (classes) {
+            classCount = objc_getClassList(classes, classCount);
+            for (int i = 0; i < classCount; i++) {
+                NSString *className = NSStringFromClass(classes[i]);
+                if ([className rangeOfString:@"rpc" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                    hookRPCProbeMethod(classes[i]);
+                }
+            }
+            free(classes);
         }
         NSLog(@"[AntForestPort] Bridge and controllers hooked safely.");
     }
