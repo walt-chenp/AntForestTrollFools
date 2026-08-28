@@ -1496,36 +1496,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *jsDirect1 = [NSString stringWithFormat:@"[{\"handlerName\":\"exchangeAsset\",\"data\":{\"sceneCode\":\"VITALITY_EXCHANGE_DRAW\",\"taskType\":\"%@\",\"caQuotaId\":\"%@\",\"useAssetsCount\":20,\"receiveAssetsCount\":1,\"source\":\"ANTFOREST\"},\"callbackId\":\"jsapi_%@\"}]", taskType, quota, timeStamp];
     NSString *jsDirect2 = [NSString stringWithFormat:@"[{\"handlerName\":\"exchangeVitality\",\"data\":{\"caQuotaId\":\"%@\",\"useAssetsCount\":20,\"source\":\"ANTFOREST\"},\"callbackId\":\"jsapi_%@\"}]", quota, timeStamp];
     
-    // 5. DOM 自动化模拟点击（深度检索 H5 内部兑换和确认按钮）
-    dispatch_async(dispatch_get_main_queue(), ^{
-        NSString *jsClick = @"(()=>{"
-        "try{"
-        "  const clickBtns = () => {"
-        "    let clicked = false;"
-        "    const all = document.querySelectorAll('button, div, span, a, p');"
-        "    for (let el of all) {"
-        "      const t = (el.innerText || el.textContent || '').trim();"
-        "      if (t === '去兑换' || t === '确认兑换' || t.includes('消耗20活力值') || t.includes('消耗活力值得机会')) {"
-        "        el.click(); clicked = true;"
-        "      }"
-        "    }"
-        "    return clicked;"
-        "  };"
-        "  clickBtns();"
-        "  setTimeout(clickBtns, 200);"
-        "  setTimeout(clickBtns, 500);"
-        "  setTimeout(clickBtns, 1000);"
-        "}catch(e){}"
-        "})()";
-        
-        if ([bridge respondsToSelector:@selector(contentView)]) {
-            id cv = [bridge performSelector:@selector(contentView)];
-            if (cv && [cv respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
-                ((void (*)(id, SEL, NSString *, void (^)(id, NSError *)))objc_msgSend)(cv, @selector(evaluateJavaScript:completionHandler:), jsClick, nil);
-            }
-        }
-    });
-
+    // 5. 原生 RPC 通道与 JSBridge 直接调度
     NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
     [bridge _doFlushMessageQueue:argACW1 url:urlLottery];
     [bridge _doFlushMessageQueue:argACW2 url:urlLottery];
@@ -1672,25 +1643,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
             }
         }
         
-        // 1. 如果是 H5 页面链接，使用静默 WKWebView 加载
-        if (targetHttpUrl.length) {
-            NSURL *targetURL = [NSURL URLWithString:targetHttpUrl];
-            if (targetURL) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (!self.silentBrowseWebView) {
-                        WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
-                        self.silentBrowseWebView = [[WKWebView alloc] initWithFrame:CGRectMake(-1000, -1000, 375, 667) configuration:config];
-                        self.silentBrowseWebView.hidden = YES;
-                        self.silentBrowseWebView.alpha = 0.01;
-                    }
-                    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:targetURL];
-                    [req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/20C65 ChannelId(0) Nebula AlipayDefined(nt:WIFI,ws:393|759,sw:393,sh:852,dp:3) AlipayChannel(5136) AlipayClient/12.12.16.6000 Language/zh-Hans NebulaSDK/1.8.100.1 APXRiver/1.1.0" forHTTPHeaderField:@"User-Agent"];
-                    [self.silentBrowseWebView loadRequest:req];
-                });
-            }
-        }
-        
-        // 2. 如果是小程序 / 小游戏任务（如疯狂水世界 appId=2021004124677717），通过静默 RPC 协议直接提交游戏事件，不弹窗、不跳转
+        // 1. 如果是小程序 / 小游戏任务（如疯狂水世界 appId=2021006129632086、狂暴西游等），通过静默 RPC 协议直接提交游戏事件，不弹窗、不跳转
         if (targetAppId.length) {
             NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
             NSString *urlLottery = @"https://render.alipay.com/p/yuyan/180020010001279274/lotteryMachine.html?caprMode=sync&source=IPicon&chInfo=IPicon&showFloaterBackForest=N&drawGroup=antforestDraw";
@@ -1717,13 +1670,8 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
             });
         }
         
-        // 停留指定时长后完成任务并领奖
+        // 停留指定时长后完成任务并领奖 (纯后台异步计时，不创建实体 WebView)
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((seconds + 1.0) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            if (self.silentBrowseWebView) {
-                [self.silentBrowseWebView stopLoading];
-                [self.silentBrowseWebView removeFromSuperview];
-                self.silentBrowseWebView = nil;
-            }
             [self finishVitalityTask:taskType sceneCode:sceneCode taskTitle:title];
             [self receiveVitalityTaskAward:taskType sceneCode:sceneCode taskTitle:title awardName:awardName];
             [self recordStage:[NSString stringWithFormat:@"%@：已完成“%@”并提交领奖", scenePrefix, title]];
@@ -1913,10 +1861,16 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         }
         if (alreadyQueued) continue;
         
-        NSString *jumpUrl = baseInfo[@"taskJumpUrl"] ?: bizInfo[@"taskJumpUrl"] ?: bizInfo[@"targetUrl"] ?: t[@"taskJumpUrl"] ?: @"";
-        BOOL isStrollTask = [baseInfo[@"isStrollTask"] boolValue] || [bizInfo[@"isStrollTask"] boolValue] || [taskTitle containsString:@"逛"] || [taskTitle containsString:@"浏览"] || [taskTitle containsString:@"玩一玩"] || [taskTitle containsString:@"看一看"];
+        NSString *jumpUrl = baseInfo[@"taskJumpUrl"] ?: bizInfo[@"taskJumpUrl"] ?: bizInfo[@"targetUrl"] ?: t[@"taskJumpUrl"] ?: bizInfo[@"url"] ?: @"";
+        BOOL isStrollTask = [baseInfo[@"isStrollTask"] boolValue] || [bizInfo[@"isStrollTask"] boolValue] || [taskTitle containsString:@"逛"] || [taskTitle containsString:@"浏览"] || [taskTitle containsString:@"玩一玩"] || [taskTitle containsString:@"看一看"] || [taskTitle containsString:@"投喂"] || [taskTitle containsString:@"鱼塘"] || [taskTitle containsString:@"马上玩"];
         NSInteger browseSeconds = [bizInfo[@"browseSeconds"] integerValue];
-        if (browseSeconds <= 0) browseSeconds = 15;
+        if (browseSeconds <= 0) {
+            if ([taskTitle containsString:@"30s"] || [taskTitle containsString:@"30秒"]) {
+                browseSeconds = 30;
+            } else {
+                browseSeconds = 15;
+            }
+        }
         
         if ([prodPlayType isEqualToString:@"EXCHANGE_ASSET"] || [taskType containsString:@"VITALITY_EXCHANGE"] || [taskType isEqualToString:@"NORMAL_DRAW_EXCHANGE_VITALITY"]) {
             [vitalityTaskQueue addObject:@{
