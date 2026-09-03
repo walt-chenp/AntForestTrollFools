@@ -50,6 +50,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSArray<NSString *> *waterScheduledTimes;
 
 @property (assign, nonatomic) BOOL enableCleanOcean; // 神奇海洋自动清理海域与找拼图
+@property (assign, nonatomic) BOOL enableAutoOceanTasks; // 神奇海洋自动做任务与领拼图
+@property (nonatomic, weak) id oceanBridge; // 神奇海洋 H5 Bridge
+@property (nonatomic, copy) NSString *oceanH5Url; // 神奇海洋当前 URL
 @property (assign, nonatomic) BOOL enableAutoPatrol; // 旧版保护地自动巡护与物种合成派遣
 @property (assign, nonatomic) BOOL enableAutoPatrolNew; // 新版保护地大富翁自动掷骰子与任务
 @property (assign, nonatomic) BOOL enableAutoRewardTasks; // 任务中心自动签到、做任务与领奖励
@@ -101,6 +104,13 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title;
 -(void)notifyActiveH5PageToRefresh;
 -(void)receiveVitalityTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName;
+
+// 神奇海洋：任务与拼图领奖
+-(void)queryOceanTaskList;
+-(void)queryOceanTaskListWithForce:(BOOL)force;
+-(void)handleOceanTaskListResponse:(id)args;
+-(void)receiveOceanTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName;
+-(void)applyOceanTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title;
 
 // 好友浇水：仅由“好友浇水设置”手动或定时触发，与自动收取独立。
 -(void)refreshWaterFriends;

@@ -95,6 +95,12 @@ static BOOL isRewardTaskURL(NSURL *url) {
            [text containsString:@"exchange.html"];
 }
 
+static BOOL isOceanURL(NSURL *url) {
+    if (!url) return NO;
+    NSString *text = [url.absoluteString lowercaseString];
+    return [text containsString:@"2021003115672468"] || [text containsString:@"antocean"];
+}
+
 static id rewardBridgeFromController(id controller) {
     if (!controller) return nil;
     NSMutableArray *objects = [NSMutableArray arrayWithObject:controller];
@@ -1343,13 +1349,15 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *earnSwitch = [[UISwitch alloc] init]; earnSwitch.on = AntForestManager.sharedInstance.enableAutoEarn; earnSwitch.translatesAutoresizingMaskIntoConstraints = NO; [earnSwitch addTarget:self action:@selector(toggleAutoEarn:) forControlEvents:UIControlEventValueChanged]; [earn addSubview:earnSwitch];
     UIButton *ocean = [self settingsButtonWithTitle:@"神奇海洋（清理与拼图）" detail:@"自动清理海域与收集拼图" icon:@"sparkles" action:nil];
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
+    UIButton *oceanTasks = [self settingsButtonWithTitle:@"神奇海洋（自动任务）" detail:@"自动完成海洋日常任务与拼图领奖" icon:@"sparkles.rectangle.stack.fill" action:nil];
+    UISwitch *oceanTasksSwitch = [[UISwitch alloc] init]; oceanTasksSwitch.on = AntForestManager.sharedInstance.enableAutoOceanTasks; oceanTasksSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanTasksSwitch addTarget:self action:@selector(toggleAutoOceanTasks:) forControlEvents:UIControlEventValueChanged]; [oceanTasks addSubview:oceanTasksSwitch];
     UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:@"自动签到、浏览任务、阶梯大奖与寻宝抽奖任务" icon:@"gift.fill" action:nil];
     UISwitch *rewardSwitch = [[UISwitch alloc] init]; rewardSwitch.on = AntForestManager.sharedInstance.enableAutoRewardTasks; rewardSwitch.translatesAutoresizingMaskIntoConstraints = NO; [rewardSwitch addTarget:self action:@selector(toggleAutoRewardTasks:) forControlEvents:UIControlEventValueChanged]; [reward addSubview:rewardSwitch];
     
     UIButton *patrolNew = [self settingsButtonWithTitle:@"保护地（大富翁）" detail:@"手动进入保护地后自动完成更多巡护步数任务" icon:@"dice.fill" action:nil];
     UISwitch *patrolNewSwitch = [[UISwitch alloc] init]; patrolNewSwitch.on = AntForestManager.sharedInstance.enableAutoPatrolNew; patrolNewSwitch.translatesAutoresizingMaskIntoConstraints = NO; [patrolNewSwitch addTarget:self action:@selector(toggleAutoPatrolNew:) forControlEvents:UIControlEventValueChanged]; [patrolNew addSubview:patrolNewSwitch];
     
-    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:reward]; [contentView addSubview:patrolNew];
+    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:oceanTasks]; [contentView addSubview:reward]; [contentView addSubview:patrolNew];
     [NSLayoutConstraint activateConstraints:@[
         [contentView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor],
         [contentView.leadingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.leadingAnchor],
@@ -1363,13 +1371,15 @@ static void installEarnEnergyCollector(id controller) {
         [revive.topAnchor constraintEqualToAnchor:water.bottomAnchor constant:12], [revive.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [revive.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [revive.heightAnchor constraintEqualToConstant:70],
         [earn.topAnchor constraintEqualToAnchor:revive.bottomAnchor constant:12], [earn.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [earn.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [earn.heightAnchor constraintEqualToConstant:70],
         [ocean.topAnchor constraintEqualToAnchor:earn.bottomAnchor constant:12], [ocean.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [ocean.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [ocean.heightAnchor constraintEqualToConstant:70],
-        [reward.topAnchor constraintEqualToAnchor:ocean.bottomAnchor constant:12], [reward.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [reward.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [reward.heightAnchor constraintEqualToConstant:70],
+        [oceanTasks.topAnchor constraintEqualToAnchor:ocean.bottomAnchor constant:12], [oceanTasks.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [oceanTasks.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [oceanTasks.heightAnchor constraintEqualToConstant:70],
+        [reward.topAnchor constraintEqualToAnchor:oceanTasks.bottomAnchor constant:12], [reward.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [reward.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [reward.heightAnchor constraintEqualToConstant:70],
         [patrolNew.topAnchor constraintEqualToAnchor:reward.bottomAnchor constant:12], [patrolNew.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [patrolNew.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [patrolNew.heightAnchor constraintEqualToConstant:70],
         [patrolNew.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-24],
         
         [reviveSwitch.trailingAnchor constraintEqualToAnchor:revive.trailingAnchor constant:-18], [reviveSwitch.centerYAnchor constraintEqualToAnchor:revive.centerYAnchor],
         [earnSwitch.trailingAnchor constraintEqualToAnchor:earn.trailingAnchor constant:-18], [earnSwitch.centerYAnchor constraintEqualToAnchor:earn.centerYAnchor],
         [oceanSwitch.trailingAnchor constraintEqualToAnchor:ocean.trailingAnchor constant:-18], [oceanSwitch.centerYAnchor constraintEqualToAnchor:ocean.centerYAnchor],
+        [oceanTasksSwitch.trailingAnchor constraintEqualToAnchor:oceanTasks.trailingAnchor constant:-18], [oceanTasksSwitch.centerYAnchor constraintEqualToAnchor:oceanTasks.centerYAnchor],
         [rewardSwitch.trailingAnchor constraintEqualToAnchor:reward.trailingAnchor constant:-18], [rewardSwitch.centerYAnchor constraintEqualToAnchor:reward.centerYAnchor],
         [patrolNewSwitch.trailingAnchor constraintEqualToAnchor:patrolNew.trailingAnchor constant:-18], [patrolNewSwitch.centerYAnchor constraintEqualToAnchor:patrolNew.centerYAnchor],
     ]];
@@ -1401,6 +1411,7 @@ static void installEarnEnergyCollector(id controller) {
 - (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"复活能量 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"打地鼠 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoOceanTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoOceanTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoOceanTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动任务已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoRewardTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRewardTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRewardTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"领奖励与森林寻宝 · 自动处理已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoPatrolNew:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrolNew = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrolNew"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"保护地（大富翁） · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
@@ -1838,8 +1849,8 @@ static void installEarnEnergyCollector(id controller) {
         return log.length > 0 && ![log containsString:@"[Diag]"] && ![log containsString:@"诊断 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort 收取日志（含保护地巡护抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋=%@，领奖励与森林寻宝=%@，保护地（大富翁）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoPatrolNew ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort-Ocean 收取日志（含神奇海洋/保护地抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋清理=%@，神奇海洋任务=%@，领奖励与森林寻宝=%@，保护地（大富翁）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoOceanTasks ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoPatrolNew ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     NSMutableString *fullOutput = [NSMutableString stringWithString:header];
     if (records.count) {
         [fullOutput appendString:[records componentsJoinedByString:@"\n\n"]];
@@ -2138,6 +2149,7 @@ static void initializeManager(void) {
     manager.enableAutoEarn = [defaults objectForKey:@"enableAutoEarn"] ? [defaults boolForKey:@"enableAutoEarn"] : YES;
     manager.enableAutoRevive = [defaults objectForKey:@"enableAutoRevive"] ? [defaults boolForKey:@"enableAutoRevive"] : YES;
     manager.enableCleanOcean = [defaults objectForKey:@"enableCleanOcean"] ? [defaults boolForKey:@"enableCleanOcean"] : YES;
+    manager.enableAutoOceanTasks = [defaults objectForKey:@"enableAutoOceanTasks"] ? [defaults boolForKey:@"enableAutoOceanTasks"] : YES;
     manager.enableAutoRewardTasks = [defaults objectForKey:@"enableAutoRewardTasks"] ? [defaults boolForKey:@"enableAutoRewardTasks"] : YES;
     manager.enableAutoPatrol = NO;
     manager.enableAutoPatrolNew = [defaults objectForKey:@"enableAutoPatrolNew"] ? [defaults boolForKey:@"enableAutoPatrolNew"] : YES;
@@ -2243,6 +2255,21 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(400 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             [manager queryVitalityTaskListWithForce:YES];
         });
+    }
+    if (isOceanURL(url)) {
+        id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
+        if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
+            manager.oceanBridge = bridge;
+            manager.oceanH5Url = url.absoluteString;
+            if (!manager.rewardTaskBridge) {
+                manager.rewardTaskBridge = bridge;
+            }
+        }
+        if (manager.enableAutoOceanTasks) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [manager queryOceanTaskListWithForce:YES];
+            });
+        }
     }
     addLogButton(self, revealLeaf);
 }
@@ -2511,6 +2538,15 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     if ([self respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
         NSDictionary *dict = [value isKindOfClass:NSDictionary.class] ? value : nil;
         NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+        if (resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class]) {
+            if (manager.oceanBridge != self) {
+                manager.oceanBridge = self;
+                [manager recordStage:@"神奇海洋 · 已绑定海洋 H5 Bridge"];
+            }
+            if (!manager.rewardTaskBridge) {
+                manager.rewardTaskBridge = self;
+            }
+        }
         if (resData[@"forestTasksNew"] || resData[@"taskInfoList"] || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"]) {
             if (manager.rewardTaskBridge != self) {
                 manager.rewardTaskBridge = self;
@@ -2612,16 +2648,19 @@ static void installHooks(void) {
             hookMethod(dtController, @selector(viewDidAppear:), (IMP)portDTViewDidAppear, (IMP *)&originalDTViewDidAppear);
         }
         
-        NSArray *bridgeNames = @[@"PSDJsBridge", @"RVKJsBridge", @"XRJsBridge", @"NXJsBridge"];
-        for (NSString *name in bridgeNames) {
-            Class bCls = NSClassFromString(name);
-            if (bCls) {
-                hookMethod(bCls, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-                hookMethod(bCls, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
-                hookMethod(bCls, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
-                hookMethod(bCls, @selector(flushMessageQueue:url:), (IMP)portFlushMessageQueueWithMessage, (IMP *)&originalFlushMessageQueueWithMessage);
-                hookMethod(bCls, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
-            }
+        Class psdClass = NSClassFromString(@"PSDJsBridge");
+        Class rvkClass = NSClassFromString(@"RVKJsBridge");
+        Class targetBridgeClass = psdClass ?: rvkClass;
+        if (targetBridgeClass) {
+            hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
+            hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
+            hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
+            hookMethod(targetBridgeClass, @selector(_flushMessageQueueWithMessage:url:), (IMP)portFlushMessageQueueWithMessage, (IMP *)&originalFlushMessageQueueWithMessage);
+            hookMethod(targetBridgeClass, @selector(_dispatchMessage:), (IMP)portDispatchMessage, (IMP *)&originalDispatchMessage);
+            hookMethod(targetBridgeClass, @selector(callHandler:data:responseCallback:), (IMP)portCallHandler, (IMP *)&originalCallHandler);
+            hookMethod(targetBridgeClass, @selector(_deserializeMessageJSON:), (IMP)portDeserializeMessageJSON, (IMP *)&originalDeserializeMessageJSON);
+            hookMethod(targetBridgeClass, @selector(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:), (IMP)portRunJsTextInput, (IMP *)&originalRunJsTextInput);
+            hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
         }
         
         int classCount = objc_getClassList(NULL, 0);

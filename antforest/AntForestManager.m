@@ -955,7 +955,7 @@ NSString* getCurrentDateTimeString() {
     for (NSString *friendId in visitedFriends) skipUsers[friendId] = @YES;
     NSData *skipUsersData = [NSJSONSerialization dataWithJSONObject:skipUsers options:0 error:nil];
     NSString *skipUsersJSON = [[NSString alloc] initWithData:skipUsersData encoding:NSUTF8StringEncoding] ?: @"{}";
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.takeLook\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"skipUsers\":%@,\"version\":\"%@\",\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",skipUsersJSON,version,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.takeLook\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"skipUsers\":%@,\"version\":\"%@\",\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",skipUsersJSON,version,timeStamp,randNum];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
     
     if([self jsBridge]) {
@@ -1102,15 +1102,9 @@ static NSString *sLastAnimalEnergyCollectedDate = nil;
     NSString *actualCreatureCode = pType.length ? pType : targetId;
     NSString *effectiveUid = self.myUserId.length ? self.myUserId : ([defaults stringForKey:@"lastKnownUserId"] ?: @"");
     
-    // 1. 采用经抓包验证成功返回 collectedEnergy:40 的官方专用接口: collectAnimalRobEnergy
-    NSString *argRob = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.collectAnimalRobEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"propId\":\"%@\",\"propType\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"version\":\"20241025\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, actualPropId, actualCreatureCode, actualAnimalId, actualCreatureCode, timeStamp, rand1];
-    [self.jsBridge _doFlushMessageQueue:argRob url:arg2];
-    
-    // 2. 双保险：0.4秒后发送通用气泡收取接口
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[\"%@\"],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, targetId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand2];
-        [self.jsBridge _doFlushMessageQueue:argCol url:arg2];
-    });
+    // 采用官方安全气泡收取接口，并添加 showError:false 与 showLoading:false 杜绝任何原生错误弹窗
+    NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[\"%@\"],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, targetId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand2];
+    [self.jsBridge _doFlushMessageQueue:argCol url:arg2];
 }
 
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId {
@@ -1134,7 +1128,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
     NSString *version = @"20241025";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryHomePage\",\"requestData\":[{\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"configVersionMap\":{\"wateringBubbleConfig\":\"0\"},\"skipWhackMole\":false,\"activityParam\":{}}]},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryHomePage\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"configVersionMap\":{\"wateringBubbleConfig\":\"0\"},\"skipWhackMole\":false,\"activityParam\":{}}]},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%%3D3194732"];
     
     if([self jsBridge]) {
@@ -1152,7 +1146,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
     NSString *version = @"20241025";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryFriendHomePage\",\"requestData\":[{\"userId\":\"%@\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"fromAct\":\"TAKE_LOOK\",\"configVersionMap\":{\"wateringBubbleConfig\":\"0\"},\"skipWhackMole\":false,\"activityParam\":{},\"currentEnergy\":99999999,\"currentVitalityAmount\":8888888}]},\"callbackId\":\"rpc_%@.%@\"}]",friendId,version,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryFriendHomePage\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"userId\":\"%@\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"fromAct\":\"TAKE_LOOK\",\"configVersionMap\":{\"wateringBubbleConfig\":\"0\"},\"skipWhackMole\":false,\"activityParam\":{},\"currentEnergy\":99999999,\"currentVitalityAmount\":8888888}]},\"callbackId\":\"rpc_%@.%@\"}]",friendId,version,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK",friendId];
     
     if([self jsBridge]) {
@@ -1191,7 +1185,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
     NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"bizType\":\"\",\"fromAct\":\"TAKE_LOOK\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",userId,bubbleIds,version,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"bizType\":\"\",\"fromAct\":\"TAKE_LOOK\",\"version\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",userId,bubbleIds,version,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&userId=%@&__webview_options__=bc%%3D3194732&source=chInfo_ch_appcenter__chsub_9patch&fromAct=TAKE_LOOK", userId];
     if([self jsBridge]) {
         [self recordStage:[NSString stringWithFormat:@"诊断 · 请求收取能量：第 %lu 轮，待确认 %lu 笔", (unsigned long)collectionCycle, (unsigned long)pendingCollectBubbles.count]];
@@ -1224,7 +1218,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
 -(void)reviveEnergy:(NSString*)uid signId:(NSString*)signId {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.sign\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"source\":\"ANTFOREST\",\"sceneCode\":\"ANTFOREST_ENERGY_SIGN\",\"requestType\":\"rpc\",\"userId\":\"%@\",\"entityId\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,signId,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.sign\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"source\":\"ANTFOREST\",\"sceneCode\":\"ANTFOREST_ENERGY_SIGN\",\"requestType\":\"rpc\",\"userId\":\"%@\",\"entityId\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,signId,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%%3D3194732"];
     if([self jsBridge]) {
         [self reportClickTime];
@@ -1249,11 +1243,11 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
     NSString *randNum2=[AntForestManager getNumberRandom:16];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.cleanOcean\",\"requestData\":[{\"cleanedUserId\":\"%@\",\"source\":\"ANT_FOREST_ly'\",\"uniqueId\":\"%@%@\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"cleanOcean\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",self.myUserId,timeStamp,randNum,timeStamp,randNum2];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.cleanOcean\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"cleanedUserId\":\"%@\",\"source\":\"ANT_FOREST\",\"uniqueId\":\"%@%@\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"cleanOcean\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",self.myUserId,timeStamp,randNum,timeStamp,randNum2];
     NSString *arg2 = [NSString stringWithFormat:@"https://2021003115672468.h5app.alipay.com/www/index.html"];
-    if([self jsBridge]) {
-        [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
-        //FileLog(@"anthook cleanMyOcean");
+    id bridge = self.oceanBridge ?: self.jsBridge;
+    if(bridge) {
+        [bridge _doFlushMessageQueue:arg1 url:arg2];
     }
 }
 
@@ -1264,10 +1258,11 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
     NSString *randNum2=[AntForestManager getNumberRandom:16];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.cleanFriendOcean\",\"requestData\":[{\"cleanedUserId\":\"%@\",\"source\":\"ANT_FOREST_ly'\",\"uniqueId\":\"%@%@\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"cleanFriendsOcean\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,timeStamp,randNum,timeStamp,randNum2];
-    NSString *arg2 = [NSString stringWithFormat:@"https://2021003115672468.h5app.alipay.com/www/index.html?fromAct=SAIL_AWAY&userId=%@&interactFlags=&source=ANT_FOREST_ly%%27&__webview_options__=ttb%%3Dauto%%26pd%%3DNO%%26bc%%3D1324950",uid];
-    if([self jsBridge]) {
-        [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.cleanFriendOcean\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"cleanedUserId\":\"%@\",\"source\":\"ANT_FOREST\",\"uniqueId\":\"%@%@\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"cleanFriendsOcean\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uid,timeStamp,randNum,timeStamp,randNum2];
+    NSString *arg2 = [NSString stringWithFormat:@"https://2021003115672468.h5app.alipay.com/www/index.html?fromAct=SAIL_AWAY&userId=%@&interactFlags=&source=ANT_FOREST&__webview_options__=ttb%%3Dauto%%26pd%%3DNO%%26bc%%3D1324950",uid];
+    id bridge = self.oceanBridge ?: self.jsBridge;
+    if(bridge) {
+        [bridge _doFlushMessageQueue:arg1 url:arg2];
     }
 }
 
@@ -1282,11 +1277,12 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
     }
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.queryFriendList\",\"requestData\":[{\"source\":\"ANT_FOREST_ly'\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"queryFriendList\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antocean.ocean.h5.queryFriendList\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"source\":\"ANT_FOREST\"}],\"appName\":\"antocean\",\"facadeName\":\"InteractController\",\"methodName\":\"queryFriendList\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
     NSString *arg2 = @"https://2021003115672468.h5app.alipay.com/www/index.html";
-    if([self jsBridge]) {
+    id bridge = self.oceanBridge ?: self.jsBridge;
+    if(bridge) {
         [self recordStage:@"请求神奇海洋好友列表"];
-        [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
+        [bridge _doFlushMessageQueue:arg1 url:arg2];
         dispatch_async(globalSerialQueueQuery, ^{
             [self cleanMyOcean];
         });
@@ -1418,7 +1414,45 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     return YES;
 }
 
+static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
+    if (!taskType.length) return NO;
+    NSString *lowerType = taskType.lowercaseString;
+    NSString *lowerTitle = title ? title.lowercaseString : @"";
+    
+    // 明确不支持 finishTask RPC 的答题、捡垃圾、连续签到与外部小程序小游戏
+    if ([lowerType containsString:@"dati"] || [lowerTitle containsString:@"答题"]) {
+        return NO;
+    }
+    if ([lowerType containsString:@"rubbishclean"] || [lowerTitle containsString:@"清理垃圾"]) {
+        return NO;
+    }
+    if ([lowerType containsString:@"visisit"] || [lowerType containsString:@"consecutive"] || [lowerTitle containsString:@"连续"] || [lowerTitle containsString:@"3天"]) {
+        return NO;
+    }
+    if ([lowerType containsString:@"yxzy"] || [lowerTitle containsString:@"源星战域"]) {
+        return NO;
+    }
+    if ([lowerType containsString:@"hydrw"] || [lowerTitle containsString:@"玩一玩得拼图"] || [lowerTitle containsString:@"专区游戏"]) {
+        return NO;
+    }
+    
+    // 带有导流前缀 DAOLIU_ 的即便是游戏也是纯跳转/浏览安全任务（如 DAOLIU_SLJYG_DJW_GAME）
+    if ([lowerType hasPrefix:@"daoliu_"] || [lowerType containsString:@"daoliu"]) {
+        return YES;
+    }
+    
+    // 纯游戏类若无导流前缀则不支持 RPC
+    if ([lowerType containsString:@"game"] && ![lowerType containsString:@"daoliu"]) {
+        return NO;
+    }
+    
+    return isSafeRewardTask(taskType, title);
+}
+
 - (NSString *)effectiveUrlForSceneCode:(NSString *)sceneCode {
+    if ([sceneCode containsString:@"ANTOCEAN"] || [sceneCode containsString:@"OCEAN"]) {
+        return self.oceanH5Url ?: @"https://2021003115672468.h5app.alipay.com/www/index.html?source=ANT_FOREST&showTaskPanel=yes";
+    }
     if ([sceneCode containsString:@"MONOPOLY"] || [sceneCode containsString:@"HSDWY"]) {
         return @"https://render.alipay.com/p/yuyan/180020010001293606/index.html?caprMode=sync";
     }
@@ -1480,20 +1514,20 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     
     // 1. 主线日常任务列表 (仅在森林主页有效，保护地或其他页面严禁调用避免 100000008 非法请求报错)
     if (isForestHomeUrl) {
-        NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"requestData\":[{\"version\":\"20241025\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
+        NSString *forestArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.queryTaskList\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"version\":\"20241025\",\"source\":\"ANTFOREST\"}],\"appName\":\"antforest\",\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum2];
         [bridge _doFlushMessageQueue:forestArg1 url:urlVitality];
     }
     
     // 2. 现代任务中心领奖励任务 (ANTFOREST_VITALITY_TASK)
-    NSString *argVitality1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_VITALITY_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+    NSString *argVitality1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_VITALITY_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
     [bridge _doFlushMessageQueue:argVitality1 url:urlVitality];
     
     // 3. 森林寻宝抽奖任务 (普通版 ANTFOREST_NORMAL_DRAW_TASK 与 活动版 ANTFOREST_ACTIVITY_DRAW_TASK)
     NSString *urlDraw = urlDynamic ?: [self effectiveUrlForSceneCode:@"ANTFOREST_NORMAL_DRAW_TASK"];
-    NSString *argDraw1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+    NSString *argDraw1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
     [bridge _doFlushMessageQueue:argDraw1 url:urlDraw];
 
-    NSString *argDraw2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+    NSString *argDraw2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_ACTIVITY_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
     [bridge _doFlushMessageQueue:argDraw2 url:urlDraw];
 }
 
@@ -1509,9 +1543,31 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *monopolyScene = @"ANTFOREST_MONOPOLY_TASK_HSDWY";
     NSString *urlMonopoly = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:monopolyScene];
-    NSString *argMonopoly1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", monopolyScene, timeStamp, [AntForestManager getNumberRandom:15]];
+    NSString *argMonopoly1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", monopolyScene, timeStamp, [AntForestManager getNumberRandom:15]];
     [self recordStage:@"新版保护地：已进入保护地界面，读取保护地巡护任务列表"];
     [bridge _doFlushMessageQueue:argMonopoly1 url:urlMonopoly];
+}
+
+-(void)queryOceanTaskList {
+    [self queryOceanTaskListWithForce:NO];
+}
+
+-(void)queryOceanTaskListWithForce:(BOOL)force {
+    if (!self.enableAutoOceanTasks) return;
+    PSDJsBridge *bridge = self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    if (!bridge) return;
+    initDailyTaskCache();
+    
+    static NSTimeInterval lastQueryOceanTaskListTime = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (!force && (now - lastQueryOceanTaskListTime < 2.0)) return;
+    lastQueryOceanTaskListTime = now;
+    
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+    NSString *urlOcean = self.oceanH5Url ?: [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:@"ANTOCEAN_TASK"];
+    NSString *argOcean = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTOCEAN_TASK\",\"source\":\"ANT_FOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+    [self recordStage:@"神奇海洋：正在拉取最新海洋任务与拼图奖励..."];
+    [bridge _doFlushMessageQueue:argOcean url:urlOcean];
 }
 
 -(void)signVitalityTask:(NSString *)signId {
@@ -1523,22 +1579,24 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:@"ANTFOREST_VITALITY_TASK"];
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.sign\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"source\":\"ANTFOREST\",\"sceneCode\":\"ANTFOREST_ENERGY_TASK_SIGN\",\"requestType\":\"RPC\",\"userId\":\"%@\",\"entityId\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.myUserId ?: @"", signId, timeStamp, randNum];
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.sign\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"source\":\"ANTFOREST\",\"sceneCode\":\"ANTFOREST_ENERGY_TASK_SIGN\",\"requestType\":\"RPC\",\"userId\":\"%@\",\"entityId\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.myUserId ?: @"", signId, timeStamp, randNum];
     [bridge _doFlushMessageQueue:arg1 url:url];
 }
 
 -(void)applyVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode {
-    if (!self.rewardTaskBridge && self.jsBridge) {
-        self.rewardTaskBridge = self.jsBridge;
-    }
-    PSDJsBridge *bridge = self.rewardTaskBridge;
-    if (!taskType.length || !bridge) return;
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_VITALITY_TASK";
+    PSDJsBridge *bridge = ([scene containsString:@"OCEAN"] && self.oceanBridge) ? self.oceanBridge : (self.rewardTaskBridge ?: self.jsBridge);
+    if (!taskType.length || !bridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:scene];
-    NSString *arg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.applyTask\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"requestType\":\"RPC\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, randNum];
+    NSString *source = [scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST";
+    NSString *arg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.applyTask\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"requestType\":\"RPC\",\"source\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, source, timeStamp, randNum];
     [bridge _doFlushMessageQueue:arg url:url];
+}
+
+-(void)applyOceanTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title {
+    [self applyVitalityTask:taskType sceneCode:sceneCode.length ? sceneCode : @"ANTOCEAN_TASK"];
 }
 
 -(void)exchangeVitalityTaskAsset:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title caQuotaId:(NSString *)caQuotaId {
@@ -1551,39 +1609,39 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:@"ANTFOREST_VITALITY_TASK"];
     
-    NSString *argForest = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.exchangeVitality\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"caQuotaId\":\"%@\",\"exchangeType\":\"LOTTERY_DRAW\",\"exchangeCount\":1,\"source\":\"ANTFOREST\",\"version\":\"20241025\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", quota, timeStamp, [AntForestManager getNumberRandom:15]];
+    NSString *argForest = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.exchangeVitality\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"caQuotaId\":\"%@\",\"exchangeType\":\"LOTTERY_DRAW\",\"exchangeCount\":1,\"source\":\"ANTFOREST\",\"version\":\"20241025\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", quota, timeStamp, [AntForestManager getNumberRandom:15]];
     [bridge _doFlushMessageQueue:argForest url:url];
 }
 
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title {
-    if (!self.rewardTaskBridge && self.jsBridge) {
-        self.rewardTaskBridge = self.jsBridge;
-    }
-    PSDJsBridge *bridge = self.rewardTaskBridge;
-    if (!taskType.length || !bridge) return;
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_VITALITY_TASK";
+    PSDJsBridge *bridge = ([scene containsString:@"OCEAN"] && self.oceanBridge) ? self.oceanBridge : (self.rewardTaskBridge ?: self.jsBridge);
+    if (!taskType.length || !bridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *outBizNo = [NSString stringWithFormat:@"%@_%@_%@", taskType, timeStamp, [AntForestManager getNumberRandom:6]];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:scene];
+    NSString *source = [scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST";
     
-    NSString *argGreen = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.finishTask\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@\",\"requestType\":\"RPC\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, timeStamp, randNum];
+    NSString *argGreen = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.finishTask\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@\",\"requestType\":\"RPC\",\"source\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, source, timeStamp, randNum];
     [bridge _doFlushMessageQueue:argGreen url:url];
 }
 
 -(void)receiveVitalityTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName {
-    if (!self.rewardTaskBridge && self.jsBridge) {
-        self.rewardTaskBridge = self.jsBridge;
-    }
-    PSDJsBridge *bridge = self.rewardTaskBridge;
-    if (!taskType.length || !bridge) return;
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_VITALITY_TASK";
+    PSDJsBridge *bridge = ([scene containsString:@"OCEAN"] && self.oceanBridge) ? self.oceanBridge : (self.rewardTaskBridge ?: self.jsBridge);
+    if (!taskType.length || !bridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:scene];
+    NSString *source = [scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST";
     
-    NSString *argGreen = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"ANTFOREST\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, randNum];
+    NSString *argGreen = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, source, timeStamp, randNum];
     [bridge _doFlushMessageQueue:argGreen url:url];
+}
+
+-(void)receiveOceanTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName {
+    [self receiveVitalityTaskAward:taskType sceneCode:sceneCode.length ? sceneCode : @"ANTOCEAN_TASK" taskTitle:title awardName:awardName];
 }
 
 - (void)notifyActiveH5PageToRefresh {
@@ -1647,6 +1705,12 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                                 [self queryMonopolyTaskList];
                                 [self notifyActiveH5PageToRefresh];
                             });
+                        } else if ([sLastExecutedSceneCode containsString:@"OCEAN"]) {
+                            [self recordStage:@"神奇海洋：本批次任务已执行完毕，2.5秒后刷新拉取海洋任务最新进度..."];
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                [self queryOceanTaskListWithForce:YES];
+                                [self notifyActiveH5PageToRefresh];
+                            });
                         } else if ([sLastExecutedSceneCode containsString:@"DRAW"]) {
                             [self recordStage:@"森林寻宝：本批次任务已执行完毕，2.5秒后自动刷新寻宝与大奖..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1661,7 +1725,11 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                             });
                         }
                     } else {
-                        [self recordStage:@"领奖励与森林寻宝：本轮所有任务与奖励已全部处理完毕"];
+                        if ([sLastExecutedSceneCode containsString:@"OCEAN"]) {
+                            [self recordStage:@"神奇海洋：本轮所有任务与领拼图操作已全部处理完毕"];
+                        } else {
+                            [self recordStage:@"领奖励与森林寻宝：本轮所有任务与奖励已全部处理完毕"];
+                        }
                         [self notifyActiveH5PageToRefresh];
                     }
                     return;
@@ -1895,7 +1963,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 }
 
 -(void)handleVitalityTaskListResponse:(id)args {
-    if (!self.enableAutoRewardTasks || ![args isKindOfClass:NSDictionary.class]) return;
+    if ((!self.enableAutoRewardTasks && !self.enableAutoOceanTasks) || ![args isKindOfClass:NSDictionary.class]) return;
     @try {
         initDailyTaskCache();
         NSDictionary *data = args;
@@ -1904,12 +1972,12 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         }
         
         // 检查是否有任务执行结果回包：只有在领取奖励（receiveTaskAward）成功或任务已完结时才记为已完成
-        NSString *resCode = [NSString stringWithFormat:@"%@", data[@"code"] ?: @""];
-        NSString *resDesc = [NSString stringWithFormat:@"%@", data[@"desc"] ?: @""];
+        NSString *resCode = [NSString stringWithFormat:@"%@", data[@"code"] ?: (data[@"resultCode"] ?: @"")];
+        NSString *resDesc = [NSString stringWithFormat:@"%@", data[@"desc"] ?: (data[@"resultDesc"] ?: @"")];
         NSString *errMsg = [NSString stringWithFormat:@"%@", data[@"errorMessage"] ?: @""];
         NSString *opType = [NSString stringWithFormat:@"%@", (args[@"operationType"] ?: data[@"operationType"]) ?: @""];
-        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"]) {
-            if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] ||
+        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"] || [resCode isEqualToString:@"SUCCESS"]) {
+            if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] ||
                 [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"] || [resDesc containsString:@"超过上限"]) {
                 if (gCurrentExecutingTaskKey.length) {
                     @synchronized(self) {
@@ -2204,6 +2272,148 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSLog(@"[AntForestPort][VitalityTask] Exception in handleVitalityTaskListResponse: %@", e);
     }
 }
+
+-(void)handleOceanTaskListResponse:(id)args {
+    if (![args isKindOfClass:NSDictionary.class]) return;
+    @try {
+        initDailyTaskCache();
+        NSDictionary *data = args;
+        if (data[@"resData"] && [data[@"resData"] isKindOfClass:NSDictionary.class]) {
+            data = data[@"resData"];
+        }
+        NSArray *oceanList = [data[@"antOceanTaskVOList"] isKindOfClass:NSArray.class] ? data[@"antOceanTaskVOList"] : nil;
+        if (!oceanList.count) return;
+        
+        NSLog(@"\n🌊 [神奇海洋·任务探测] ══════════════ 共发现 %lu 个海洋任务 ══════════════", (unsigned long)oceanList.count);
+        [self recordStage:[NSString stringWithFormat:@"神奇海洋：探测到 %lu 个任务，正在解析列表...", (unsigned long)oceanList.count]];
+        
+        NSMutableArray<NSDictionary *> *tasksToQueue = [NSMutableArray array];
+        
+        for (NSUInteger idx = 0; idx < oceanList.count; idx++) {
+            id t = oceanList[idx];
+            if (![t isKindOfClass:NSDictionary.class]) continue;
+            
+            NSString *taskType = [t[@"taskType"] isKindOfClass:NSString.class] ? t[@"taskType"] : @"";
+            NSString *sceneCode = [t[@"sceneCode"] isKindOfClass:NSString.class] ? t[@"sceneCode"] : @"ANTOCEAN_TASK";
+            NSString *taskStatus = [t[@"taskStatus"] isKindOfClass:NSString.class] ? t[@"taskStatus"] : @"";
+            NSString *awardType = [t[@"awardType"] isKindOfClass:NSString.class] ? t[@"awardType"] : @"";
+            NSString *awardCount = [NSString stringWithFormat:@"%@", t[@"awardCount"] ?: @"1"];
+            
+            NSDictionary *bizInfo = nil;
+            id rawBiz = t[@"bizInfo"];
+            if ([rawBiz isKindOfClass:NSDictionary.class]) {
+                bizInfo = rawBiz;
+            } else if ([rawBiz isKindOfClass:NSString.class]) {
+                NSData *bd = [(NSString *)rawBiz dataUsingEncoding:NSUTF8StringEncoding];
+                if (bd) bizInfo = [NSJSONSerialization JSONObjectWithData:bd options:0 error:nil];
+            }
+            
+            NSString *taskTitle = bizInfo[@"taskTitle"] ?: bizInfo[@"title"] ?: taskType;
+            NSString *taskDesc = bizInfo[@"taskDesc"] ?: bizInfo[@"desc"] ?: @"";
+            NSString *taskJumpBtn = bizInfo[@"taskJumpBtn"] ?: @"";
+            
+            NSString *awardDesc = [awardType isEqualToString:@"RIGHTS"] ? [NSString stringWithFormat:@"拼图碎片x%@", awardCount] : [NSString stringWithFormat:@"%@x%@", awardType, awardCount];
+            
+            // 逐条控制台格式化打印，杜绝系统底层单行超长截断
+            NSLog(@"🌊 [海洋任务 %lu/%lu] 标题:【%@】| 标识: %@ | 状态: %@ | 按钮:【%@】| 奖励: %@ | 描述: %@",
+                  (unsigned long)(idx + 1), (unsigned long)oceanList.count,
+                  taskTitle, taskType, taskStatus, taskJumpBtn, awardDesc, taskDesc);
+            
+            [self recordProbeLog:[NSString stringWithFormat:@"[神奇海洋 %lu/%lu] 标题:%@ | 标识:%@ | 状态:%@ | 按钮:%@ | 奖励:%@",
+                                  (unsigned long)(idx + 1), (unsigned long)oceanList.count,
+                                  taskTitle, taskType, taskStatus, taskJumpBtn, awardDesc]];
+            
+            if (!self.enableAutoOceanTasks) continue;
+            
+            NSString *taskKey = [NSString stringWithFormat:@"%@:%@", sceneCode, taskType];
+            if ([taskStatus isEqualToString:@"RECEIVED"]) {
+                @synchronized(self) {
+                    [gDailyCompletedTasks addObject:taskKey];
+                    saveDailyTaskCache();
+                }
+                continue;
+            }
+            if ([taskStatus isEqualToString:@"TODO"]) {
+                @synchronized(self) {
+                    if ([gDailyCompletedTasks containsObject:taskKey]) {
+                        [gDailyCompletedTasks removeObject:taskKey];
+                        saveDailyTaskCache();
+                    }
+                }
+            }
+            if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"]) {
+                continue;
+            }
+            
+            BOOL canClaim = [taskStatus isEqualToString:@"FINISHED"] ||
+                            [taskStatus isEqualToString:@"CAN_RECEIVE"] ||
+                            ([taskJumpBtn containsString:@"领"] && ![taskStatus isEqualToString:@"RECEIVED"]);
+            
+            if (canClaim) {
+                [tasksToQueue addObject:@{
+                    @"action": @"receive",
+                    @"taskType": taskType,
+                    @"sceneCode": sceneCode,
+                    @"title": taskTitle,
+                    @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
+                    @"scenePrefix": @"神奇海洋"
+                }];
+            } else if ([taskStatus isEqualToString:@"TODO"]) {
+                if (isSafeOceanTask(taskType, taskTitle)) {
+                    NSInteger browseSec = extractTaskBrowseSeconds(t, bizInfo, taskTitle);
+                    NSString *action = (browseSec > 0) ? @"browse" : @"finish";
+                    NSString *jumpUrl = bizInfo[@"targetUrl"] ?: bizInfo[@"jumpUrl"] ?: @"";
+                    [tasksToQueue addObject:@{
+                        @"action": action,
+                        @"taskType": taskType,
+                        @"sceneCode": sceneCode,
+                        @"title": taskTitle,
+                        @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
+                        @"scenePrefix": @"神奇海洋",
+                        @"browseSeconds": @(browseSec),
+                        @"jumpUrl": jumpUrl
+                    }];
+                } else {
+                    NSLog(@"🌊 [神奇海洋] 任务【%@】属于互动型/答题/连续签到/外部游戏任务，不支持直接RPC完成，已自动跳过", taskTitle);
+                }
+            }
+        }
+        NSLog(@"🌊 [神奇海洋·任务探测] ══════════════════════════════════════════════\n");
+        
+        if (!self.enableAutoOceanTasks || !tasksToQueue.count) return;
+        
+        BOOL shouldStartLoop = NO;
+        NSUInteger totalQueued = 0;
+        @synchronized(self) {
+            if (!vitalityTaskQueue) vitalityTaskQueue = [NSMutableArray array];
+            for (NSDictionary *task in tasksToQueue) {
+                NSString *tk = [NSString stringWithFormat:@"%@:%@", task[@"sceneCode"], task[@"taskType"]];
+                BOOL alreadyInQueue = NO;
+                for (NSDictionary *q in vitalityTaskQueue) {
+                    NSString *qk = [NSString stringWithFormat:@"%@:%@", q[@"sceneCode"], q[@"taskType"]];
+                    if ([qk isEqualToString:tk]) { alreadyInQueue = YES; break; }
+                }
+                if (!alreadyInQueue) {
+                    [vitalityTaskQueue addObject:task];
+                }
+            }
+            totalQueued = vitalityTaskQueue.count;
+            if (!vitalityTaskRunning && totalQueued > 0) {
+                vitalityTaskRunning = YES;
+                shouldStartLoop = YES;
+            }
+        }
+        if (shouldStartLoop) {
+            [self recordStage:[NSString stringWithFormat:@"神奇海洋：规划 %lu 项待完成与领拼图操作", (unsigned long)tasksToQueue.count]];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(400 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [self executeNextVitalityTask];
+            });
+        }
+    } @catch (NSException *e) {
+        NSLog(@"[AntForestPort][OceanTask] Exception in handleOceanTaskListResponse: %@", e);
+    }
+}
+
     
 
 
@@ -2341,7 +2551,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
     NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:16];
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@_p%ld\"}]", version, (long)startIndex, timeStamp, randNum, (long)startIndex];
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@_p%ld\"}]", version, (long)startIndex, timeStamp, randNum, (long)startIndex];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/listRank.html?caprMode=sync&init=energyRank&periodType=total";
     [self recordStage:[NSString stringWithFormat:@"请求好友排行榜自动翻页（第 %ld-%ld 位）", (long)startIndex + 1, (long)startIndex + 200]];
     [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
@@ -2352,7 +2562,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
     NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",version,timeStamp,randNum];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/listRank.html?caprMode=sync&init=energyRank&periodType=total";
     if([self jsBridge]) {
         [self recordStage:@"请求全量好友排行榜（200位/页）"];
@@ -2365,7 +2575,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
     [[AntForestManager sharedLock] lock];
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.fillUserRobFlag\",\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userIdList\":[%@],\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uids,timeStamp,randNum];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.fillUserRobFlag\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userIdList\":[%@],\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\"]},\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]",uids,timeStamp,randNum];
     NSString *arg2 = [NSString stringWithFormat:@"https://render.alipay.com/p/yuyan/180020010001247580/listRank.html?caprMode=sync&init=energyRank&periodType=total"];
     if([self jsBridge]) {
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
@@ -2874,6 +3084,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
             if ([opType containsString:@"protectBubble"] || [dict[@"handlerName"] isEqualToString:@"protectBubble"] || resData[@"protectBubble"] || resData[@"userProtectResult"]) {
                 [self handleAutoReviveResponse:args];
             }
+            if (resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class]) {
+                [self handleOceanTaskListResponse:resData ?: dict];
+            }
             if (resData[@"forestTasksNew"] || resData[@"energySignVO"] || resData[@"taskInfoList"] || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || [opType containsString:@"antiep"] || [opType containsString:@"queryTaskList"] || [opType containsString:@"draw"] || [opType containsString:@"exchangeVitality"] || [resData[@"code"] isEqualToString:@"400000040"] || [resData[@"code"] isEqualToString:@"400000004"] || [resData[@"code"] isEqualToString:@"400000030"] || [resData[@"code"] isEqualToString:@"B000000008"] || [resData[@"desc"] containsString:@"不支持rpc调用"] || [resData[@"desc"] containsString:@"无法领取"] || [dict[@"error"] integerValue] == 3000) {
                 [self handleVitalityTaskListResponse:resData ?: dict];
             }
@@ -2897,6 +3110,11 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"todayAnimalEnergyCollectedDate"];
                     [[NSUserDefaults standardUserDefaults] synchronize];
                     [self recordStage:[NSString stringWithFormat:@"收取 · 巡护动物（大鲵）能量球已成功收取（%ldg）！", (long)(collected > 0 ? collected : 30)]];
+                } else if ([resResultCode isEqualToString:@"SYSTEM_FAILURE"] || [dict[@"resultDesc"] containsString:@"开小差"] || [resData[@"resultDesc"] containsString:@"开小差"] || [resResultCode isEqualToString:@"ENERGY_CAN_NOT_COLLECT"]) {
+                    NSString *today = getCurrentDateString();
+                    [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"todayAnimalEnergyCollectedDate"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                    [self recordStage:@"保护地巡护 · 今日动物巡护能量已收过或不可收，锁定今日防重"];
                 }
             }
             
@@ -2952,8 +3170,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
             }
             
-            // 匹配 takelook 返回的 friendID
-            if(resData && resData[@"friendId"]) {
+            // 匹配 takelook 返回的 friendID（仅当插件正在执行后台找能量扫描时才由插件接管并查气泡，避免干扰用户手动找能量跳转）
+            if(takeLookRunning && resData && resData[@"friendId"]) {
                 NSString *friendId = resData[@"friendId"];
                 if (![self consumeTakeLookFriend:friendId]) return;
                 NSMutableDictionary* fb = [[AntForestManager sharedInstance] friendsBubbles];
