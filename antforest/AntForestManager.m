@@ -1413,6 +1413,9 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [cleanTitle containsString:@"淘宝签到"] ||
         [cleanTitle containsString:@"向僵尸开炮"] ||
         [cleanTitle containsString:@"梦幻经理人"] ||
+        [cleanTitle containsString:@"连续"] ||
+        [cleanTitle containsString:@"清理垃圾"] ||
+        [cleanTitle containsString:@"帮好友清理"] ||
         [cleanTitle containsString:@"给随机好友"]) {
         return NO;
     }
@@ -2211,6 +2214,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             
             // 仅拦截未完成的高风险任务与不可通过RPC自动完成的任务
             if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
+            if (![taskStatus isEqualToString:@"FINISHED"] && [sceneCode containsString:@"OCEAN"] && !isSafeOceanTask(taskType, taskTitle)) continue;
             
             // 阶梯大奖 (阶段宝箱 / 额外累计奖励)
             NSDictionary *groupInfo = [t[@"taskGroupInfo"] isKindOfClass:NSDictionary.class] ? t[@"taskGroupInfo"] : nil;
