@@ -2419,13 +2419,27 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             if (!self.enableAutoOceanTasks) continue;
             
             NSString *taskKey = [NSString stringWithFormat:@"%@:%@", sceneCode, taskType];
-            if ([taskStatus isEqualToString:@"RECEIVED"]) {
+            NSDictionary *rights = [t[@"taskRights"] isKindOfClass:NSDictionary.class] ? t[@"taskRights"] : nil;
+            NSInteger alreadyReceive = [rights[@"alreadyReceiveAwardCount"] integerValue];
+            NSInteger rightsTimesLimit = [rights[@"rightsTimesLimit"] integerValue];
+            if (rightsTimesLimit <= 0) rightsTimesLimit = [t[@"rightsTimesLimit"] integerValue];
+            if (alreadyReceive <= 0) alreadyReceive = [t[@"rightsTimes"] integerValue];
+            if (alreadyReceive <= 0) {
+                id ext = t[@"extend"];
+                if ([ext isKindOfClass:NSString.class] && [ext containsString:@"alreadyReceiveAwardCount"]) {
+                    NSDictionary *ed = [NSJSONSerialization JSONObjectWithData:[ext dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+                    alreadyReceive = [ed[@"alreadyReceiveAwardCount"] integerValue];
+                }
+            }
+            BOOL isDoneAll = [taskStatus isEqualToString:@"RECEIVED"] || (rightsTimesLimit > 0 && alreadyReceive >= rightsTimesLimit);
+            if (isDoneAll) {
                 @synchronized(self) {
                     [gDailyCompletedTasks addObject:taskKey];
                     saveDailyTaskCache();
                 }
                 continue;
             }
+            
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, 0, 0) || isMultiStageTaskFromDict(t, nil, bizInfo);
             if ([taskStatus isEqualToString:@"TODO"] || isMultiIncomplete) {
                 @synchronized(self) {
