@@ -1864,14 +1864,16 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
             NSString *taskKey = taskType.length ? [NSString stringWithFormat:@"%@:%@", sceneCode, taskType] : nil;
             gCurrentExecutingTaskKey = taskKey;
             
-            initDailyTaskCache();
-            // finishTask 的成功只代表任务动作已提交，后续 receive 仍必须执行。
-            if (taskKey.length && ![action isEqualToString:@"receive"]) {
+            if (taskKey.length) {
                 BOOL isDone = NO;
                 @synchronized(self) {
                     BOOL isMultiIncomplete = isMultiStageIncompleteTask(title, 0, 0) || [item[@"isMultiStage"] boolValue];
                     if (!isMultiIncomplete) {
-                        isDone = ([gDailyCompletedTasks containsObject:taskKey] || [gDailyFailedTasks containsObject:taskKey]);
+                        if ([gDailyCompletedTasks containsObject:taskKey]) {
+                            isDone = YES;
+                        } else if (![action isEqualToString:@"receive"] && [gDailyFailedTasks containsObject:taskKey]) {
+                            isDone = YES;
+                        }
                     }
                 }
                 if (isDone) {
@@ -2167,7 +2169,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSString *resDesc = [NSString stringWithFormat:@"%@", data[@"desc"] ?: (data[@"resultDesc"] ?: @"")];
         NSString *errMsg = [NSString stringWithFormat:@"%@", data[@"errorMessage"] ?: @""];
         NSString *opType = [NSString stringWithFormat:@"%@", (args[@"operationType"] ?: data[@"operationType"]) ?: @""];
-        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"] || [resDesc containsString:@"无法重复领取"]) {
+        NSDictionary *finishVO = data[@"finishAwardResultVO"];
+        BOOL finishHasNoNextStage = ([finishVO isKindOfClass:NSDictionary.class] && finishVO[@"hasNextStage"] && ![finishVO[@"hasNextStage"] boolValue]);
+        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"] || [resDesc containsString:@"无法重复领取"] || finishHasNoNextStage) {
             if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000005"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] ||
                 [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"] || [resDesc containsString:@"超过上限"] || [resDesc containsString:@"无法重复领取"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"]) {
                 if (gCurrentExecutingTaskKey.length) {
@@ -2300,6 +2304,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         saveDailyTaskCache();
                     }
                 }
+            }
+            
+            // 如果今日已完成且非多阶段未完成任务，坚决跳过，绝不重复排队
+            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete) {
+                continue;
             }
             
             if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"]) {
