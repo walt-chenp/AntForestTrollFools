@@ -1312,7 +1312,12 @@ static void initDailyTaskCache(void) {
             NSArray *failed = [defaults objectForKey:@"vitality_daily_failed"];
             NSMutableSet *clearedFailed = [NSMutableSet set];
             for (NSString *key in failed ?: @[]) {
-                if (![key containsString:@"XIANYU"] && ![key containsString:@"xianyu"] && ![key containsString:@"taobao"]) {
+                if (![key containsString:@"XIANYU"] &&
+                    ![key containsString:@"xianyu"] &&
+                    ![key containsString:@"taobao"] &&
+                    ![key containsString:@"BUSINESS"] &&
+                    ![key containsString:@"LIGHTS"] &&
+                    ![key containsString:@"ANTOCEAN"]) {
                     [clearedFailed addObject:key];
                 }
             }
@@ -1770,7 +1775,7 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
             if (taskKey.length && ![action isEqualToString:@"receive"]) {
                 BOOL isDone = NO;
                 @synchronized(self) {
-                    BOOL isMultiIncomplete = isMultiStageIncompleteTask(title, 0, 0);
+                    BOOL isMultiIncomplete = isMultiStageIncompleteTask(title, 0, 0) || [item[@"isMultiStage"] boolValue];
                     if (!isMultiIncomplete) {
                         isDone = ([gDailyCompletedTasks containsObject:taskKey] || [gDailyFailedTasks containsObject:taskKey]);
                     }
@@ -1845,6 +1850,7 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                 NSString *capturedTitle = [title copy];
                 NSString *capturedAwardName = [awardName copy];
                 NSString *capturedScenePrefix = [scenePrefix copy];
+                BOOL isMulti = [item[@"isMultiStage"] boolValue];
                 
                 // 停留指定时长后完成任务，并等待 finishTask 写入后再提交领奖
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((seconds + 1.0) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1860,6 +1866,12 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                         
                         double delayAfter = 1.2 + (arc4random_uniform(500) / 1000.0);
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            if (isMulti && taskKey.length) {
+                                @synchronized(self) {
+                                    [gDailyCompletedTasks removeObject:taskKey];
+                                    saveDailyTaskCache();
+                                }
+                            }
                             [self executeNextVitalityTask];
                         });
                     });
@@ -1905,6 +1917,64 @@ static BOOL isMultiStageIncompleteTask(NSString *title, NSInteger progress, NSIn
         if (total > 1 && cur < total) {
             return YES;
         }
+    }
+    return NO;
+}
+
+static BOOL isMultiStageTaskFromDict(NSDictionary *taskDict, NSDictionary *baseInfo, NSDictionary *bizInfo) {
+    if (![taskDict isKindOfClass:NSDictionary.class] && ![baseInfo isKindOfClass:NSDictionary.class]) return NO;
+    
+    // 1. 结构化 rightsTimesLimit 与已领次数判断
+    NSDictionary *rights = [taskDict[@"taskRights"] isKindOfClass:NSDictionary.class] ? taskDict[@"taskRights"] : nil;
+    NSInteger limit = [rights[@"rightsTimesLimit"] integerValue];
+    NSInteger received = [rights[@"alreadyReceiveAwardCount"] integerValue];
+    if (limit <= 0) limit = [taskDict[@"rightsTimesLimit"] integerValue];
+    if (received <= 0) received = [taskDict[@"rightsTimes"] integerValue];
+    
+    // 从 extend 解析 alreadyReceiveAwardCount
+    if (received <= 0) {
+        id extendVal = taskDict[@"extend"] ?: baseInfo[@"extend"];
+        NSDictionary *extendDict = nil;
+        if ([extendVal isKindOfClass:NSDictionary.class]) {
+            extendDict = extendVal;
+        } else if ([extendVal isKindOfClass:NSString.class]) {
+            extendDict = [NSJSONSerialization JSONObjectWithData:[extendVal dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+        }
+        if (extendDict[@"alreadyReceiveAwardCount"]) {
+            received = [extendDict[@"alreadyReceiveAwardCount"] integerValue];
+        }
+    }
+    
+    // 从 bizInfo 解析 canDoTaskTimesLimit 和 doneTimes
+    id bizVal = taskDict[@"bizInfo"] ?: baseInfo[@"bizInfo"];
+    NSString *bizStr = [bizVal isKindOfClass:NSString.class] ? (NSString *)bizVal : @"";
+    if (bizStr.length > 0) {
+        if (limit <= 0 && [bizStr containsString:@"canDoTaskTimesLimit="]) {
+            static NSRegularExpression *limitRegex = nil;
+            static dispatch_once_t onceLimit;
+            dispatch_once(&onceLimit, ^{
+                limitRegex = [NSRegularExpression regularExpressionWithPattern:@"canDoTaskTimesLimit=(\\d+)" options:0 error:nil];
+            });
+            NSTextCheckingResult *m = [limitRegex firstMatchInString:bizStr options:0 range:NSMakeRange(0, bizStr.length)];
+            if (m && m.numberOfRanges > 1) {
+                limit = [[bizStr substringWithRange:[m rangeAtIndex:1]] integerValue];
+            }
+        }
+        if ([bizStr containsString:@"doneTimes="] || [bizStr containsString:@"taskDoneTimes="]) {
+            static NSRegularExpression *doneRegex = nil;
+            static dispatch_once_t onceDone;
+            dispatch_once(&onceDone, ^{
+                doneRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:taskDoneTimes|doneTimes)=(\\d+)" options:0 error:nil];
+            });
+            NSTextCheckingResult *m = [doneRegex firstMatchInString:bizStr options:0 range:NSMakeRange(0, bizStr.length)];
+            if (m && m.numberOfRanges > 1) {
+                received = [[bizStr substringWithRange:[m rangeAtIndex:1]] integerValue];
+            }
+        }
+    }
+    
+    if (limit > 1 && received < limit) {
+        return YES;
     }
     return NO;
 }
@@ -1992,7 +2062,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSString *resDesc = [NSString stringWithFormat:@"%@", data[@"desc"] ?: (data[@"resultDesc"] ?: @"")];
         NSString *errMsg = [NSString stringWithFormat:@"%@", data[@"errorMessage"] ?: @""];
         NSString *opType = [NSString stringWithFormat:@"%@", (args[@"operationType"] ?: data[@"operationType"]) ?: @""];
-        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"] || [resCode isEqualToString:@"SUCCESS"]) {
+        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"]) {
             if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] ||
                 [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"] || [resDesc containsString:@"超过上限"]) {
                 if (gCurrentExecutingTaskKey.length) {
@@ -2117,12 +2187,16 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 查询/受理成功不是任务完成；服务端仍为 TODO 时必须撤销旧版留下的误缓存，进度尚未达标时亦不可缓存。
             NSInteger taskRequire = [baseInfo[@"taskRequire"] integerValue];
             NSInteger taskProgress = [baseInfo[@"taskProgress"] integerValue];
-            if ([taskStatus isEqualToString:@"TODO"] || isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire)) {
+            BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire) || isMultiStageTaskFromDict(t, baseInfo, bizInfo);
+            if ([taskStatus isEqualToString:@"TODO"] || isMultiIncomplete) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
-                        saveDailyTaskCache();
                     }
+                    if ([gDailyFailedTasks containsObject:taskKey]) {
+                        [gDailyFailedTasks removeObject:taskKey];
+                    }
+                    saveDailyTaskCache();
                 }
             }
             
@@ -2217,7 +2291,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     @"taskType": taskType,
                     @"sceneCode": sceneCode,
                     @"title": taskTitle,
-                    @"awardName": awardName
+                    @"awardName": awardName,
+                    @"isMultiStage": @(isMultiIncomplete)
                 }];
             } else if ([taskStatus isEqualToString:@"TODO"]) {
                 if (requiresTimedBrowse) {
@@ -2229,7 +2304,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         @"title": taskTitle,
                         @"awardName": awardName,
                         @"jumpUrl": jumpUrl,
-                        @"browseSeconds": @(explicitBrowseSec)
+                        @"browseSeconds": @(explicitBrowseSec),
+                        @"isMultiStage": @(isMultiIncomplete)
                     }];
                 } else {
                     // 常规逛一逛/浏览/去完成等即时任务，直接提交完成并领奖，无需停留15秒
@@ -2237,7 +2313,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         @"action": @"finish",
                         @"taskType": taskType,
                         @"sceneCode": sceneCode,
-                        @"title": taskTitle
+                        @"title": taskTitle,
+                        @"isMultiStage": @(isMultiIncomplete)
                     }];
                     [newlyParsedTasks addObject:@{
                         @"action": @"receive",
@@ -2349,12 +2426,16 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 }
                 continue;
             }
-            if ([taskStatus isEqualToString:@"TODO"] || isMultiStageIncompleteTask(taskTitle, 0, 0)) {
+            BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, 0, 0) || isMultiStageTaskFromDict(t, nil, bizInfo);
+            if ([taskStatus isEqualToString:@"TODO"] || isMultiIncomplete) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
-                        saveDailyTaskCache();
                     }
+                    if ([gDailyFailedTasks containsObject:taskKey]) {
+                        [gDailyFailedTasks removeObject:taskKey];
+                    }
+                    saveDailyTaskCache();
                 }
             }
             if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"]) {
@@ -2372,7 +2453,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     @"sceneCode": sceneCode,
                     @"title": taskTitle,
                     @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
-                    @"scenePrefix": @"神奇海洋"
+                    @"scenePrefix": @"神奇海洋",
+                    @"isMultiStage": @(isMultiIncomplete)
                 }];
             } else if ([taskStatus isEqualToString:@"TODO"]) {
                 if (isSafeOceanTask(taskType, taskTitle)) {
@@ -2387,7 +2469,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
                         @"scenePrefix": @"神奇海洋",
                         @"browseSeconds": @(browseSec),
-                        @"jumpUrl": jumpUrl
+                        @"jumpUrl": jumpUrl,
+                        @"isMultiStage": @(isMultiIncomplete)
                     }];
                 } else {
                     NSLog(@"🌊 [神奇海洋] 任务【%@】属于互动型/答题/连续签到/外部游戏任务，不支持直接RPC完成，已自动跳过", taskTitle);
