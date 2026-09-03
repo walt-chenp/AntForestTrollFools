@@ -1371,6 +1371,11 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     
     // AI摸鱼类任务安全可执行 (赠送每日摸鱼次数、看15s视频、去玩一玩森林小车车15s等)
     if ([lowerType containsString:@"aifish"] || [lowerType containsString:@"touch_fish"] || [lowerTitle containsString:@"摸鱼"]) {
+        if ([lowerType containsString:@"kuaishou"] || [lowerTitle containsString:@"快手"] ||
+            [lowerType containsString:@"zhuanhua"] || [lowerType containsString:@"cnxdy"] ||
+            [lowerTitle containsString:@"击败"] || [lowerTitle containsString:@"打怪"] || [lowerTitle containsString:@"玩一玩超"]) {
+            return NO;
+        }
         return YES;
     }
     
@@ -1468,6 +1473,11 @@ static BOOL isSafeAIFishTask(NSString *taskType, NSString *title) {
     if (!taskType.length) return NO;
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
+    if ([lowerType containsString:@"kuaishou"] || [lowerTitle containsString:@"快手"] ||
+        [lowerType containsString:@"zhuanhua"] || [lowerType containsString:@"cnxdy"] ||
+        [lowerTitle containsString:@"击败"] || [lowerTitle containsString:@"打怪"] || [lowerTitle containsString:@"玩一玩超"]) {
+        return NO;
+    }
     if ([lowerType containsString:@"aifish"] || [lowerType containsString:@"touch_fish"] || [lowerTitle containsString:@"摸鱼"]) {
         return YES;
     }
@@ -1947,6 +1957,13 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                     } @catch (NSException *e) {}
                     
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        if (taskKey.length && [gDailyFailedTasks containsObject:taskKey]) {
+                            double delayAfter = 0.5;
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                [self executeNextVitalityTask];
+                            });
+                            return;
+                        }
                         @try {
                             [self receiveVitalityTaskAward:capturedTaskType sceneCode:capturedSceneCode taskTitle:capturedTitle awardName:capturedAwardName];
                             [self recordStage:[NSString stringWithFormat:@"%@：已完成“%@”并提交领奖", capturedScenePrefix, capturedTitle]];
@@ -2150,9 +2167,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSString *resDesc = [NSString stringWithFormat:@"%@", data[@"desc"] ?: (data[@"resultDesc"] ?: @"")];
         NSString *errMsg = [NSString stringWithFormat:@"%@", data[@"errorMessage"] ?: @""];
         NSString *opType = [NSString stringWithFormat:@"%@", (args[@"operationType"] ?: data[@"operationType"]) ?: @""];
-        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"]) {
-            if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] ||
-                [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"] || [resDesc containsString:@"超过上限"]) {
+        if ([opType containsString:@"receiveTaskAward"] || [resDesc containsString:@"任务已完结"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"] || [resDesc containsString:@"无法重复领取"]) {
+            if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000005"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] ||
+                [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"] || [resDesc containsString:@"超过上限"] || [resDesc containsString:@"无法重复领取"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"]) {
                 if (gCurrentExecutingTaskKey.length) {
                     @synchronized(self) {
                         [gDailyCompletedTasks addObject:gCurrentExecutingTaskKey];
@@ -2160,8 +2177,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     }
                 }
             }
-        } else if ([resCode isEqualToString:@"400000040"] || [resCode isEqualToString:@"400000001"] || [resCode isEqualToString:@"3000"] || [data[@"error"] integerValue] == 3000 ||
-            [resDesc containsString:@"不支持rpc调用"] || [resDesc containsString:@"不存在"] || [errMsg containsString:@"系统出错"]) {
+        } else if ([resCode isEqualToString:@"400000040"] || [resCode isEqualToString:@"400000001"] || [resCode isEqualToString:@"400000004"] || [resCode isEqualToString:@"3000"] || [data[@"error"] integerValue] == 3000 ||
+            [resDesc containsString:@"不支持rpc调用"] || [resDesc containsString:@"不存在"] || [resDesc containsString:@"未完成"] || [errMsg containsString:@"系统出错"]) {
             if (gCurrentExecutingTaskKey.length) {
                 @synchronized(self) {
                     [gDailyFailedTasks addObject:gCurrentExecutingTaskKey];
@@ -2276,15 +2293,12 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             NSInteger taskRequire = [baseInfo[@"taskRequire"] integerValue];
             NSInteger taskProgress = [baseInfo[@"taskProgress"] integerValue];
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire) || isMultiStageTaskFromDict(t, baseInfo, bizInfo);
-            if ([taskStatus isEqualToString:@"TODO"] || isMultiIncomplete) {
+            if (isMultiIncomplete) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
+                        saveDailyTaskCache();
                     }
-                    if ([gDailyFailedTasks containsObject:taskKey]) {
-                        [gDailyFailedTasks removeObject:taskKey];
-                    }
-                    saveDailyTaskCache();
                 }
             }
             
