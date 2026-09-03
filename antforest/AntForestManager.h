@@ -50,7 +50,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong) NSArray<NSString *> *waterScheduledTimes;
 
 @property (assign, nonatomic) BOOL enableCleanOcean; // 神奇海洋自动清理海域与找拼图
-@property (assign, nonatomic) BOOL enableAutoPatrol; // 保护地自动巡护与物种合成派遣
+@property (assign, nonatomic) BOOL enableAutoPatrol; // 旧版保护地自动巡护与物种合成派遣
+@property (assign, nonatomic) BOOL enableAutoPatrolNew; // 新版保护地大富翁自动掷骰子与任务
 @property (assign, nonatomic) BOOL enableAutoRewardTasks; // 任务中心自动签到、做任务与领奖励
 @property (atomic, assign) BOOL isScanRunning; // 扫描进行中独占锁
 @property (assign, nonatomic) int failedTimes; //未成功收取能量的次数
@@ -93,9 +94,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 // 任务中心：自动签到与领奖励
 -(void)queryVitalityTaskList;
+-(void)queryVitalityTaskListWithForce:(BOOL)force;
+-(void)queryMonopolyTaskList;
 -(void)handleVitalityTaskListResponse:(id)args;
 -(void)signVitalityTask:(NSString *)signId;
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title;
+-(void)notifyActiveH5PageToRefresh;
 -(void)receiveVitalityTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName;
 
 // 好友浇水：仅由“好友浇水设置”手动或定时触发，与自动收取独立。

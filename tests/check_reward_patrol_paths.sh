@@ -3,7 +3,7 @@ set -eu
 
 source_file="$(dirname "$0")/../antforest/AntForestManager.m"
 entry_file="$(dirname "$0")/../PortEntry.m"
-grep -Fq '(!self.enableSelfCollect && !self.enableAutoPatrol) || !self.jsBridge' "$source_file"
+grep -Fq '(!self.enableAutoCollect && !self.enableSelfCollect && !self.enableAutoPatrolNew) || !self.jsBridge' "$source_file"
 grep -Fq '@"action": @"exchange"' "$source_file"
 grep -Fq '@"caQuotaId": caQuotaId ?: @""' "$source_file"
 grep -Fq 'if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;' "$source_file"
