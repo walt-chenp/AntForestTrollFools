@@ -695,12 +695,6 @@ static NSInteger reviveDailyCount(void) {
         [[NSUserDefaults standardUserDefaults] synchronize];
     }
     waterFriendRefreshPending = NO;
-    NSArray *kept = [self.waterFriendIds filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString *uid, __unused NSDictionary *bindings) { return self.friendsRank[uid] != nil; }]];
-    if (kept.count != self.waterFriendIds.count) {
-        self.waterFriendIds = kept;
-        [[NSUserDefaults standardUserDefaults] setObject:kept forKey:@"waterFriendIds"];
-        [self recordStage:@"浇水 · 已移除不在总榜内的好友选择"];
-    }
     [self recordStage:[NSString stringWithFormat:@"浇水 · 好友列表刷新完成：%lu 位", (unsigned long)self.friendsRank.count]];
     [[NSNotificationCenter defaultCenter] postNotificationName:@"WaterFriendListUpdated" object:nil];
 }
@@ -1616,7 +1610,7 @@ static BOOL isSafeAIFishTask(NSString *taskType, NSString *title) {
 }
 
 -(void)queryAIFishTaskListWithForce:(BOOL)force {
-    if (!self.enableAutoOceanTasks && !self.enableAutoRewardTasks) return;
+    if (!self.enableAutoAIFish) return;
     PSDJsBridge *bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
     if (!bridge) return;
     initDailyTaskCache();
@@ -2156,7 +2150,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 }
 
 -(void)handleVitalityTaskListResponse:(id)args {
-    if ((!self.enableAutoRewardTasks && !self.enableAutoOceanTasks) || ![args isKindOfClass:NSDictionary.class]) return;
+    if ((!self.enableAutoRewardTasks && !self.enableAutoOceanTasks && !self.enableAutoAIFish) || ![args isKindOfClass:NSDictionary.class]) return;
     @try {
         initDailyTaskCache();
         NSDictionary *data = args;
@@ -2323,6 +2317,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 仅拦截未完成的高风险任务与不可通过RPC自动完成的任务
             if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
             if (![taskStatus isEqualToString:@"FINISHED"] && [sceneCode containsString:@"OCEAN"] && !isSafeOceanTask(taskType, taskTitle)) continue;
+            if ([sceneCode containsString:@"AIFISH"] && !self.enableAutoAIFish) continue;
             if (![taskStatus isEqualToString:@"FINISHED"] && [sceneCode containsString:@"AIFISH"] && !isSafeAIFishTask(taskType, taskTitle)) continue;
             
             // 阶梯大奖 (阶段宝箱 / 额外累计奖励)
