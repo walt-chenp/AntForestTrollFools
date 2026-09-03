@@ -456,7 +456,7 @@ static NSInteger reviveDailyCount(void) {
     waterAwaitingLimit = waterAwaitingTransfer = NO;
     NSDictionary *body = @{ @"userId": waterCurrentUserId, @"version": @"20241025", @"source": @"chInfo_ch_appcenter__chsub_9patch", @"fromAct": @"TAKE_LOOK", @"configVersionMap": @{ @"wateringBubbleConfig": @"0" }, @"skipWhackMole": @NO, @"activityParam": @{}, @"currentEnergy": @99999999, @"currentVitalityAmount": @8888888 };
     [self waterSendRPC:@"alipay.antforest.forest.h5.queryFriendHomePage" body:body];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!waterRunning || requestToken != waterRequestToken || !waterAwaitingHome) return;
         if (waterRetryCount++ == 0) { [self waterRequestFriendHome]; return; }
         [self waterFinishCurrentFriendWithStatus:@"好友主页回包超时，已跳过"];
@@ -509,8 +509,7 @@ static NSInteger reviveDailyCount(void) {
     };
     [self recordStage:[NSString stringWithFormat:@"浇水 · 诊断：请求第 %lu/%lu 次浇水（提醒=%@）", (unsigned long)(waterSucceededCount + 1), (unsigned long)waterTargetCount, self.waterReminderEnabled ? @"开" : @"关"]];
     [self waterSendRPC:@"alipay.antforest.forest.h5.transferEnergy" body:body];
-    [self waterSendRPC:@"alipay.antmember.forest.h5.transferEnergy" body:body];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (!waterRunning || requestToken != waterRequestToken || !waterAwaitingTransfer) return;
         if (waterTransferRetryCount++ == 0) {
             waterAwaitingTransfer = NO;
@@ -574,21 +573,47 @@ static NSInteger reviveDailyCount(void) {
 
 - (void)handleWaterResponse:(id)args {
     if (!waterRunning || ![args isKindOfClass:NSDictionary.class]) return;
+    NSDictionary *dict = args;
+    NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+    NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: @"")];
+    
     if (waterAwaitingHome) {
-        NSString *bizNo = [waterFindValue(args, @"bizNo", 0) isKindOfClass:NSString.class] ? waterFindValue(args, @"bizNo", 0) : nil;
+        if (opType.length && ![opType containsString:@"queryFriendHomePage"]) {
+            return;
+        }
+        // 校验回包 userId，防止被自己首页或其它接口的 bizNo 抢占
+        NSString *respUid = [waterFindValue(resData ?: dict, @"userId", 0) description];
+        if (respUid.length && waterCurrentUserId.length && ![respUid isEqualToString:waterCurrentUserId]) {
+            return;
+        }
+        NSString *bizNo = [waterFindValue(resData ?: dict, @"bizNo", 0) isKindOfClass:NSString.class] ? waterFindValue(resData ?: dict, @"bizNo", 0) : nil;
         if (!bizNo.length) return;
         waterCurrentBizNo = bizNo;
+        waterAwaitingHome = NO;
         [self recordStage:@"浇水 · 已获取好友主页凭据"];
-        [self waterRequestLimit];
+        [self waterTransferOnce];
         return;
     }
     if (waterAwaitingLimit) {
         if (!waterFindValue(args, @"waterLimit", 0)) return;
+        waterAwaitingLimit = NO;
         [self recordStage:@"浇水 · 已通过浇水限额校验"];
         [self waterTransferOnce];
         return;
     }
     if (!waterAwaitingTransfer) return;
+    
+    // 校验是否为浇水 transferEnergy 回包
+    BOOL isTransferResp = [opType containsString:@"transferEnergy"] ||
+                          resData[@"treeEnergy"] != nil ||
+                          resData[@"wateringTimes"] != nil ||
+                          [waterFindValue(args, @"resultCode", 0) isEqualToString:@"WATERING_TIMES_LIMIT"] ||
+                          [waterFindValue(args, @"resultCode", 0) isEqualToString:@"WATER_NOT_GET_LOCK"] ||
+                          [waterFindValue(args, @"resultCode", 0) isEqualToString:@"PARAM_ILLEGAL"];
+    if (!isTransferResp && opType.length) {
+        return;
+    }
+    
     [self recordStage:[NSString stringWithFormat:@"浇水 · 诊断：收取回包 %@", waterResponseSummary(args)]];
     if (!waterResponseSucceeded(args)) {
         NSString *code = waterResponseCode(args);
@@ -3301,6 +3326,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
             NSDictionary *dict = args;
             NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
             [self updateWaterFriendListFromResponse:args];
+            if (waterRunning) {
+                [self handleWaterResponse:args];
+            }
             NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: @""];
             if ([opType containsString:@"protectBubble"] || [dict[@"handlerName"] isEqualToString:@"protectBubble"] || resData[@"protectBubble"] || resData[@"userProtectResult"]) {
                 [self handleAutoReviveResponse:args];
