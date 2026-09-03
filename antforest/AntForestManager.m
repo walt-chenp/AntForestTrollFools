@@ -1317,7 +1317,9 @@ static void initDailyTaskCache(void) {
                     ![key containsString:@"taobao"] &&
                     ![key containsString:@"BUSINESS"] &&
                     ![key containsString:@"LIGHTS"] &&
-                    ![key containsString:@"ANTOCEAN"]) {
+                    ![key containsString:@"ANTOCEAN"] &&
+                    ![key containsString:@"AIFISH"] &&
+                    ![key containsString:@"aifish"]) {
                     [clearedFailed addObject:key];
                 }
             }
@@ -1364,6 +1366,11 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     
     // 阶梯大奖类型安全可领
     if ([lowerType hasPrefix:@"acc_"] || [lowerType containsString:@"_acc_"] || [lowerType containsString:@"acc_"] || [lowerType containsString:@"stage_"] || [lowerType containsString:@"ladder"]) {
+        return YES;
+    }
+    
+    // AI摸鱼类任务安全可执行 (赠送每日摸鱼次数、看15s视频、去玩一玩森林小车车15s等)
+    if ([lowerType containsString:@"aifish"] || [lowerType containsString:@"touch_fish"] || [lowerTitle containsString:@"摸鱼"]) {
         return YES;
     }
     
@@ -1457,7 +1464,20 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
     return isSafeRewardTask(taskType, title);
 }
 
+static BOOL isSafeAIFishTask(NSString *taskType, NSString *title) {
+    if (!taskType.length) return NO;
+    NSString *lowerType = taskType.lowercaseString;
+    NSString *lowerTitle = title ? title.lowercaseString : @"";
+    if ([lowerType containsString:@"aifish"] || [lowerType containsString:@"touch_fish"] || [lowerTitle containsString:@"摸鱼"]) {
+        return YES;
+    }
+    return isSafeRewardTask(taskType, title);
+}
+
 - (NSString *)effectiveUrlForSceneCode:(NSString *)sceneCode {
+    if ([sceneCode containsString:@"AIFISH"] || [sceneCode containsString:@"ANTAIFISH"]) {
+        return self.aiFishH5Url ?: @"https://render.alipay.com/p/yuyan/180020010001290531/index.html?caprMode=sync&source=ANT_OCEAN";
+    }
     if ([sceneCode containsString:@"ANTOCEAN"] || [sceneCode containsString:@"OCEAN"]) {
         return self.oceanH5Url ?: @"https://2021003115672468.h5app.alipay.com/www/index.html?source=ANT_FOREST&showTaskPanel=yes";
     }
@@ -1576,6 +1596,38 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
     NSString *argOcean = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTOCEAN_TASK\",\"source\":\"ANT_FOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
     [self recordStage:@"神奇海洋：正在拉取最新海洋任务与拼图奖励..."];
     [bridge _doFlushMessageQueue:argOcean url:urlOcean];
+    
+    // 同步拉取 AI 摸鱼奖励任务
+    [self queryAIFishTaskListWithForce:force];
+}
+
+-(void)queryAIFishTaskList {
+    [self queryAIFishTaskListWithForce:NO];
+}
+
+-(void)queryAIFishTaskListWithForce:(BOOL)force {
+    if (!self.enableAutoOceanTasks && !self.enableAutoRewardTasks) return;
+    PSDJsBridge *bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    if (!bridge) return;
+    initDailyTaskCache();
+    
+    static NSTimeInterval lastQueryAIFishTaskListTime = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (!force && (now - lastQueryAIFishTaskListTime < 2.0)) return;
+    lastQueryAIFishTaskListTime = now;
+    
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
+    NSString *urlAIFish = self.aiFishH5Url ?: [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:@"ANTAIFISH"];
+    
+    [self recordStage:@"AI摸鱼：正在拉取摸鱼任务与涂鸦机会..."];
+    
+    // 1. ANTAIFISH (每日赠送摸鱼次数、看15s视频等)
+    NSString *argFish1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTAIFISH\",\"source\":\"ANT_OCEAN\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+    [bridge _doFlushMessageQueue:argFish1 url:urlAIFish];
+    
+    // 2. ANTAIFISH_RESCUE_AND_RESTORE (去玩一玩森林小车车15s等)
+    NSString *argFish2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTAIFISH_RESCUE_AND_RESTORE\",\"source\":\"ANT_OCEAN\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+    [bridge _doFlushMessageQueue:argFish2 url:urlAIFish];
 }
 
 -(void)signVitalityTask:(NSString *)signId {
@@ -1593,12 +1645,19 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
 
 -(void)applyVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode {
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_VITALITY_TASK";
-    PSDJsBridge *bridge = ([scene containsString:@"OCEAN"] && self.oceanBridge) ? self.oceanBridge : (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = nil;
+    if ([scene containsString:@"AIFISH"]) {
+        bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    } else if ([scene containsString:@"OCEAN"]) {
+        bridge = self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    } else {
+        bridge = self.rewardTaskBridge ?: self.jsBridge;
+    }
     if (!taskType.length || !bridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:scene];
-    NSString *source = [scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST";
+    NSString *source = [scene containsString:@"AIFISH"] ? @"ANT_OCEAN" : ([scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST");
     NSString *arg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.applyTask\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"requestType\":\"RPC\",\"source\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, source, timeStamp, randNum];
     [bridge _doFlushMessageQueue:arg url:url];
 }
@@ -1623,13 +1682,20 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
 
 -(void)finishVitalityTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title {
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_VITALITY_TASK";
-    PSDJsBridge *bridge = ([scene containsString:@"OCEAN"] && self.oceanBridge) ? self.oceanBridge : (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = nil;
+    if ([scene containsString:@"AIFISH"]) {
+        bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    } else if ([scene containsString:@"OCEAN"]) {
+        bridge = self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    } else {
+        bridge = self.rewardTaskBridge ?: self.jsBridge;
+    }
     if (!taskType.length || !bridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *outBizNo = [NSString stringWithFormat:@"%@_%@_%@", taskType, timeStamp, [AntForestManager getNumberRandom:6]];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:scene];
-    NSString *source = [scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST";
+    NSString *source = [scene containsString:@"AIFISH"] ? @"ANT_OCEAN" : ([scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST");
     
     NSString *argGreen = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.finishTask\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@\",\"requestType\":\"RPC\",\"source\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, source, timeStamp, randNum];
     [bridge _doFlushMessageQueue:argGreen url:url];
@@ -1637,12 +1703,19 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
 
 -(void)receiveVitalityTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName {
     NSString *scene = sceneCode.length ? sceneCode : @"ANTFOREST_VITALITY_TASK";
-    PSDJsBridge *bridge = ([scene containsString:@"OCEAN"] && self.oceanBridge) ? self.oceanBridge : (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = nil;
+    if ([scene containsString:@"AIFISH"]) {
+        bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    } else if ([scene containsString:@"OCEAN"]) {
+        bridge = self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
+    } else {
+        bridge = self.rewardTaskBridge ?: self.jsBridge;
+    }
     if (!taskType.length || !bridge) return;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *url = [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:scene];
-    NSString *source = [scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST";
+    NSString *source = [scene containsString:@"AIFISH"] ? @"ANT_OCEAN" : ([scene containsString:@"OCEAN"] ? @"ANT_FOREST" : @"ANTFOREST");
     
     NSString *argGreen = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, source, timeStamp, randNum];
     [bridge _doFlushMessageQueue:argGreen url:url];
@@ -1713,6 +1786,12 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                                 [self queryMonopolyTaskList];
                                 [self notifyActiveH5PageToRefresh];
                             });
+                        } else if ([sLastExecutedSceneCode containsString:@"AIFISH"]) {
+                            [self recordStage:@"AI摸鱼：本批次任务已执行完毕，2.5秒后刷新拉取摸鱼任务最新进度..."];
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                [self queryAIFishTaskListWithForce:YES];
+                                [self notifyActiveH5PageToRefresh];
+                            });
                         } else if ([sLastExecutedSceneCode containsString:@"OCEAN"]) {
                             [self recordStage:@"神奇海洋：本批次任务已执行完毕，2.5秒后刷新拉取海洋任务最新进度..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -1733,7 +1812,9 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                             });
                         }
                     } else {
-                        if ([sLastExecutedSceneCode containsString:@"OCEAN"]) {
+                        if ([sLastExecutedSceneCode containsString:@"AIFISH"]) {
+                            [self recordStage:@"AI摸鱼：本轮所有摸鱼任务与涂鸦机会已全部处理完毕"];
+                        } else if ([sLastExecutedSceneCode containsString:@"OCEAN"]) {
                             [self recordStage:@"神奇海洋：本轮所有任务与领拼图操作已全部处理完毕"];
                         } else {
                             [self recordStage:@"领奖励与森林寻宝：本轮所有任务与奖励已全部处理完毕"];
@@ -1791,10 +1872,14 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
             }
             
             NSString *scenePrefix = @"领奖励";
-            if ([sceneCode containsString:@"MONOPOLY"]) {
+            if ([sceneCode containsString:@"AIFISH"]) {
+                scenePrefix = @"AI摸鱼";
+            } else if ([sceneCode containsString:@"MONOPOLY"]) {
                 scenePrefix = @"新版保护地";
             } else if ([sceneCode containsString:@"NORMAL_DRAW"] || [sceneCode containsString:@"ACTIVITY_DRAW"] || [sceneCode containsString:@"DRAW"]) {
                 scenePrefix = @"森林寻宝";
+            } else if ([sceneCode containsString:@"OCEAN"]) {
+                scenePrefix = @"神奇海洋";
             } else if (isAcc || [taskType hasPrefix:@"acc_task_energy_"]) {
                 scenePrefix = @"阶梯大奖";
             }
@@ -2215,6 +2300,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 仅拦截未完成的高风险任务与不可通过RPC自动完成的任务
             if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
             if (![taskStatus isEqualToString:@"FINISHED"] && [sceneCode containsString:@"OCEAN"] && !isSafeOceanTask(taskType, taskTitle)) continue;
+            if (![taskStatus isEqualToString:@"FINISHED"] && [sceneCode containsString:@"AIFISH"] && !isSafeAIFishTask(taskType, taskTitle)) continue;
             
             // 阶梯大奖 (阶段宝箱 / 额外累计奖励)
             NSDictionary *groupInfo = [t[@"taskGroupInfo"] isKindOfClass:NSDictionary.class] ? t[@"taskGroupInfo"] : nil;
@@ -3201,10 +3287,11 @@ static BOOL oceanPlanLoggedThisRound = NO;
             if ([opType containsString:@"protectBubble"] || [dict[@"handlerName"] isEqualToString:@"protectBubble"] || resData[@"protectBubble"] || resData[@"userProtectResult"]) {
                 [self handleAutoReviveResponse:args];
             }
+            NSArray *taskInfoList = [resData[@"taskInfoList"] isKindOfClass:NSArray.class] ? resData[@"taskInfoList"] : ([dict[@"taskInfoList"] isKindOfClass:NSArray.class] ? dict[@"taskInfoList"] : nil);
             if (resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class]) {
                 [self handleOceanTaskListResponse:resData ?: dict];
             }
-            if (resData[@"forestTasksNew"] || resData[@"energySignVO"] || resData[@"taskInfoList"] || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || [opType containsString:@"antiep"] || [opType containsString:@"queryTaskList"] || [opType containsString:@"draw"] || [opType containsString:@"exchangeVitality"] || [resData[@"code"] isEqualToString:@"400000040"] || [resData[@"code"] isEqualToString:@"400000004"] || [resData[@"code"] isEqualToString:@"400000030"] || [resData[@"code"] isEqualToString:@"B000000008"] || [resData[@"desc"] containsString:@"不支持rpc调用"] || [resData[@"desc"] containsString:@"无法领取"] || [dict[@"error"] integerValue] == 3000) {
+            if (resData[@"forestTasksNew"] || resData[@"energySignVO"] || taskInfoList || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || [opType containsString:@"antiep"] || [opType containsString:@"queryTaskList"] || [opType containsString:@"draw"] || [opType containsString:@"exchangeVitality"] || [resData[@"code"] isEqualToString:@"400000040"] || [resData[@"code"] isEqualToString:@"400000004"] || [resData[@"code"] isEqualToString:@"400000030"] || [resData[@"code"] isEqualToString:@"B000000008"] || [resData[@"desc"] containsString:@"不支持rpc调用"] || [resData[@"desc"] containsString:@"无法领取"] || [dict[@"error"] integerValue] == 3000) {
                 [self handleVitalityTaskListResponse:resData ?: dict];
             }
             

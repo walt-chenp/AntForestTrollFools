@@ -53,6 +53,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (assign, nonatomic) BOOL enableAutoOceanTasks; // 神奇海洋自动做任务与领拼图
 @property (nonatomic, weak) id oceanBridge; // 神奇海洋 H5 Bridge
 @property (nonatomic, copy) NSString *oceanH5Url; // 神奇海洋当前 URL
+@property (nonatomic, weak) id aiFishBridge; // AI摸鱼 H5 Bridge
+@property (nonatomic, copy) NSString *aiFishH5Url; // AI摸鱼当前 URL
 @property (assign, nonatomic) BOOL enableAutoPatrol; // 旧版保护地自动巡护与物种合成派遣
 @property (assign, nonatomic) BOOL enableAutoPatrolNew; // 新版保护地大富翁自动掷骰子与任务
 @property (assign, nonatomic) BOOL enableAutoRewardTasks; // 任务中心自动签到、做任务与领奖励
@@ -75,6 +77,8 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)cleanMyOceanThoroughly;
 -(void)scanOceanForFriends:(NSArray<NSString *> *)friendIds;
 -(void)queryOceanFriendList;
+-(void)queryAIFishTaskList;
+-(void)queryAIFishTaskListWithForce:(BOOL)force;
 
 -(void)queryTotalRank;
 -(void)queryRobFlag:(NSString*)uids;

@@ -101,6 +101,12 @@ static BOOL isOceanURL(NSURL *url) {
     return [text containsString:@"2021003115672468"] || [text containsString:@"antocean"];
 }
 
+static BOOL isAIFishURL(NSURL *url) {
+    if (!url) return NO;
+    NSString *text = [url.absoluteString lowercaseString];
+    return [text containsString:@"180020010001290531"] || [text containsString:@"aifish"] || [text containsString:@"antaifish"];
+}
+
 static id rewardBridgeFromController(id controller) {
     if (!controller) return nil;
     NSMutableArray *objects = [NSMutableArray arrayWithObject:controller];
@@ -2271,6 +2277,21 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             });
         }
     }
+    if (isAIFishURL(url)) {
+        id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
+        if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
+            manager.aiFishBridge = bridge;
+            manager.aiFishH5Url = url.absoluteString;
+            if (!manager.rewardTaskBridge) {
+                manager.rewardTaskBridge = bridge;
+            }
+        }
+        if (manager.enableAutoOceanTasks || manager.enableAutoRewardTasks) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [manager queryAIFishTaskListWithForce:YES];
+            });
+        }
+    }
     addLogButton(self, revealLeaf);
 }
 
@@ -2547,9 +2568,22 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
                 manager.rewardTaskBridge = self;
             }
         }
-        if (resData[@"forestTasksNew"] || resData[@"taskInfoList"] || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"]) {
+        NSArray *taskInfoList = [resData[@"taskInfoList"] isKindOfClass:NSArray.class] ? resData[@"taskInfoList"] : ([dict[@"taskInfoList"] isKindOfClass:NSArray.class] ? dict[@"taskInfoList"] : nil);
+        if (resData[@"forestTasksNew"] || taskInfoList || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || [dict[@"currentSeasonInfo"] isKindOfClass:NSDictionary.class]) {
             if (manager.rewardTaskBridge != self) {
                 manager.rewardTaskBridge = self;
+            }
+            if ([dict[@"currentSeasonInfo"] isKindOfClass:NSDictionary.class]) {
+                manager.aiFishBridge = self;
+            }
+            for (id t in taskInfoList) {
+                if ([t isKindOfClass:NSDictionary.class]) {
+                    NSString *sc = t[@"taskBaseInfo"][@"sceneCode"];
+                    if ([sc containsString:@"AIFISH"]) {
+                        manager.aiFishBridge = self;
+                        break;
+                    }
+                }
             }
         }
     }
