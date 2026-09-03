@@ -1770,7 +1770,10 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
             if (taskKey.length && ![action isEqualToString:@"receive"]) {
                 BOOL isDone = NO;
                 @synchronized(self) {
-                    isDone = ([gDailyCompletedTasks containsObject:taskKey] || [gDailyFailedTasks containsObject:taskKey]);
+                    BOOL isMultiIncomplete = isMultiStageIncompleteTask(title, 0, 0);
+                    if (!isMultiIncomplete) {
+                        isDone = ([gDailyCompletedTasks containsObject:taskKey] || [gDailyFailedTasks containsObject:taskKey]);
+                    }
                 }
                 if (isDone) {
                     // 今日已完成或已确认不可做，直接处理下一个
@@ -1887,48 +1890,30 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
     });
 }
 
+static BOOL isMultiStageIncompleteTask(NSString *title, NSInteger progress, NSInteger require) {
+    if (require > 1 && progress < require) return YES;
+    if (!title.length) return NO;
+    static NSRegularExpression *stageRegex = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        stageRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\(|（)?(\\d+)\\s*/\\s*(\\d+)(?:\\)|）)?" options:0 error:nil];
+    });
+    NSTextCheckingResult *match = [stageRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    if (match && match.numberOfRanges > 2) {
+        NSInteger cur = [[title substringWithRange:[match rangeAtIndex:1]] integerValue];
+        NSInteger total = [[title substringWithRange:[match rangeAtIndex:2]] integerValue];
+        if (total > 1 && cur < total) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
 static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *bizInfo, NSString *taskTitle) {
     NSString *title = taskTitle ?: @"";
     NSString *taskType = [baseInfo[@"taskType"] isKindOfClass:NSString.class] ? baseInfo[@"taskType"] : @"";
-    BOOL hasExplicitTimeKeyword = ([title containsString:@"秒"] || [title containsString:@"15s"] || [title containsString:@"30s"] || [title containsString:@"15S"] || [title containsString:@"30S"] || [title containsString:@"倒计时"] || [title containsString:@"逛够"] || [title containsString:@"停留"] || [title containsString:@"浏览满"]);
     
-    // 1. 外链任务（如“去UC芭芭农场施肥”、“让闲置循环起来”、闲鱼、森林市集等）：需保持运行 2 秒以满足外部服务端的唤起与有效激活校验
-    if ([taskType containsString:@"XIANYU"] || [taskType containsString:@"BBNC"] || [taskType containsString:@"shenqiyutang"] || [taskType containsString:@"XLIGHT"] || [taskType containsString:@"JSKP"] || [title containsString:@"UC"] || [title containsString:@"芭芭农场"] || [title containsString:@"施肥"] || [title containsString:@"闲置"] || [title containsString:@"闲鱼"] || [title containsString:@"循环"] || [title containsString:@"市集"] || [title containsString:@"集市"]) {
-        return 2;
-    }
-    
-    // 2. 常规即时任务（如打开快手/淘宝、逛一逛各类专区等）：无倒计时要求时直接 0 秒秒做
-    if (!hasExplicitTimeKeyword) {
-        if ([title containsString:@"打开"] || [title containsString:@"快手"] || [title containsString:@"淘宝"] || [title containsString:@"专区"] || [title containsString:@"逛一逛"] || [title containsString:@"去看看"] || [title containsString:@"体验"] || [title containsString:@"鱼塘"] || [title containsString:@"庄园"] || [title containsString:@"物种"] || [title containsString:@"会员中心"] || [title containsString:@"芝麻林"] || [title containsString:@"草草乐"] || [title containsString:@"去参与"] || [title containsString:@"去关注"] || [title containsString:@"去查看"]) {
-            return 0;
-        }
-    }
-    
-    // 2. 检查结构化秒数字段
-    if ([bizInfo isKindOfClass:NSDictionary.class]) {
-        if (bizInfo[@"browseSeconds"] && [bizInfo[@"browseSeconds"] integerValue] > 0) {
-            return [bizInfo[@"browseSeconds"] integerValue];
-        }
-        if (bizInfo[@"browseTime"] && [bizInfo[@"browseTime"] integerValue] > 0) {
-            return [bizInfo[@"browseTime"] integerValue];
-        }
-        if (bizInfo[@"staySeconds"] && [bizInfo[@"staySeconds"] integerValue] > 0) {
-            return [bizInfo[@"staySeconds"] integerValue];
-        }
-        if (bizInfo[@"stayTime"] && [bizInfo[@"stayTime"] integerValue] > 0) {
-            return [bizInfo[@"stayTime"] integerValue];
-        }
-        if (bizInfo[@"duration"] && [bizInfo[@"duration"] integerValue] > 0) {
-            return [bizInfo[@"duration"] integerValue];
-        }
-    }
-    if ([baseInfo isKindOfClass:NSDictionary.class]) {
-        if (baseInfo[@"browseSeconds"] && [baseInfo[@"browseSeconds"] integerValue] > 0) {
-            return [baseInfo[@"browseSeconds"] integerValue];
-        }
-    }
-    
-    // 3. 从文案中动态正则扫描秒数要求 (如 "15s", "15秒", "30秒", "5秒", "10秒" 等)
+    // 1. 优先从文案中动态正则扫描明确秒数要求 (如 "15s", "15秒", "30秒", "5秒", "10秒" 等)
     NSMutableArray<NSString *> *textCandidates = [NSMutableArray array];
     if (taskTitle.length) [textCandidates addObject:taskTitle];
     if ([bizInfo isKindOfClass:NSDictionary.class]) {
@@ -1959,6 +1944,37 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             return 60;
         }
     }
+    
+    // 2. 检查结构化秒数字段
+    if ([bizInfo isKindOfClass:NSDictionary.class]) {
+        if (bizInfo[@"browseSeconds"] && [bizInfo[@"browseSeconds"] integerValue] > 0) {
+            return [bizInfo[@"browseSeconds"] integerValue];
+        }
+        if (bizInfo[@"browseTime"] && [bizInfo[@"browseTime"] integerValue] > 0) {
+            return [bizInfo[@"browseTime"] integerValue];
+        }
+        if (bizInfo[@"staySeconds"] && [bizInfo[@"staySeconds"] integerValue] > 0) {
+            return [bizInfo[@"staySeconds"] integerValue];
+        }
+        if (bizInfo[@"stayTime"] && [bizInfo[@"stayTime"] integerValue] > 0) {
+            return [bizInfo[@"stayTime"] integerValue];
+        }
+        if (bizInfo[@"duration"] && [bizInfo[@"duration"] integerValue] > 0) {
+            return [bizInfo[@"duration"] integerValue];
+        }
+    }
+    if ([baseInfo isKindOfClass:NSDictionary.class]) {
+        if (baseInfo[@"browseSeconds"] && [baseInfo[@"browseSeconds"] integerValue] > 0) {
+            return [baseInfo[@"browseSeconds"] integerValue];
+        }
+    }
+    
+    // 3. 无明确倒计时要求时，外链任务需保持运行 2 秒以满足外部服务端的唤起与有效激活校验
+    if ([taskType containsString:@"XIANYU"] || [taskType containsString:@"BBNC"] || [taskType containsString:@"shenqiyutang"] || [taskType containsString:@"XLIGHT"] || [taskType containsString:@"JSKP"] || [title containsString:@"UC"] || [title containsString:@"芭芭农场"] || [title containsString:@"施肥"] || [title containsString:@"闲置"] || [title containsString:@"闲鱼"] || [title containsString:@"循环"] || [title containsString:@"市集"] || [title containsString:@"集市"]) {
+        return 2;
+    }
+    
+    // 4. 常规即时任务（如打开快手/淘宝、逛一逛各类专区等）：直接 0 秒秒做
     return 0;
 }
 
@@ -2101,7 +2117,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 查询/受理成功不是任务完成；服务端仍为 TODO 时必须撤销旧版留下的误缓存，进度尚未达标时亦不可缓存。
             NSInteger taskRequire = [baseInfo[@"taskRequire"] integerValue];
             NSInteger taskProgress = [baseInfo[@"taskProgress"] integerValue];
-            if ([taskStatus isEqualToString:@"TODO"] || (taskRequire > 1 && taskProgress < taskRequire)) {
+            if ([taskStatus isEqualToString:@"TODO"] || isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire)) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
@@ -2333,7 +2349,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 }
                 continue;
             }
-            if ([taskStatus isEqualToString:@"TODO"]) {
+            if ([taskStatus isEqualToString:@"TODO"] || isMultiStageIncompleteTask(taskTitle, 0, 0)) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
