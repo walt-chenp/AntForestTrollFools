@@ -1278,7 +1278,7 @@ static void installEarnEnergyCollector(id controller) {
     UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:@"自动签到、浏览任务、阶梯大奖与寻宝抽奖任务" icon:@"gift.fill" action:nil];
     UISwitch *rewardSwitch = [[UISwitch alloc] init]; rewardSwitch.on = AntForestManager.sharedInstance.enableAutoRewardTasks; rewardSwitch.translatesAutoresizingMaskIntoConstraints = NO; [rewardSwitch addTarget:self action:@selector(toggleAutoRewardTasks:) forControlEvents:UIControlEventValueChanged]; [reward addSubview:rewardSwitch];
     
-    UIButton *aiFish = [self settingsButtonWithTitle:@"AI摸鱼（任务与机会）" detail:@"自动完成摸鱼与涂鸦任务并领取机会" icon:@"fish.fill" action:nil];
+    UIButton *aiFish = [self settingsButtonWithTitle:@"AI摸鱼（任务与机会）" detail:@"手动进入AI摸鱼自动完成奖励任务并领取" icon:@"fish.fill" action:nil];
     UISwitch *aiFishSwitch = [[UISwitch alloc] init]; aiFishSwitch.on = AntForestManager.sharedInstance.enableAutoAIFish; aiFishSwitch.translatesAutoresizingMaskIntoConstraints = NO; [aiFishSwitch addTarget:self action:@selector(toggleAutoAIFish:) forControlEvents:UIControlEventValueChanged]; [aiFish addSubview:aiFishSwitch];
     
     UIButton *patrolNew = [self settingsButtonWithTitle:@"新版保护地（大富翁）" detail:@"手动进入保护地后自动完成更多巡护步数任务" icon:@"dice.fill" action:nil];
