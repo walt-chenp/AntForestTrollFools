@@ -1085,27 +1085,29 @@ static NSString *sLastAnimalEnergyCollectedDate = nil;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *rand1 = [AntForestManager getNumberRandom:15];
     NSString *rand2 = [AntForestManager getNumberRandom:15];
+    NSString *rand3 = [AntForestManager getNumberRandom:15];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
     
-    NSString *targetId = aId.length ? aId : (pId.length ? pId : (pType.length ? pType : @"hongshandongwuyuan#dani"));
-    if (![targetId containsString:@"#"]) {
-        targetId = @"hongshandongwuyuan#dani";
-    }
-    NSString *actualPropId = pId.length ? pId : targetId;
-    NSString *actualAnimalId = aId.length ? aId : targetId;
-    NSString *actualCreatureCode = pType.length ? pType : targetId;
+    NSString *actualPropId = pId.length ? pId : @"hongshandongwuyuan#dani";
+    NSString *actualAnimalId = aId.length ? aId : @"hongshandongwuyuan#dani";
+    NSString *actualCreatureCode = pType.length ? pType : @"hongshandongwuyuan#dani";
     NSString *effectiveUid = self.myUserId.length ? self.myUserId : ([defaults stringForKey:@"lastKnownUserId"] ?: @"");
     
-    // 采用官方安全气泡收取接口，仅当 targetId 为纯数字气泡 ID 时才调用 collectEnergy RPC
-    // 非数字物种代码（如 hongshandongwuyuan#dani）不传入 bubbleIds，避免服务端报错 error 11 未找到该数据，而是通过 DOM 精准点击收取
+    // 1. 若为纯数字气泡 ID，直接发送 collectEnergy RPC
     NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-    BOOL isNumericBubbleId = (targetId.length > 0 && [targetId rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
-    if (isNumericBubbleId) {
-        NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, targetId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand2];
+    BOOL isNumericPropId = (pId.length > 0 && [pId rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
+    if (isNumericPropId) {
+        NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, pId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand1];
         [self.jsBridge _doFlushMessageQueue:argCol url:arg2];
-    } else {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
     }
+    
+    // 2. 发送官方专用的动物能量收取接口 collectAnimalRobEnergy
+    NSString *argRob1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectAnimalRobEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"propId\":\"%@\",\"propType\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"version\":\"20241025\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, actualPropId, actualCreatureCode, actualAnimalId, actualCreatureCode, timeStamp, rand2];
+    [self.jsBridge _doFlushMessageQueue:argRob1 url:arg2];
+    
+    // 3. 发送 collectAnimalEnergy
+    NSString *argRob2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectAnimalEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"propId\":\"%@\",\"propType\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, actualPropId, actualCreatureCode, actualAnimalId, actualCreatureCode, timeStamp, rand3];
+    [self.jsBridge _doFlushMessageQueue:argRob2 url:arg2];
 }
 
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId {
@@ -3399,20 +3401,6 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 NSString *savedAnimalDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"todayAnimalEnergyCollectedDate"];
                 if (![today isEqualToString:savedAnimalDate]) {
                     [self receiveAnimalEnergyWithPropId:cCode propType:cCode animalId:cCode energy:cEnergy name:cName isCollected:NO];
-                    
-                    // 动物模型加载并渲染后，延迟脉冲模拟触发气泡点击
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
-                    });
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
-                    });
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
-                    });
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
-                    });
                 }
             }
         }

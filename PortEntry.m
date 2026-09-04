@@ -421,115 +421,12 @@ static void dismissFriendAnimalPopup(id controller) {
     }
 }
 
-static void collectAnimalEnergyAtHome(id controller) {
-    if (![AntForestManager sharedInstance].enableAutoCollect && ![AntForestManager sharedInstance].enableSelfCollect && ![AntForestManager sharedInstance].enableAutoPatrolNew) return;
-    if (!controller) {
-        controller = currentForestHomeController;
-        if (!controller && [AntForestManager sharedInstance].jsBridge) {
-            controller = forestControllerForBridge([AntForestManager sharedInstance].jsBridge);
-        }
-        if (!controller) {
-            UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
-            while (top.presentedViewController) top = top.presentedViewController;
-            controller = top;
-        }
-    }
-    if (!controller) return;
-    
-    // 严禁在好友森林页面执行
-    NSURL *url = urlFromController(controller);
-    if (url && !isSelfForestHomeURL(url)) return;
-    
-    id webView = findWebViewInController(controller);
-    if (!webView) return;
-    
-    SEL evaluate = @selector(evaluateJavaScript:completionHandler:);
-    if ([webView respondsToSelector:evaluate]) {
-        NSString *js = @"(function(){"
-        "var allEls = Array.from(document.querySelectorAll('*'));"
-        "var isModalOpen = allEls.some(function(el){"
-        "  var t=(el.innerText||el.textContent||'').trim();"
-        "  return t.includes('伙伴回保护地')||t.includes('立即派遣')||t.includes('获取更多伙伴');"
-        "});"
-        "if(isModalOpen){"
-        "  var dBtn = allEls.find(function(el){"
-        "    var t=(el.innerText||el.textContent||'').trim();"
-        "    return t==='立即派遣'||(t.includes('立即派遣')&&t.length<=10);"
-        "  });"
-        "  if(dBtn){"
-        "    var r=dBtn.getBoundingClientRect();"
-        "    if(r.width>0&&r.height>0&&r.top>50){"
-        "      try{"
-        "        var mOpts={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2};"
-        "        dBtn.dispatchEvent(new MouseEvent('mousedown',mOpts));"
-        "        dBtn.dispatchEvent(new MouseEvent('mouseup',mOpts));"
-        "        dBtn.dispatchEvent(new MouseEvent('click',mOpts));"
-        "        dBtn.click();"
-        "      }catch(_){}"
-        "      return 'dispatched_modal';"
-        "    }"
-        "  }"
-        "}"
-        // 2. 扫描并点击主页动物头顶的巡护能量气泡（如 30g, 25g, 40g, 50g 等）（严禁点击动物本体及 Canvas 避免跳转新版巡护地）
-        "var clickedBubble = false;"
-        "var clickedEnergyText = '';"
-        "allEls.forEach(function(el){"
-        "  try {"
-        "    if (clickedBubble) return;"
-        "    if (el.tagName && el.tagName.toLowerCase() === 'canvas') return;"
-        "    var txt = (el.innerText || el.textContent || '').trim();"
-        "    var aria = (el.getAttribute('aria-label') || '').trim();"
-        "    var cls = (el.className || '').toString().toLowerCase();"
-        "    if (cls === 'creature' || cls === 'animal' || cls.includes('animal-container') || cls.includes('dani-wrapper')) return;"
-        "    var val = 0;"
-        "    var m = txt.match(/^(\\d+)\\s*(g|克)$/i) || aria.match(/^(\\d+)\\s*(g|克)$/i);"
-        "    if (!m) {"
-        "      var mSub = txt.match(/(\\d+)\\s*(g|克)/i) || aria.match(/(\\d+)\\s*(g|克)/i);"
-        "      if (mSub && (txt.length <= 8 || aria.length <= 12)) m = mSub;"
-        "    }"
-        "    if (m) val = parseInt(m[1], 10);"
-        "    if (val > 0 && val <= 500) {"
-        "      var r = el.getBoundingClientRect();"
-        "      if (r && r.width > 0 && r.height > 0 && r.width < 160 && r.height < 160 && r.top > 40) {"
-        "        var cx = r.left + r.width / 2;"
-        "        var cy = r.top + r.height / 2;"
-        "        var targets = [el];"
-        "        if (el.parentElement && el.parentElement !== document.body) targets.push(el.parentElement);"
-        "        targets.forEach(function(targetEl){"
-        "          try {"
-        "            var touch = new Touch({identifier: Date.now(), target: targetEl, clientX: cx, clientY: cy, screenX: cx, screenY: cy, pageX: cx, pageY: cy});"
-        "            targetEl.dispatchEvent(new TouchEvent('touchstart', {touches:[touch], targetTouches:[touch], changedTouches:[touch], bubbles:true, cancelable:true}));"
-        "            targetEl.dispatchEvent(new TouchEvent('touchend', {touches:[], targetTouches:[], changedTouches:[touch], bubbles:true, cancelable:true}));"
-        "          } catch(te){}"
-        "          try {"
-        "            var mOpts = {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy};"
-        "            targetEl.dispatchEvent(new MouseEvent('mousedown', mOpts));"
-        "            targetEl.dispatchEvent(new MouseEvent('mouseup', mOpts));"
-        "            targetEl.dispatchEvent(new MouseEvent('click', mOpts));"
-        "          } catch(me){}"
-        "          try { targetEl.click(); } catch(ce){}"
-        "        });"
-        "        clickedBubble = true;"
-        "        clickedEnergyText = val + 'g';"
-        "      }"
-        "    }"
-        "  } catch(e){}"
-        "});"
-        "return clickedBubble ? ('bubble_clicked:' + clickedEnergyText) : 'no_bubble';"
-        "})();";
-        void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-        runJavaScript(webView, evaluate, js, ^(id result, NSError *error) {
-            if ([result isKindOfClass:NSString.class] && [result hasPrefix:@"bubble_clicked:"]) {
-                NSString *eVal = [result substringFromIndex:[@"bubble_clicked:" length]];
-                [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"保护地巡护 · 检测到首页动物巡护能量球（%@）并已自动点击收取！", eVal]];
-            }
-        });
-    }
+static void collectAnimalEnergyAtHome(__unused id controller) {
+    // 保护地巡护能量由 AntForestManager 在后台通过官方静默 RPC (collectAnimalRobEnergy / collectAnimalEnergy / receiveAnimalEnergy) 安全收取，
+    // 严禁在森林首页通过 DOM 盲扫点击气泡，彻底避免误触跳转其他页面（如活动卡片、排行榜等）。
 }
 
-static void installForestHomeCollector(id controller) {
-    if (![AntForestManager sharedInstance].enableSelfCollect && ![AntForestManager sharedInstance].enableAutoPatrolNew) return;
-    collectAnimalEnergyAtHome(controller);
+static void installForestHomeCollector(__unused id controller) {
 }
 
 static BOOL isNewPatrolURL(NSURL *url, id controller) {
@@ -2243,12 +2140,6 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
     if (revealLeaf) shouldRevealLeafOnNextForestAppearance = NO;
     if (isSelfHome && (manager.enableWaterOnLaunch || manager.enableAutoCollect)) {
         startForestHomeWhenBridgeReady(self);
-        NSArray<NSNumber *> *delays = @[@500, @1200, @2200, @3500];
-        for (NSNumber *d in delays) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([d integerValue] * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                installForestHomeCollector(self);
-            });
-        }
     } else if (forestHome && !isSelfHome) {
         // 在好友森林页面：严禁运行首页动物收集脉冲，自动扫描并关闭“河姆渡福猪”等动物引导弹窗
         NSArray<NSNumber *> *delays = @[@200, @600, @1200, @2000, @3200];
@@ -2689,11 +2580,6 @@ static void installHooks(void) {
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
             shouldRevealLeafOnNextForestAppearance = YES;
             [[AFStepSimulator shared] installAvailableHooks];
-        }];
-        [[NSNotificationCenter defaultCenter] addObserverForName:@"AntForestCollectAnimalEnergyNotification" object:nil queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *notification) {
-            if (currentForestHomeController) {
-                collectAnimalEnergyAtHome(currentForestHomeController);
-            }
         }];
         [[AFStepSimulator shared] installAvailableHooks];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [[AFStepSimulator shared] installAvailableHooks]; });
