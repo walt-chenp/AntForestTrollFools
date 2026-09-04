@@ -1096,9 +1096,16 @@ static NSString *sLastAnimalEnergyCollectedDate = nil;
     NSString *actualCreatureCode = pType.length ? pType : targetId;
     NSString *effectiveUid = self.myUserId.length ? self.myUserId : ([defaults stringForKey:@"lastKnownUserId"] ?: @"");
     
-    // 采用官方安全气泡收取接口，并添加 showError:false 与 showLoading:false 杜绝任何原生错误弹窗
-    NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[\"%@\"],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, targetId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand2];
-    [self.jsBridge _doFlushMessageQueue:argCol url:arg2];
+    // 采用官方安全气泡收取接口，仅当 targetId 为纯数字气泡 ID 时才调用 collectEnergy RPC
+    // 非数字物种代码（如 hongshandongwuyuan#dani）不传入 bubbleIds，避免服务端报错 error 11 未找到该数据，而是通过 DOM 精准点击收取
+    NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+    BOOL isNumericBubbleId = (targetId.length > 0 && [targetId rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
+    if (isNumericBubbleId) {
+        NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, targetId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand2];
+        [self.jsBridge _doFlushMessageQueue:argCol url:arg2];
+    } else {
+        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
+    }
 }
 
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId {
@@ -1311,6 +1318,9 @@ static void initDailyTaskCache(void) {
                     ![key containsString:@"taobao"] &&
                     ![key containsString:@"BUSINESS"] &&
                     ![key containsString:@"LIGHTS"] &&
+                    ![key containsString:@"XLIGHT"] &&
+                    ![key containsString:@"DRAW"] &&
+                    ![key containsString:@"SQYT"] &&
                     ![key containsString:@"ANTOCEAN"] &&
                     ![key containsString:@"AIFISH"] &&
                     ![key containsString:@"aifish"]) {
@@ -2165,7 +2175,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     }
     
     // 3. 无明确倒计时要求时，外链任务需保持运行 2 秒以满足外部服务端的唤起与有效激活校验
-    if ([taskType containsString:@"XIANYU"] || [taskType containsString:@"BBNC"] || [taskType containsString:@"shenqiyutang"] || [taskType containsString:@"XLIGHT"] || [taskType containsString:@"JSKP"] || [title containsString:@"UC"] || [title containsString:@"芭芭农场"] || [title containsString:@"施肥"] || [title containsString:@"闲置"] || [title containsString:@"闲鱼"] || [title containsString:@"循环"] || [title containsString:@"市集"] || [title containsString:@"集市"]) {
+    if ([taskType containsString:@"XIANYU"] || [taskType containsString:@"BBNC"] || [taskType containsString:@"shenqiyutang"] || [taskType containsString:@"SQYT"] || [taskType containsString:@"XLIGHT"] || [taskType containsString:@"JSKP"] || [title containsString:@"UC"] || [title containsString:@"芭芭农场"] || [title containsString:@"施肥"] || [title containsString:@"闲置"] || [title containsString:@"闲鱼"] || [title containsString:@"循环"] || [title containsString:@"市集"] || [title containsString:@"集市"] || [title containsString:@"鱼塘"]) {
         return 2;
     }
     
@@ -2201,6 +2211,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             }
         } else if ([resCode isEqualToString:@"400000040"] || [resCode isEqualToString:@"400000001"] || [resCode isEqualToString:@"400000004"] || [resCode isEqualToString:@"3000"] || [data[@"error"] integerValue] == 3000 ||
             [resDesc containsString:@"不支持rpc调用"] || [resDesc containsString:@"不存在"] || [resDesc containsString:@"未完成"] || [errMsg containsString:@"系统出错"]) {
+            if ([resCode isEqualToString:@"400000040"] || [resDesc containsString:@"不支持rpc调用"]) {
+                [self recordStage:@"任务中心 · 当前任务需在对应界面手动操作完成（服务端不支持直接调用）"];
+            }
             if (gCurrentExecutingTaskKey.length) {
                 @synchronized(self) {
                     [gDailyFailedTasks addObject:gCurrentExecutingTaskKey];
@@ -2319,7 +2332,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             NSInteger taskRequire = [baseInfo[@"taskRequire"] integerValue];
             NSInteger taskProgress = [baseInfo[@"taskProgress"] integerValue];
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire) || isMultiStageTaskFromDict(t, baseInfo, bizInfo);
-            if (isMultiIncomplete) {
+            if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"]) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
@@ -2328,12 +2341,14 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 }
             }
             
-            // 如果今日已完成且非多阶段未完成任务，坚决跳过，绝不重复排队
-            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete) {
+            // 如果今日已完成且非多阶段未完成任务（且服务端明确非 TODO），坚决跳过，绝不重复排队
+            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete && ![taskStatus isEqualToString:@"TODO"]) {
                 continue;
             }
             
-            if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"]) {
+            // 针对森林寻宝或带有外链跳转的互动任务，单次失败不永久拉黑，允许重新尝试；其他纯失败任务若非 FINISHED 则跳过
+            BOOL isDrawOrInteractionTask = ([sceneCode containsString:@"DRAW"] || [taskType containsString:@"XLIGHT"] || [taskType containsString:@"SQYT"]);
+            if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"] && !isDrawOrInteractionTask) {
                 continue;
             }
             
@@ -3378,7 +3393,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 NSString *cCode = creatureVO[@"creatureCode"] ?: @"hongshandongwuyuan#dani";
                 NSString *cName = creatureVO[@"displayInfo"][@"creatureNameText"] ?: @"大鲵";
                 NSInteger cEnergy = [creatureVO[@"levelRobEnergy"] integerValue] ?: [creatureVO[@"initialRobEnergy"] integerValue];
-                if (cEnergy <= 0) cEnergy = 40;
+                if (cEnergy <= 0) cEnergy = 30;
                 
                 NSString *today = getCurrentDateString();
                 NSString *savedAnimalDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"todayAnimalEnergyCollectedDate"];
@@ -3386,13 +3401,16 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     [self receiveAnimalEnergyWithPropId:cCode propType:cCode animalId:cCode energy:cEnergy name:cName isCollected:NO];
                     
                     // 动物模型加载并渲染后，延迟脉冲模拟触发气泡点击
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
                     });
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
                     });
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
+                    });
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         [[NSNotificationCenter defaultCenter] postNotificationName:@"AntForestCollectAnimalEnergyNotification" object:nil];
                     });
                 }

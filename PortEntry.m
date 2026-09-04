@@ -470,39 +470,60 @@ static void collectAnimalEnergyAtHome(id controller) {
         "    }"
         "  }"
         "}"
-        // 2. 扫描并点击主页动物头顶的纯 40g / 25g 能量气泡文本（严禁点击动物本体及 Canvas 避免跳转新版巡护地）
+        // 2. 扫描并点击主页动物头顶的巡护能量气泡（如 30g, 25g, 40g, 50g 等）（严禁点击动物本体及 Canvas 避免跳转新版巡护地）
         "var clickedBubble = false;"
+        "var clickedEnergyText = '';"
         "allEls.forEach(function(el){"
         "  try {"
+        "    if (clickedBubble) return;"
         "    if (el.tagName && el.tagName.toLowerCase() === 'canvas') return;"
         "    var txt = (el.innerText || el.textContent || '').trim();"
         "    var aria = (el.getAttribute('aria-label') || '').trim();"
         "    var cls = (el.className || '').toString().toLowerCase();"
         "    if (cls === 'creature' || cls === 'animal' || cls.includes('animal-container') || cls.includes('dani-wrapper')) return;"
-        "    if (txt === '40g' || txt === '25g' || (txt.indexOf('40g') !== -1 && txt.length <= 6) || (aria.indexOf('40g') !== -1 && aria.length <= 10)) {"
+        "    var val = 0;"
+        "    var m = txt.match(/^(\\d+)\\s*(g|克)$/i) || aria.match(/^(\\d+)\\s*(g|克)$/i);"
+        "    if (!m) {"
+        "      var mSub = txt.match(/(\\d+)\\s*(g|克)/i) || aria.match(/(\\d+)\\s*(g|克)/i);"
+        "      if (mSub && (txt.length <= 8 || aria.length <= 12)) m = mSub;"
+        "    }"
+        "    if (m) val = parseInt(m[1], 10);"
+        "    if (val > 0 && val <= 500) {"
         "      var r = el.getBoundingClientRect();"
-        "      if (r && r.width > 0 && r.height > 0 && r.width < 140 && r.height < 140) {"
+        "      if (r && r.width > 0 && r.height > 0 && r.width < 160 && r.height < 160 && r.top > 40) {"
         "        var cx = r.left + r.width / 2;"
         "        var cy = r.top + r.height / 2;"
-        "        try {"
-        "          var touch = new Touch({identifier: Date.now(), target: el, clientX: cx, clientY: cy, screenX: cx, screenY: cy, pageX: cx, pageY: cy});"
-        "          el.dispatchEvent(new TouchEvent('touchstart', {touches:[touch], targetTouches:[touch], changedTouches:[touch], bubbles:true, cancelable:true}));"
-        "          el.dispatchEvent(new TouchEvent('touchend', {touches:[], targetTouches:[], changedTouches:[touch], bubbles:true, cancelable:true}));"
-        "        } catch(te){}"
-        "        try {"
-        "          var mOpts = {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy};"
-        "          el.dispatchEvent(new MouseEvent('click', mOpts));"
-        "        } catch(me){}"
-        "        el.click();"
+        "        var targets = [el];"
+        "        if (el.parentElement && el.parentElement !== document.body) targets.push(el.parentElement);"
+        "        targets.forEach(function(targetEl){"
+        "          try {"
+        "            var touch = new Touch({identifier: Date.now(), target: targetEl, clientX: cx, clientY: cy, screenX: cx, screenY: cy, pageX: cx, pageY: cy});"
+        "            targetEl.dispatchEvent(new TouchEvent('touchstart', {touches:[touch], targetTouches:[touch], changedTouches:[touch], bubbles:true, cancelable:true}));"
+        "            targetEl.dispatchEvent(new TouchEvent('touchend', {touches:[], targetTouches:[], changedTouches:[touch], bubbles:true, cancelable:true}));"
+        "          } catch(te){}"
+        "          try {"
+        "            var mOpts = {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy};"
+        "            targetEl.dispatchEvent(new MouseEvent('mousedown', mOpts));"
+        "            targetEl.dispatchEvent(new MouseEvent('mouseup', mOpts));"
+        "            targetEl.dispatchEvent(new MouseEvent('click', mOpts));"
+        "          } catch(me){}"
+        "          try { targetEl.click(); } catch(ce){}"
+        "        });"
         "        clickedBubble = true;"
+        "        clickedEnergyText = val + 'g';"
         "      }"
         "    }"
         "  } catch(e){}"
         "});"
-        "return clickedBubble ? 'bubble_clicked' : 'no_bubble';"
+        "return clickedBubble ? ('bubble_clicked:' + clickedEnergyText) : 'no_bubble';"
         "})();";
         void (*runJavaScript)(id, SEL, NSString *, void (^)(id, NSError *)) = (void *)objc_msgSend;
-        runJavaScript(webView, evaluate, js, ^(id result, NSError *error) {});
+        runJavaScript(webView, evaluate, js, ^(id result, NSError *error) {
+            if ([result isKindOfClass:NSString.class] && [result hasPrefix:@"bubble_clicked:"]) {
+                NSString *eVal = [result substringFromIndex:[@"bubble_clicked:" length]];
+                [[AntForestManager sharedInstance] recordStage:[NSString stringWithFormat:@"保护地巡护 · 检测到首页动物巡护能量球（%@）并已自动点击收取！", eVal]];
+            }
+        });
     }
 }
 
