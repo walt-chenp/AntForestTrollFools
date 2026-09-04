@@ -69,6 +69,8 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)startScheduledCollectTimer;
 -(void)startScheduledWaterTimer;
 -(void)receiveAnimalPartnerEnergy;
+-(void)queryUsingCreatureInfo;
+-(void)collectMonopolyCreatureEnergyWithCode:(NSString *)creatureCode shortDay:(NSString *)shortDay energy:(NSInteger)energy name:(NSString *)name;
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId;
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId energy:(NSInteger)energy name:(NSString *)name isCollected:(BOOL)isCollected;
 -(void)stopAutoCollectTimer;

@@ -1051,6 +1051,46 @@ NSString* getCurrentDateTimeString() {
 
 static NSString *sLastAnimalEnergyCollectedDate = nil;
 
+-(void)queryUsingCreatureInfo {
+    if (!self.jsBridge) return;
+    static NSTimeInterval lastQueryCreatureTime = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - lastQueryCreatureTime < 3.0) return;
+    lastQueryCreatureTime = now;
+    
+    NSString *effectiveUid = self.myUserId.length ? self.myUserId : ([[NSUserDefaults standardUserDefaults] stringForKey:@"lastKnownUserId"] ?: @"");
+    NSString *uuid = [[NSUUID UUID] UUIDString];
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)[[NSDate date] timeIntervalSince1970] * 1000];
+    NSString *rand = [AntForestManager getNumberRandom:15];
+    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+    
+    NSString *arg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antisle.monopoly.h5.queryUsingCreatureInfo\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"uniqueId\":\"%@\",\"targetUserId\":\"%@\",\"version\":\"20260623\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", uuid, effectiveUid ?: @"", timeStamp, rand];
+    [self.jsBridge _doFlushMessageQueue:arg url:arg2];
+}
+
+-(void)collectMonopolyCreatureEnergyWithCode:(NSString *)creatureCode shortDay:(NSString *)shortDay energy:(NSInteger)energy name:(NSString *)name {
+    if (!self.jsBridge) return;
+    NSString *code = creatureCode.length ? creatureCode : @"hongshandongwuyuan#dani";
+    NSString *aName = name.length ? name : @"大鲵";
+    NSString *sDay = shortDay;
+    if (!sDay.length) {
+        NSDateFormatter *df = [[NSDateFormatter alloc] init];
+        [df setDateFormat:@"yyyyMMdd"];
+        sDay = [df stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-86400]];
+    }
+    
+    NSString *energyDesc = (energy > 0) ? [NSString stringWithFormat:@"（%ldg）", (long)energy] : @"";
+    [self recordStage:[NSString stringWithFormat:@"保护地巡护：正在通过官方专有接口收取%@能量%@...", aName, energyDesc]];
+    
+    NSString *uuid = [[NSUUID UUID] UUIDString];
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)[[NSDate date] timeIntervalSince1970] * 1000];
+    NSString *rand = [AntForestManager getNumberRandom:15];
+    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+    
+    NSString *arg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antisle.monopoly.h5.collectMonopolyCreatureEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"uniqueId\":\"%@\",\"creatureCode\":\"%@\",\"shortDay\":\"%@\",\"version\":\"20260623\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", uuid, code, sDay, timeStamp, rand];
+    [self.jsBridge _doFlushMessageQueue:arg url:arg2];
+}
+
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId energy:(NSInteger)energy name:(NSString *)name isCollected:(BOOL)isCollected {
     if ((!self.enableAutoCollect && !self.enableSelfCollect && !self.enableAutoPatrolNew) || !self.jsBridge) return;
     NSString *pType = propType ?: @"";
@@ -1072,42 +1112,35 @@ static NSString *sLastAnimalEnergyCollectedDate = nil;
         return;
     }
     
-    // 节流：两次尝试收取至少间隔 5 秒，避免高频并发
+    // 节流：两次尝试收取至少间隔 3 秒，避免高频并发
     static NSTimeInterval sLastAnimalAttemptTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - sLastAnimalAttemptTime < 5.0) return;
+    if (now - sLastAnimalAttemptTime < 3.0) return;
     sLastAnimalAttemptTime = now;
     
-    // 待收巡护伙伴能量
-    NSString *energyDesc = (energy > 0) ? [NSString stringWithFormat:@"（%ldg）", (long)energy] : @"";
-    [self recordStage:[NSString stringWithFormat:@"保护地巡护：正在收取%@能量%@...", aName, energyDesc]];
+    // 1. 针对新版保护地巡护动物（如南京红山动物园大鲵），发送官方原版 alipay.antisle.monopoly.h5.collectMonopolyCreatureEnergy
+    NSString *creatureCode = aId.length ? aId : (pType.length ? pType : @"hongshandongwuyuan#dani");
+    NSDateFormatter *df = [[NSDateFormatter alloc] init];
+    [df setDateFormat:@"yyyyMMdd"];
+    NSString *yesterdayShortDay = [df stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-86400]];
+    NSString *todayShortDay = [df stringFromDate:[NSDate date]];
     
-    NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
-    NSString *rand1 = [AntForestManager getNumberRandom:15];
-    NSString *rand2 = [AntForestManager getNumberRandom:15];
-    NSString *rand3 = [AntForestManager getNumberRandom:15];
-    NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+    // 发送昨日 shortDay（正常巡护结算为昨日产出）
+    [self collectMonopolyCreatureEnergyWithCode:creatureCode shortDay:yesterdayShortDay energy:energy name:aName];
     
-    NSString *actualPropId = pId.length ? pId : @"hongshandongwuyuan#dani";
-    NSString *actualAnimalId = aId.length ? aId : @"hongshandongwuyuan#dani";
-    NSString *actualCreatureCode = pType.length ? pType : @"hongshandongwuyuan#dani";
-    NSString *effectiveUid = self.myUserId.length ? self.myUserId : ([defaults stringForKey:@"lastKnownUserId"] ?: @"");
+    // 延时 800ms 发送今日 shortDay 容错
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self collectMonopolyCreatureEnergyWithCode:creatureCode shortDay:todayShortDay energy:energy name:aName];
+    });
     
-    // 1. 若为纯数字气泡 ID，直接发送 collectEnergy RPC
-    NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-    BOOL isNumericPropId = (pId.length > 0 && [pId rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
-    if (isNumericPropId) {
-        NSString *argCol = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"bubbleIds\":[%@],\"propId\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"bizType\":\"animal\",\"fromAct\":\"HOME\",\"version\":\"20241025\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, pId, actualPropId, actualAnimalId, actualCreatureCode, timeStamp, rand1];
-        [self.jsBridge _doFlushMessageQueue:argCol url:arg2];
+    // 2. 针对经典动物背包道具，发送官方原版 alipay.antforest.forest.h5.collectAnimalRobEnergy
+    if (pId.length && ![pId isEqualToString:creatureCode]) {
+        NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)[[NSDate date] timeIntervalSince1970] * 1000];
+        NSString *rand = [AntForestManager getNumberRandom:15];
+        NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?caprMode=sync&__webview_options__=bc%3D3194732";
+        NSString *argClassic = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antforest.forest.h5.collectAnimalRobEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"propId\":\"%@\",\"propType\":\"%@\",\"shortDay\":\"%@\",\"version\":\"20240322\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", pId, pType, yesterdayShortDay, timeStamp, rand];
+        [self.jsBridge _doFlushMessageQueue:argClassic url:arg2];
     }
-    
-    // 2. 发送官方专用的动物能量收取接口 collectAnimalRobEnergy
-    NSString *argRob1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectAnimalRobEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"propId\":\"%@\",\"propType\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"version\":\"20241025\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, actualPropId, actualCreatureCode, actualAnimalId, actualCreatureCode, timeStamp, rand2];
-    [self.jsBridge _doFlushMessageQueue:argRob1 url:arg2];
-    
-    // 3. 发送 collectAnimalEnergy
-    NSString *argRob2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.collectAnimalEnergy\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"userId\":\"%@\",\"propId\":\"%@\",\"propType\":\"%@\",\"animalId\":\"%@\",\"creatureCode\":\"%@\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", effectiveUid, actualPropId, actualCreatureCode, actualAnimalId, actualCreatureCode, timeStamp, rand3];
-    [self.jsBridge _doFlushMessageQueue:argRob2 url:arg2];
 }
 
 -(void)receiveAnimalEnergyWithPropId:(NSString *)propId propType:(NSString *)propType animalId:(NSString *)animalId {
@@ -1115,7 +1148,7 @@ static NSString *sLastAnimalEnergyCollectedDate = nil;
 }
 
 -(void)receiveAnimalPartnerEnergy {
-    // 留空由 queryHomePage 回包中的 usingUserPropsNew 精准驱动
+    [self queryUsingCreatureInfo];
 }
 
 static NSTimeInterval lastMyBubblesQueryTime = 0;
@@ -1136,6 +1169,7 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
     
     if([self jsBridge]) {
         [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
+        [self queryUsingCreatureInfo];
     }
     
     [NSThread sleepForTimeInterval:0.18];
@@ -3383,16 +3417,31 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 [[NSUserDefaults standardUserDefaults] setObject:curUid forKey:@"lastKnownUserId"];
             }
             
-            // 巡护动物能量球成功回包校验 (只要回包带 collectedEnergy > 0 或匹配相关 opType)
+            // 巡护动物能量球成功回包校验 (支持新版 collectMonopolyCreatureEnergy 与经典 collectAnimalRobEnergy)
             NSInteger collected = [resData[@"collectedEnergy"] integerValue];
-            if (collected > 0 || [opType containsString:@"collectAnimalRobEnergy"] || ([opType containsString:@"collectEnergy"] && [dict[@"bizType"] isEqualToString:@"animal"])) {
+            if (!collected && [dict[@"collectedEnergy"] respondsToSelector:@selector(integerValue)]) {
+                collected = [dict[@"collectedEnergy"] integerValue];
+            }
+            if ([opType containsString:@"collectMonopolyCreatureEnergy"] || [opType containsString:@"collectAnimalRobEnergy"]) {
                 NSString *resResultCode = resData[@"resultCode"] ?: dict[@"resultCode"];
-                if ([resResultCode isEqualToString:@"SUCCESS"] || [resData[@"success"] boolValue] || collected > 0) {
+                BOOL isSuccess = ([resResultCode isEqualToString:@"SUCCESS"] || [resData[@"success"] boolValue] || [dict[@"success"] boolValue] || collected > 0);
+                if (isSuccess) {
                     NSString *today = getCurrentDateString();
                     [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"todayAnimalEnergyCollectedDate"];
                     [[NSUserDefaults standardUserDefaults] synchronize];
-                    [self recordStage:[NSString stringWithFormat:@"收取 · 巡护动物（大鲵）能量球已成功收取（%ldg）！", (long)(collected > 0 ? collected : 30)]];
-                } else if ([resResultCode isEqualToString:@"ENERGY_CAN_NOT_COLLECT"]) {
+                    NSInteger displayEnergy = (collected > 0) ? collected : 30;
+                    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+                    if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
+                        self.todayCollectedEnergy = 0;
+                        [defaults setObject:getCurrentDateString() forKey:@"todayCollectedEnergyDate"];
+                    }
+                    self.totalCollectedEnergy += displayEnergy;
+                    self.todayCollectedEnergy += displayEnergy;
+                    [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
+                    [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
+                    [defaults synchronize];
+                    [self recordStage:[NSString stringWithFormat:@"收取 · 巡护动物（大鲵）能量球已成功收取：%ldg（今日累计 %ldg）", (long)displayEnergy, (long)self.todayCollectedEnergy]];
+                } else if ([resResultCode isEqualToString:@"ENERGY_CAN_NOT_COLLECT"] || [resResultCode isEqualToString:@"ENERGY_HAS_COLLECTED"] || [resResultCode isEqualToString:@"ENERGY_NOT_EXIST"]) {
                     NSString *today = getCurrentDateString();
                     [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"todayAnimalEnergyCollectedDate"];
                     [[NSUserDefaults standardUserDefaults] synchronize];
@@ -3400,17 +3449,28 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
             }
             
-            // 自动检测森林伙伴/巡护动物 (userCreatureVO)
+            // 自动检测森林伙伴/巡护动物 (userCreatureVO，来自 queryUsingCreatureInfo 或 queryHomePage)
             NSDictionary *creatureVO = resData[@"userCreatureVO"] ?: dict[@"userCreatureVO"];
             if ([creatureVO isKindOfClass:NSDictionary.class]) {
                 NSString *cCode = creatureVO[@"creatureCode"] ?: @"hongshandongwuyuan#dani";
                 NSString *cName = creatureVO[@"displayInfo"][@"creatureNameText"] ?: @"大鲵";
-                NSInteger cEnergy = [creatureVO[@"levelRobEnergy"] integerValue] ?: [creatureVO[@"initialRobEnergy"] integerValue];
+                NSDictionary *robVO = [creatureVO[@"robEnergyVO"] isKindOfClass:NSDictionary.class] ? creatureVO[@"robEnergyVO"] : nil;
+                NSInteger yesterdayEnergy = [robVO[@"yesterdayRobEnergy"] integerValue];
+                NSString *yesterdayShortDay = [robVO[@"yesterdayShortDay"] isKindOfClass:NSString.class] ? robVO[@"yesterdayShortDay"] : @"";
+                BOOL energyIsCollect = [robVO[@"energyIsCollect"] boolValue];
+                
+                NSInteger cEnergy = yesterdayEnergy ?: ([creatureVO[@"levelRobEnergy"] integerValue] ?: [creatureVO[@"initialRobEnergy"] integerValue]);
                 if (cEnergy <= 0) cEnergy = 30;
                 
                 NSString *today = getCurrentDateString();
                 NSString *savedAnimalDate = [[NSUserDefaults standardUserDefaults] stringForKey:@"todayAnimalEnergyCollectedDate"];
-                if (![today isEqualToString:savedAnimalDate]) {
+                
+                if (yesterdayEnergy > 0 && !energyIsCollect) {
+                    [self recordStage:[NSString stringWithFormat:@"保护地巡护：探测到%@头顶巡护能量（%ldg），正在通过官方专有接口收取...", cName, (long)yesterdayEnergy]];
+                    [self collectMonopolyCreatureEnergyWithCode:cCode shortDay:yesterdayShortDay energy:yesterdayEnergy name:cName];
+                } else if (energyIsCollect || [today isEqualToString:savedAnimalDate]) {
+                    // 今日已收
+                } else {
                     [self receiveAnimalEnergyWithPropId:cCode propType:cCode animalId:cCode energy:cEnergy name:cName isCollected:NO];
                 }
             }
