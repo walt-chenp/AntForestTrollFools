@@ -1404,6 +1404,9 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [lowerType containsString:@"widget_"] ||
         [lowerType containsString:@"mhjlr"] ||
         [lowerType containsString:@"xjskp"] ||
+        [lowerType containsString:@"wdhysj"] ||
+        [lowerType containsString:@"zhxf"] ||
+        [lowerType containsString:@"yxzy"] ||
         [lowerType containsString:@"_zhwufu"]) {
         return NO;
     }
@@ -1427,8 +1430,17 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [cleanTitle containsString:@"一键浇水"] ||
         [cleanTitle containsString:@"添加组件"] ||
         [cleanTitle containsString:@"淘宝签到"] ||
+        [cleanTitle containsString:@"玩游戏得"] ||
+        [cleanTitle containsString:@"居民订单"] ||
+        [cleanTitle containsString:@"升级建筑"] ||
+        [cleanTitle containsString:@"闯关"] ||
+        [cleanTitle containsString:@"通过1关"] ||
         [cleanTitle containsString:@"向僵尸开炮"] ||
         [cleanTitle containsString:@"梦幻经理人"] ||
+        [cleanTitle containsString:@"造化仙府"] ||
+        [cleanTitle containsString:@"源星战域"] ||
+        [cleanTitle containsString:@"我的花园"] ||
+        [cleanTitle containsString:@"花园小镇"] ||
         [cleanTitle containsString:@"连续"] ||
         [cleanTitle containsString:@"清理垃圾"] ||
         [cleanTitle containsString:@"帮好友清理"] ||
@@ -2348,9 +2360,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
             
-            // 针对森林寻宝或带有外链跳转的互动任务，单次失败不永久拉黑，允许重新尝试；其他纯失败任务若非 FINISHED 则跳过
-            BOOL isDrawOrInteractionTask = ([sceneCode containsString:@"DRAW"] || [taskType containsString:@"XLIGHT"] || [taskType containsString:@"SQYT"]);
-            if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"] && !isDrawOrInteractionTask) {
+            // 针对失败任务，只要非 FINISHED 则坚决跳过，杜绝重复排队重试导致死循环
+            if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"]) {
                 continue;
             }
             
