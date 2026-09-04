@@ -1349,8 +1349,6 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [taskType isEqualToString:@"TEST_LEAF_CONVERT_TASK"] ||
         [taskType isEqualToString:@"widget_0511"] ||
         [taskType isEqualToString:@"ONE_CLICK_WATERING_V1"] ||
-        [taskType containsString:@"taobaoqiandao"] ||
-        [taskType containsString:@"FOREST_ACTIVITY_DRAW_SQYT"] ||
         [taskType containsString:@"10THjiaoshui"] ||
         [taskType containsString:@"10ZN_JS"]) {
         return NO;
@@ -1729,6 +1727,24 @@ static BOOL isSafeAIFishTask(NSString *taskType, NSString *title) {
     [self receiveVitalityTaskAward:taskType sceneCode:sceneCode.length ? sceneCode : @"ANTOCEAN_TASK" taskTitle:title awardName:awardName];
 }
 
+-(void)claimVitalityStageAwardsIfNeeded {
+    PSDJsBridge *bridge = self.rewardTaskBridge ?: self.jsBridge;
+    if (!bridge) return;
+    
+    // 现代任务中心“今日累计奖励”（+40g, +60g, +100g 等阶段累计奖励）
+    NSArray *stageTaskTypes = @[
+        @"acc_task_energy_1", @"acc_task_energy_2", @"acc_task_energy_3",
+        @"acc_task_energy_40", @"acc_task_energy_60", @"acc_task_energy_100",
+        @"ANTFOREST_ACC_TASK_40", @"ANTFOREST_ACC_TASK_60", @"ANTFOREST_ACC_TASK_100",
+        @"ANTFOREST_ACC_TASK_1", @"ANTFOREST_ACC_TASK_2", @"ANTFOREST_ACC_TASK_3",
+        @"STAGE_AWARD_1", @"STAGE_AWARD_2", @"STAGE_AWARD_3",
+        @"LADDER_AWARD_1", @"LADDER_AWARD_2", @"LADDER_AWARD_3"
+    ];
+    for (NSString *st in stageTaskTypes) {
+        [self receiveVitalityTaskAward:st sceneCode:@"ANTFOREST_VITALITY_TASK" taskTitle:@"今日累计阶梯奖励" awardName:@"阶梯能量"];
+    }
+}
+
 - (void)notifyActiveH5PageToRefresh {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSMutableSet *targets = [NSMutableSet set];
@@ -1809,6 +1825,7 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                                 [self notifyActiveH5PageToRefresh];
                             });
                         } else {
+                            [self claimVitalityStageAwardsIfNeeded];
                             [self recordStage:@"领奖励：本批次任务已执行完毕，2.5秒后自动刷新拉取新解锁任务与阶梯大奖..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                 [self queryVitalityTaskListWithForce:YES];
@@ -1821,6 +1838,7 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                         } else if ([sLastExecutedSceneCode containsString:@"OCEAN"]) {
                             [self recordStage:@"神奇海洋：本轮所有任务与领拼图操作已全部处理完毕"];
                         } else {
+                            [self claimVitalityStageAwardsIfNeeded];
                             [self recordStage:@"领奖励与森林寻宝：本轮所有任务与奖励已全部处理完毕"];
                         }
                         [self notifyActiveH5PageToRefresh];
@@ -2077,6 +2095,12 @@ static BOOL isMultiStageTaskFromDict(NSDictionary *taskDict, NSDictionary *baseI
     if (limit > 1 && received < limit) {
         return YES;
     }
+    
+    NSInteger taskRequire = [baseInfo[@"taskRequire"] integerValue];
+    NSInteger taskProgress = [baseInfo[@"taskProgress"] integerValue];
+    if (taskRequire > 1 && taskProgress < taskRequire) {
+        return YES;
+    }
     return NO;
 }
 
@@ -2236,12 +2260,16 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         
         // 2. 收集任务列表
         NSMutableArray<NSDictionary *> *allTaskList = [NSMutableArray array];
-        NSArray *forestTasksNew = [data[@"forestTasksNew"] isKindOfClass:NSArray.class] ? data[@"forestTasksNew"] : nil;
-        if (forestTasksNew.count > 0) {
-            for (id g in forestTasksNew) {
-                if ([g isKindOfClass:NSDictionary.class]) {
-                    NSArray *subList = g[@"taskInfoList"];
-                    if ([subList isKindOfClass:NSArray.class]) [allTaskList addObjectsFromArray:subList];
+        NSArray *candidateGroupKeys = @[@"forestTasksNew", @"stageTaskList", @"stageInfoList", @"stagePrizeList", @"stageAwards", @"accumulateTasks", @"ladderTasks", @"taskGroupList", @"forestTasks"];
+        for (NSString *key in candidateGroupKeys) {
+            NSArray *arr = [data[key] isKindOfClass:NSArray.class] ? data[key] : nil;
+            if (arr.count > 0) {
+                for (id g in arr) {
+                    if ([g isKindOfClass:NSDictionary.class]) {
+                        NSArray *subList = g[@"taskInfoList"] ?: g[@"taskList"] ?: g[@"subTaskList"];
+                        if ([subList isKindOfClass:NSArray.class]) [allTaskList addObjectsFromArray:subList];
+                        else if (g[@"taskBaseInfo"]) [allTaskList addObject:g];
+                    }
                 }
             }
         }
@@ -2429,7 +2457,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         @"taskType": taskType,
                         @"sceneCode": sceneCode,
                         @"title": taskTitle,
-                        @"awardName": awardName
+                        @"awardName": awardName,
+                        @"isMultiStage": @(isMultiIncomplete)
                     }];
                 }
             }
@@ -3335,7 +3364,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"todayAnimalEnergyCollectedDate"];
                     [[NSUserDefaults standardUserDefaults] synchronize];
                     [self recordStage:[NSString stringWithFormat:@"收取 · 巡护动物（大鲵）能量球已成功收取（%ldg）！", (long)(collected > 0 ? collected : 30)]];
-                } else if ([resResultCode isEqualToString:@"SYSTEM_FAILURE"] || [dict[@"resultDesc"] containsString:@"开小差"] || [resData[@"resultDesc"] containsString:@"开小差"] || [resResultCode isEqualToString:@"ENERGY_CAN_NOT_COLLECT"]) {
+                } else if ([resResultCode isEqualToString:@"ENERGY_CAN_NOT_COLLECT"]) {
                     NSString *today = getCurrentDateString();
                     [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"todayAnimalEnergyCollectedDate"];
                     [[NSUserDefaults standardUserDefaults] synchronize];
@@ -3572,20 +3601,20 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
                 
                 // 匹配 wateringBubbles（包含好友浇水赠能、保护地巡护动物每日巡护能量球）
-                NSArray *wateringBubbles = [dict objectForKey:@"wateringBubbles"];
+                NSArray *wateringBubbles = dict[@"wateringBubbles"] ?: resData[@"wateringBubbles"];
                 if ([wateringBubbles isKindOfClass:NSArray.class]) {
                     for (NSDictionary *wb in wateringBubbles) {
                         if (![wb isKindOfClass:NSDictionary.class]) continue;
-                        NSNumber *bidNum = wb[@"id"];
+                        NSNumber *bidNum = wb[@"id"] ?: wb[@"bubbleId"];
                         if (bidNum && [bidNum longLongValue] > 0) {
                             NSString *bid = [bidNum stringValue];
-                            NSString *bizType = wb[@"bizType"] ?: @"";
-                            NSString *fullEnergy = [NSString stringWithFormat:@"%@", wb[@"fullEnergy"] ?: @""];
+                            NSString *bizType = [NSString stringWithFormat:@"%@", wb[@"bizType"] ?: @""];
+                            NSString *fullEnergy = [NSString stringWithFormat:@"%@", wb[@"fullEnergy"] ?: wb[@"energy"] ?: @""];
                             NSString *giverUid = wb[@"userId"] ?: @"";
                             
-                            // 仅本人首页的赠能/巡护能量，或好友页明确允许代收(canHelpCollect)才收
-                            if (mine || [wb[@"canHelpCollect"] isEqualToNumber:@1]) {
-                                NSString *targetUid = mine ? self.myUserId : (userId ?: self.myUserId);
+                            // 仅本人首页的赠能/巡护能量，或动物巡护能量，或好友页明确允许代收(canHelpCollect)才收
+                            if (mine || [bizType containsString:@"animal"] || [wb[@"canHelpCollect"] isEqualToNumber:@1]) {
+                                NSString *targetUid = (mine || [bizType containsString:@"animal"]) ? (self.myUserId.length ? self.myUserId : userId) : (userId ?: self.myUserId);
                                 NSString *log = [NSString stringWithFormat:@"%@\n找到赠能/巡护能量球(%@g) 收取, %@", giverUid.length ? [[AntForestManager sharedInstance] getUserName:giverUid] : [[AntForestManager sharedInstance] getUserName:targetUid], fullEnergy, bid];
                                 [[AntForestManager sharedInstance] addLog:log];
                                 [self recordStage:[NSString stringWithFormat:@"发现赠能/巡护能量（%@g，ID：%@）并自动收取", fullEnergy, bid]];
