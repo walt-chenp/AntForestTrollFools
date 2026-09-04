@@ -1939,7 +1939,7 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                 @synchronized(self) {
                     BOOL isMultiIncomplete = isMultiStageIncompleteTask(title, 0, 0) || [item[@"isMultiStage"] boolValue];
                     if (!isMultiIncomplete) {
-                        if ([gDailyCompletedTasks containsObject:taskKey]) {
+                        if (![action isEqualToString:@"receive"] && [gDailyCompletedTasks containsObject:taskKey]) {
                             isDone = YES;
                         } else if (![action isEqualToString:@"receive"] && [gDailyFailedTasks containsObject:taskKey]) {
                             isDone = YES;
@@ -2380,7 +2380,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             NSInteger taskRequire = [baseInfo[@"taskRequire"] integerValue];
             NSInteger taskProgress = [baseInfo[@"taskProgress"] integerValue];
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire) || isMultiStageTaskFromDict(t, baseInfo, bizInfo);
-            if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"]) {
+            if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"] || [taskStatus isEqualToString:@"FINISHED"] || [taskStatus isEqualToString:@"CAN_RECEIVE"]) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
@@ -2389,8 +2389,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 }
             }
             
-            // 如果今日已完成且非多阶段未完成任务（且服务端明确非 TODO），坚决跳过，绝不重复排队
-            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete && ![taskStatus isEqualToString:@"TODO"]) {
+            // 如果今日已完成且非多阶段未完成任务（且服务端明确非 TODO 且非待领奖），坚决跳过，绝不重复排队
+            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete && ![taskStatus isEqualToString:@"TODO"] && ![taskStatus isEqualToString:@"FINISHED"] && ![taskStatus isEqualToString:@"CAN_RECEIVE"]) {
                 continue;
             }
             
@@ -2618,11 +2618,38 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             if (!self.enableAutoOceanTasks) continue;
             
             NSString *taskKey = [NSString stringWithFormat:@"%@:%@", sceneCode, taskType];
+            BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, 0, 0) || isMultiStageTaskFromDict(t, nil, bizInfo);
+            
+            BOOL canClaim = [taskStatus isEqualToString:@"FINISHED"] ||
+                            [taskStatus isEqualToString:@"CAN_RECEIVE"] ||
+                            ([taskJumpBtn containsString:@"领"] && ![taskStatus isEqualToString:@"RECEIVED"]);
+            
+            if (canClaim) {
+                @synchronized(self) {
+                    if ([gDailyCompletedTasks containsObject:taskKey]) {
+                        [gDailyCompletedTasks removeObject:taskKey];
+                    }
+                    if ([gDailyFailedTasks containsObject:taskKey]) {
+                        [gDailyFailedTasks removeObject:taskKey];
+                    }
+                    saveDailyTaskCache();
+                }
+                [tasksToQueue addObject:@{
+                    @"action": @"receive",
+                    @"taskType": taskType,
+                    @"sceneCode": sceneCode,
+                    @"title": taskTitle,
+                    @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
+                    @"scenePrefix": @"神奇海洋",
+                    @"isMultiStage": @(isMultiIncomplete)
+                }];
+                continue;
+            }
+            
             NSDictionary *rights = [t[@"taskRights"] isKindOfClass:NSDictionary.class] ? t[@"taskRights"] : nil;
             NSInteger alreadyReceive = [rights[@"alreadyReceiveAwardCount"] integerValue];
             NSInteger rightsTimesLimit = [rights[@"rightsTimesLimit"] integerValue];
             if (rightsTimesLimit <= 0) rightsTimesLimit = [t[@"rightsTimesLimit"] integerValue];
-            if (alreadyReceive <= 0) alreadyReceive = [t[@"rightsTimes"] integerValue];
             if (alreadyReceive <= 0) {
                 id ext = t[@"extend"];
                 if ([ext isKindOfClass:NSString.class] && [ext containsString:@"alreadyReceiveAwardCount"]) {
@@ -2639,7 +2666,6 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
             
-            BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, 0, 0) || isMultiStageTaskFromDict(t, nil, bizInfo);
             if ([taskStatus isEqualToString:@"TODO"] || isMultiIncomplete) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
@@ -2651,40 +2677,47 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     saveDailyTaskCache();
                 }
             }
-            if ([gDailyFailedTasks containsObject:taskKey] && ![taskStatus isEqualToString:@"FINISHED"]) {
+            if ([gDailyFailedTasks containsObject:taskKey]) {
+                continue;
+            }
+            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete) {
                 continue;
             }
             
-            BOOL canClaim = [taskStatus isEqualToString:@"FINISHED"] ||
-                            [taskStatus isEqualToString:@"CAN_RECEIVE"] ||
-                            ([taskJumpBtn containsString:@"领"] && ![taskStatus isEqualToString:@"RECEIVED"]);
-            
-            if (canClaim) {
-                [tasksToQueue addObject:@{
-                    @"action": @"receive",
-                    @"taskType": taskType,
-                    @"sceneCode": sceneCode,
-                    @"title": taskTitle,
-                    @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
-                    @"scenePrefix": @"神奇海洋",
-                    @"isMultiStage": @(isMultiIncomplete)
-                }];
-            } else if ([taskStatus isEqualToString:@"TODO"]) {
+            if ([taskStatus isEqualToString:@"TODO"]) {
                 if (isSafeOceanTask(taskType, taskTitle)) {
                     NSInteger browseSec = extractTaskBrowseSeconds(t, bizInfo, taskTitle);
-                    NSString *action = (browseSec > 0) ? @"browse" : @"finish";
-                    NSString *jumpUrl = bizInfo[@"targetUrl"] ?: bizInfo[@"jumpUrl"] ?: @"";
-                    [tasksToQueue addObject:@{
-                        @"action": action,
-                        @"taskType": taskType,
-                        @"sceneCode": sceneCode,
-                        @"title": taskTitle,
-                        @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
-                        @"scenePrefix": @"神奇海洋",
-                        @"browseSeconds": @(browseSec),
-                        @"jumpUrl": jumpUrl,
-                        @"isMultiStage": @(isMultiIncomplete)
-                    }];
+                    if (browseSec > 0) {
+                        NSString *jumpUrl = bizInfo[@"targetUrl"] ?: bizInfo[@"jumpUrl"] ?: @"";
+                        [tasksToQueue addObject:@{
+                            @"action": @"browse",
+                            @"taskType": taskType,
+                            @"sceneCode": sceneCode,
+                            @"title": taskTitle,
+                            @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
+                            @"scenePrefix": @"神奇海洋",
+                            @"browseSeconds": @(browseSec),
+                            @"jumpUrl": jumpUrl,
+                            @"isMultiStage": @(isMultiIncomplete)
+                        }];
+                    } else {
+                        [tasksToQueue addObject:@{
+                            @"action": @"finish",
+                            @"taskType": taskType,
+                            @"sceneCode": sceneCode,
+                            @"title": taskTitle,
+                            @"isMultiStage": @(isMultiIncomplete)
+                        }];
+                        [tasksToQueue addObject:@{
+                            @"action": @"receive",
+                            @"taskType": taskType,
+                            @"sceneCode": sceneCode,
+                            @"title": taskTitle,
+                            @"awardName": [awardType isEqualToString:@"RIGHTS"] ? @"拼图碎片" : @"海洋奖励",
+                            @"scenePrefix": @"神奇海洋",
+                            @"isMultiStage": @(isMultiIncomplete)
+                        }];
+                    }
                 } else {
                     NSLog(@"🌊 [神奇海洋] 任务【%@】属于互动型/答题/连续签到/外部游戏任务，不支持直接RPC完成，已自动跳过", taskTitle);
                 }
@@ -2699,10 +2732,10 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         @synchronized(self) {
             if (!vitalityTaskQueue) vitalityTaskQueue = [NSMutableArray array];
             for (NSDictionary *task in tasksToQueue) {
-                NSString *tk = [NSString stringWithFormat:@"%@:%@", task[@"sceneCode"], task[@"taskType"]];
+                NSString *tk = [NSString stringWithFormat:@"%@:%@:%@", task[@"sceneCode"], task[@"taskType"], task[@"action"]];
                 BOOL alreadyInQueue = NO;
                 for (NSDictionary *q in vitalityTaskQueue) {
-                    NSString *qk = [NSString stringWithFormat:@"%@:%@", q[@"sceneCode"], q[@"taskType"]];
+                    NSString *qk = [NSString stringWithFormat:@"%@:%@:%@", q[@"sceneCode"], q[@"taskType"], q[@"action"]];
                     if ([qk isEqualToString:tk]) { alreadyInQueue = YES; break; }
                 }
                 if (!alreadyInQueue) {
