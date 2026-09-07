@@ -84,14 +84,23 @@ static BOOL isEarnEnergyURL(NSURL *url) {
     return [text containsString:@"forcewhackmole=y"] || [text containsString:@"whackmole"] || [text containsString:@"earnenergy"] || [text containsString:@"earn_energy"] || [text containsString:@"earn.html"] || [text containsString:@"60000002.h5app.alipay.com"];
 }
 
+static BOOL isLotteryURL(NSURL *url) {
+    if (!url) return NO;
+    NSString *text = [url.absoluteString lowercaseString];
+    return [text containsString:@"180020010001279274"] ||
+           [text containsString:@"lotterymachine"] ||
+           [text containsString:@"antforestdraw"];
+}
+
 static BOOL isRewardTaskURL(NSURL *url) {
     if (!url) return NO;
     if (isEnergyRainURL(url)) return NO;
     if (isForestHomeURL(url)) return NO;
+    if (isLotteryURL(url)) return NO;
     NSString *text = [url.absoluteString lowercaseString];
-    return [text containsString:@"lotterymachine"] ||
+    return [text containsString:@"lottery"] ||
+           [text containsString:@"draw"] ||
            [text containsString:@"vitality"] ||
-           [text containsString:@"180020010001279274"] ||
            [text containsString:@"exchange.html"];
 }
 
@@ -105,6 +114,18 @@ static BOOL isAIFishURL(NSURL *url) {
     if (!url) return NO;
     NSString *text = [url.absoluteString lowercaseString];
     return [text containsString:@"180020010001290531"] || [text containsString:@"aifish"] || [text containsString:@"antaifish"];
+}
+
+static BOOL isFarmURL(NSURL *url) {
+    if (!url) return NO;
+    if ([AntForestManager isManorURL:url]) return NO;
+    NSString *text = [url.absoluteString lowercaseString];
+    return [text containsString:@"alipayfarm"] ||
+           [text containsString:@"tmfarm"] ||
+           [text containsString:@"babafarm"] ||
+           [text containsString:@"orchard"] ||
+           [text containsString:@"180020010001263018"] ||
+           [text containsString:@"68687599"];
 }
 
 static id rewardBridgeFromController(id controller) {
@@ -431,10 +452,15 @@ static void installForestHomeCollector(__unused id controller) {
 
 static BOOL isNewPatrolURL(NSURL *url, id controller) {
     NSString *str = url.absoluteString ? url.absoluteString : @"";
+    NSString *lowerStr = [str lowercaseString];
     if ([str containsString:@"180020010001293606"] ||
-        [str containsString:@"forest-guardian-v2"] ||
         [str containsString:@"2060090000398301"] ||
-        [str containsString:@"monopoly"]) {
+        [lowerStr containsString:@"forest-guardian"] ||
+        [lowerStr containsString:@"guardian"] ||
+        [lowerStr containsString:@"monopoly"] ||
+        [lowerStr containsString:@"patrol"] ||
+        [lowerStr containsString:@"antisle"] ||
+        [lowerStr containsString:@"hsdwy"]) {
         return YES;
     }
     for (NSString *sel in @[@"appId", @"appID", @"currentAppId", @"appName", @"name", @"title"]) {
@@ -442,9 +468,18 @@ static BOOL isNewPatrolURL(NSURL *url, id controller) {
         if ([controller respondsToSelector:s]) {
             id val = ((id (*)(id, SEL))objc_msgSend)(controller, s);
             NSString *valStr = [val isKindOfClass:NSString.class] ? val : [val description];
+            NSString *lowerVal = [valStr lowercaseString];
             if ([valStr containsString:@"180020010001293606"] ||
                 [valStr containsString:@"2060090000398301"] ||
-                [valStr containsString:@"monopoly"]) return YES;
+                [lowerVal containsString:@"monopoly"] ||
+                [lowerVal containsString:@"patrol"] ||
+                [lowerVal containsString:@"antisle"] ||
+                [lowerVal containsString:@"hsdwy"] ||
+                [valStr containsString:@"保护地"] ||
+                [valStr containsString:@"巡护"] ||
+                [valStr containsString:@"大富翁"] ||
+                [valStr containsString:@"南京红山"] ||
+                [valStr containsString:@"红山动物园"]) return YES;
         }
     }
     return NO;
@@ -463,6 +498,7 @@ static void installMonopolyAutoPilot(id controller) {
     "window.__afMonopolyInstalled=true;"
     "function sendLog(data){try{console.log('PATROL_LOG:'+JSON.stringify(data))}catch(e){}};"
     "let state={diceCount:-1,isBusy:false,lastActionTime:0,reportedDone:false};"
+    "let openedDrawerOnce=false;"
     "function triggerTap(el){"
     "if(!el)return;"
     "const r=el.getBoundingClientRect();"
@@ -496,6 +532,16 @@ static void installMonopolyAutoPilot(id controller) {
     "if(kw.length>=2&&(txt.startsWith(kw)||txt.endsWith(kw)||(kw==='GO'&&txt.toUpperCase()==='GO')||(kw==='前进'&&txt==='前进'))){triggerTap(el);return kw;}"
     "}}"
     "return null;}"
+    "function tryOpenDrawerOnce(){"
+    "if(window.__afMonopolyDrawerEverOpened)return;"
+    "const isDrawerOpen=Array.from(document.querySelectorAll('*')).some(el=>{"
+    "const t=(el.innerText||el.textContent||'').trim();"
+    "return t==='做任务领骰子'||t==='做任务得机会'||t==='更多巡护步数'||t==='巡护任务'||t==='做任务领步数'||t.includes('做任务领骰子')||t.includes('更多巡护步数');"
+    "});"
+    "if(isDrawerOpen){window.__afMonopolyDrawerEverOpened=true;return;}"
+    "const kw=findAndClick(['更多步数','更多巡护步数','领步数','赚步数','做任务领步数','做任务领骰子','做任务得机会','领骰子','做任务','巡护步数','巡护任务'],50);"
+    "if(kw){window.__afMonopolyDrawerEverOpened=true;sendLog({type:'STATUS',msg:'保护地大富翁：已自动点击【'+kw+'】展开步数任务抽屉'});}"
+    "}"
     "function checkIsOutOfDice(){"
     "if(state.diceCount===0)return true;"
     "const isTaskDrawerVisible=Array.from(document.querySelectorAll('*')).some(el=>{"
@@ -565,6 +611,7 @@ static void installMonopolyAutoPilot(id controller) {
     "};"
     "}"
     "hookBridge();"
+    "setTimeout(tryOpenDrawerOnce,600);"
     "setTimeout(monopolyStep,600);"
     "setInterval(monopolyStep,1200);"
     "sendLog({type:'STATUS',msg:'保护地大富翁：自动掷骰巡护已就绪'});"
@@ -1275,16 +1322,22 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
     UIButton *oceanTasks = [self settingsButtonWithTitle:@"神奇海洋（自动任务）" detail:@"自动完成海洋日常任务与拼图领奖" icon:@"sparkles.rectangle.stack.fill" action:nil];
     UISwitch *oceanTasksSwitch = [[UISwitch alloc] init]; oceanTasksSwitch.on = AntForestManager.sharedInstance.enableAutoOceanTasks; oceanTasksSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanTasksSwitch addTarget:self action:@selector(toggleAutoOceanTasks:) forControlEvents:UIControlEventValueChanged]; [oceanTasks addSubview:oceanTasksSwitch];
-    UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:@"自动签到、浏览任务、阶梯大奖与寻宝抽奖任务" icon:@"gift.fill" action:nil];
+    UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:@"自动浏览任务、奖励领取、森林寻宝需手动进入才能触发自动浏览任务。" icon:@"gift.fill" action:nil];
     UISwitch *rewardSwitch = [[UISwitch alloc] init]; rewardSwitch.on = AntForestManager.sharedInstance.enableAutoRewardTasks; rewardSwitch.translatesAutoresizingMaskIntoConstraints = NO; [rewardSwitch addTarget:self action:@selector(toggleAutoRewardTasks:) forControlEvents:UIControlEventValueChanged]; [reward addSubview:rewardSwitch];
     
     UIButton *aiFish = [self settingsButtonWithTitle:@"AI摸鱼（任务与机会）" detail:@"手动进入AI摸鱼自动完成奖励任务并领取" icon:@"fish.fill" action:nil];
     UISwitch *aiFishSwitch = [[UISwitch alloc] init]; aiFishSwitch.on = AntForestManager.sharedInstance.enableAutoAIFish; aiFishSwitch.translatesAutoresizingMaskIntoConstraints = NO; [aiFishSwitch addTarget:self action:@selector(toggleAutoAIFish:) forControlEvents:UIControlEventValueChanged]; [aiFish addSubview:aiFishSwitch];
     
+    UIButton *farmTasks = [self settingsButtonWithTitle:@"芭芭农场（做任务集肥料）" detail:@"手动进入芭芭农场后自动做部分浏览任务、游戏、连续签到和肥料领取。" icon:@"leaf.circle.fill" action:nil];
+    UISwitch *farmTasksSwitch = [[UISwitch alloc] init]; farmTasksSwitch.on = AntForestManager.sharedInstance.enableAutoFarmTasks; farmTasksSwitch.translatesAutoresizingMaskIntoConstraints = NO; [farmTasksSwitch addTarget:self action:@selector(toggleAutoFarmTasks:) forControlEvents:UIControlEventValueChanged]; [farmTasks addSubview:farmTasksSwitch];
+    
+    UIButton *manorTasks = [self settingsButtonWithTitle:@"蚂蚁庄园" detail:@"手动进入蚂蚁庄园后点击领饲料自动做部分任务、喂养与收饲料" icon:@"oval.portrait.fill" action:nil];
+    UISwitch *manorTasksSwitch = [[UISwitch alloc] init]; manorTasksSwitch.on = AntForestManager.sharedInstance.enableAutoManor; manorTasksSwitch.translatesAutoresizingMaskIntoConstraints = NO; [manorTasksSwitch addTarget:self action:@selector(toggleAutoManor:) forControlEvents:UIControlEventValueChanged]; [manorTasks addSubview:manorTasksSwitch];
+    
     UIButton *patrolNew = [self settingsButtonWithTitle:@"新版保护地（大富翁）" detail:@"手动进入保护地后自动完成更多巡护步数任务" icon:@"dice.fill" action:nil];
     UISwitch *patrolNewSwitch = [[UISwitch alloc] init]; patrolNewSwitch.on = AntForestManager.sharedInstance.enableAutoPatrolNew; patrolNewSwitch.translatesAutoresizingMaskIntoConstraints = NO; [patrolNewSwitch addTarget:self action:@selector(toggleAutoPatrolNew:) forControlEvents:UIControlEventValueChanged]; [patrolNew addSubview:patrolNewSwitch];
     
-    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:oceanTasks]; [contentView addSubview:reward]; [contentView addSubview:aiFish]; [contentView addSubview:patrolNew];
+    [contentView addSubview:schedule]; [contentView addSubview:step]; [contentView addSubview:water]; [contentView addSubview:revive]; [contentView addSubview:earn]; [contentView addSubview:ocean]; [contentView addSubview:oceanTasks]; [contentView addSubview:reward]; [contentView addSubview:aiFish]; [contentView addSubview:farmTasks]; [contentView addSubview:manorTasks]; [contentView addSubview:patrolNew];
     [NSLayoutConstraint activateConstraints:@[
         [contentView.topAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.topAnchor],
         [contentView.leadingAnchor constraintEqualToAnchor:scrollView.contentLayoutGuide.leadingAnchor],
@@ -1301,7 +1354,9 @@ static void installEarnEnergyCollector(id controller) {
         [oceanTasks.topAnchor constraintEqualToAnchor:ocean.bottomAnchor constant:12], [oceanTasks.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [oceanTasks.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [oceanTasks.heightAnchor constraintEqualToConstant:70],
         [reward.topAnchor constraintEqualToAnchor:oceanTasks.bottomAnchor constant:12], [reward.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [reward.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [reward.heightAnchor constraintEqualToConstant:70],
         [aiFish.topAnchor constraintEqualToAnchor:reward.bottomAnchor constant:12], [aiFish.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [aiFish.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [aiFish.heightAnchor constraintEqualToConstant:70],
-        [patrolNew.topAnchor constraintEqualToAnchor:aiFish.bottomAnchor constant:12], [patrolNew.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [patrolNew.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [patrolNew.heightAnchor constraintEqualToConstant:70],
+        [farmTasks.topAnchor constraintEqualToAnchor:aiFish.bottomAnchor constant:12], [farmTasks.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [farmTasks.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [farmTasks.heightAnchor constraintEqualToConstant:70],
+        [manorTasks.topAnchor constraintEqualToAnchor:farmTasks.bottomAnchor constant:12], [manorTasks.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [manorTasks.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [manorTasks.heightAnchor constraintEqualToConstant:70],
+        [patrolNew.topAnchor constraintEqualToAnchor:manorTasks.bottomAnchor constant:12], [patrolNew.leadingAnchor constraintEqualToAnchor:schedule.leadingAnchor], [patrolNew.trailingAnchor constraintEqualToAnchor:schedule.trailingAnchor], [patrolNew.heightAnchor constraintEqualToConstant:70],
         [patrolNew.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-24],
         
         [reviveSwitch.trailingAnchor constraintEqualToAnchor:revive.trailingAnchor constant:-18], [reviveSwitch.centerYAnchor constraintEqualToAnchor:revive.centerYAnchor],
@@ -1310,6 +1365,8 @@ static void installEarnEnergyCollector(id controller) {
         [oceanTasksSwitch.trailingAnchor constraintEqualToAnchor:oceanTasks.trailingAnchor constant:-18], [oceanTasksSwitch.centerYAnchor constraintEqualToAnchor:oceanTasks.centerYAnchor],
         [rewardSwitch.trailingAnchor constraintEqualToAnchor:reward.trailingAnchor constant:-18], [rewardSwitch.centerYAnchor constraintEqualToAnchor:reward.centerYAnchor],
         [aiFishSwitch.trailingAnchor constraintEqualToAnchor:aiFish.trailingAnchor constant:-18], [aiFishSwitch.centerYAnchor constraintEqualToAnchor:aiFish.centerYAnchor],
+        [farmTasksSwitch.trailingAnchor constraintEqualToAnchor:farmTasks.trailingAnchor constant:-18], [farmTasksSwitch.centerYAnchor constraintEqualToAnchor:farmTasks.centerYAnchor],
+        [manorTasksSwitch.trailingAnchor constraintEqualToAnchor:manorTasks.trailingAnchor constant:-18], [manorTasksSwitch.centerYAnchor constraintEqualToAnchor:manorTasks.centerYAnchor],
         [patrolNewSwitch.trailingAnchor constraintEqualToAnchor:patrolNew.trailingAnchor constant:-18], [patrolNewSwitch.centerYAnchor constraintEqualToAnchor:patrolNew.centerYAnchor],
     ]];
 }
@@ -1318,16 +1375,17 @@ static void installEarnEnergyCollector(id controller) {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem]; button.backgroundColor = UIColor.systemBackgroundColor; button.layer.cornerRadius = 16; button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft; button.translatesAutoresizingMaskIntoConstraints = NO; if (action) [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:icon]]; image.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0]; image.translatesAutoresizingMaskIntoConstraints = NO;
     UILabel *titleLabel = [[UILabel alloc] init]; titleLabel.text = title; titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; titleLabel.textColor = UIColor.labelColor; titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    UILabel *detailLabel = [[UILabel alloc] init]; detailLabel.text = detail; detailLabel.font = [UIFont systemFontOfSize:12]; detailLabel.textColor = UIColor.secondaryLabelColor; detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    UILabel *detailLabel = [[UILabel alloc] init]; detailLabel.text = detail; detailLabel.font = [UIFont systemFontOfSize:11]; detailLabel.textColor = UIColor.secondaryLabelColor; detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    detailLabel.numberOfLines = 2;
     detailLabel.adjustsFontSizeToFitWidth = YES;
-    detailLabel.minimumScaleFactor = 0.8;
+    detailLabel.minimumScaleFactor = 0.75;
     UIImageView *chevron = action ? [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]] : nil; chevron.tintColor = UIColor.systemGray3Color; chevron.translatesAutoresizingMaskIntoConstraints = NO;
     [button addSubview:image]; [button addSubview:titleLabel]; [button addSubview:detailLabel]; if (chevron) [button addSubview:chevron];
     [NSLayoutConstraint activateConstraints:@[
         [image.leadingAnchor constraintEqualToAnchor:button.leadingAnchor constant:18], [image.centerYAnchor constraintEqualToAnchor:button.centerYAnchor], [image.widthAnchor constraintEqualToConstant:22], [image.heightAnchor constraintEqualToConstant:22],
-        [titleLabel.topAnchor constraintEqualToAnchor:button.topAnchor constant:14], [titleLabel.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:12],
+        [titleLabel.topAnchor constraintEqualToAnchor:button.topAnchor constant:12], [titleLabel.leadingAnchor constraintEqualToAnchor:image.trailingAnchor constant:12],
         [titleLabel.trailingAnchor constraintLessThanOrEqualToAnchor:button.trailingAnchor constant:-76],
-        [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:4], [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
+        [detailLabel.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:3], [detailLabel.leadingAnchor constraintEqualToAnchor:titleLabel.leadingAnchor],
         [detailLabel.trailingAnchor constraintLessThanOrEqualToAnchor:button.trailingAnchor constant:-76],
     ]];
     if (chevron) [NSLayoutConstraint activateConstraints:@[[chevron.trailingAnchor constraintEqualToAnchor:button.trailingAnchor constant:-18], [chevron.centerYAnchor constraintEqualToAnchor:button.centerYAnchor]]];
@@ -1343,6 +1401,8 @@ static void installEarnEnergyCollector(id controller) {
 - (void)toggleAutoOceanTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoOceanTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoOceanTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动任务已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoRewardTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRewardTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRewardTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"领奖励与森林寻宝 · 自动处理已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoAIFish:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoAIFish = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoAIFish"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"AI摸鱼 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoFarmTasks:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoFarmTasks = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoFarmTasks"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"芭芭农场 · 做任务集肥料已%@", sender.on ? @"开启" : @"关闭"]]; }
+- (void)toggleAutoManor:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoManor = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoManor"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"蚂蚁庄园 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoPatrolNew:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoPatrolNew = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoPatrolNew"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"新版保护地（大富翁） · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)close { [self dismissViewControllerAnimated:YES completion:nil]; }
 
@@ -1524,7 +1584,7 @@ static void installEarnEnergyCollector(id controller) {
 
     [self.view addSubview:grabber];
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"当前版本：保护地巡护全量抓包探针版 (Patrol Probe)";
+    versionLabel.text = @"当前版本：v3.0 正式版";
     versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     versionLabel.textColor = [UIColor systemGray2Color];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -1604,7 +1664,7 @@ static void installEarnEnergyCollector(id controller) {
         [versionLabel.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
         [versionLabel.bottomAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.bottomAnchor constant:-4],
     ]];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(refresh) name:@"LogUpdated" object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onLogUpdated) name:@"LogUpdated" object:nil];
     [self refresh];
 }
 
@@ -1658,6 +1718,11 @@ static void installEarnEnergyCollector(id controller) {
     stack.spacing = 8;
     stack.alignment = UIStackViewAlignmentCenter;
     return stack;
+}
+
+- (void)onLogUpdated {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(refresh) object:nil];
+    [self performSelector:@selector(refresh) withObject:nil afterDelay:0.15];
 }
 
 - (void)refresh {
@@ -1779,22 +1844,13 @@ static void installEarnEnergyCollector(id controller) {
         return log.length > 0 && ![log containsString:@"[Diag]"] && ![log containsString:@"诊断 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
-    NSString *header = [NSString stringWithFormat:@"AntForestPort-Ocean 收取日志（含神奇海洋/保护地抓包探针）\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋清理=%@，神奇海洋任务=%@，领奖励与森林寻宝=%@，AI摸鱼=%@，新版保护地（大富翁）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoOceanTasks ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoAIFish ? @"开" : @"关", manager.enableAutoPatrolNew ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+    NSString *header = [NSString stringWithFormat:@"AntForestPort-Ocean 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋清理=%@，神奇海洋任务=%@，领奖励与森林寻宝=%@，AI摸鱼=%@，芭芭农场做任务集肥料=%@，蚂蚁庄园=%@，新版保护地（大富翁）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoOceanTasks ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoAIFish ? @"开" : @"关", manager.enableAutoFarmTasks ? @"开" : @"关", manager.enableAutoManor ? @"开" : @"关", manager.enableAutoPatrolNew ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     NSMutableString *fullOutput = [NSMutableString stringWithString:header];
     if (records.count) {
         [fullOutput appendString:[records componentsJoinedByString:@"\n\n"]];
     } else {
         [fullOutput appendString:@"没有常规收取日志\n"];
-    }
-    
-    NSArray *probes = manager.probeRecords;
-    [fullOutput appendFormat:@"\n\n========================================\n📋 保护地巡护 / 寻宝抽奖 / 全量 H5 RPC 抓包探针数据（共 %lu 条，最新排在最前）\n========================================\n\n", (unsigned long)probes.count];
-    if (probes.count) {
-        NSArray *reversedProbes = probes.reverseObjectEnumerator.allObjects;
-        [fullOutput appendString:[reversedProbes componentsJoinedByString:@"\n\n"]];
-    } else {
-        [fullOutput appendString:@"暂未捕获到 H5 RPC 请求（请先打开相应页面进行操作）\n"];
     }
     
     UIPasteboard.generalPasteboard.string = fullOutput;
@@ -2082,6 +2138,8 @@ static void initializeManager(void) {
     manager.enableAutoOceanTasks = [defaults objectForKey:@"enableAutoOceanTasks"] ? [defaults boolForKey:@"enableAutoOceanTasks"] : YES;
     manager.enableAutoRewardTasks = [defaults objectForKey:@"enableAutoRewardTasks"] ? [defaults boolForKey:@"enableAutoRewardTasks"] : YES;
     manager.enableAutoAIFish = [defaults objectForKey:@"enableAutoAIFish"] ? [defaults boolForKey:@"enableAutoAIFish"] : YES;
+    manager.enableAutoFarmTasks = [defaults objectForKey:@"enableAutoFarmTasks"] ? [defaults boolForKey:@"enableAutoFarmTasks"] : YES;
+    manager.enableAutoManor = [defaults objectForKey:@"enableAutoManor"] ? [defaults boolForKey:@"enableAutoManor"] : YES;
     manager.enableAutoPatrol = NO;
     manager.enableAutoPatrolNew = [defaults objectForKey:@"enableAutoPatrolNew"] ? [defaults boolForKey:@"enableAutoPatrolNew"] : YES;
     manager.enableBackgroundLoop = [defaults objectForKey:@"enableBackgroundLoop"] ? [defaults boolForKey:@"enableBackgroundLoop"] : YES;
@@ -2150,18 +2208,36 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         }
     }
     if (isPatrolURL(url, self) && manager.enableAutoPatrolNew) {
+        manager.monopolyDrawerOpened = NO;
         id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
         if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
-            manager.rewardTaskBridge = bridge;
+            manager.monopolyBridge = bridge;
+            manager.monopolyH5Url = url.absoluteString;
+            [manager recordStage:@"新版保护地：进入保护地界面，已绑定 Bridge"];
         }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-            [manager queryMonopolyTaskList];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            [manager queryMonopolyTaskListWithForce:YES];
+            if (!manager.monopolyDrawerOpened) {
+                [manager openMonopolyTaskPanelOnWebView];
+            }
         });
-        NSArray<NSNumber *> *delays = @[@300, @800, @1500, @2500, @4000];
+        NSArray<NSNumber *> *delays = @[@800, @1500, @2500, @4000, @6000];
         for (NSNumber *d in delays) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([d integerValue] * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
                 NSURL *cur = urlFromController(self);
                 if (isPatrolURL(cur, self)) {
+                    id b = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
+                    if (b && [b respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
+                        if (manager.monopolyBridge != b) {
+                            manager.monopolyBridge = b;
+                            manager.monopolyH5Url = cur.absoluteString ?: url.absoluteString;
+                            [manager recordStage:@"新版保护地：轮询中成功就绪并绑定 Bridge"];
+                        }
+                    }
+                    [manager queryMonopolyTaskListWithForce:YES];
+                    if (!manager.monopolyDrawerOpened) {
+                        [manager openMonopolyTaskPanelOnWebView];
+                    }
                     installPatrolAutoPilot(self);
                 }
             });
@@ -2172,6 +2248,29 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
             installEarnEnergyCollector(self);
         });
     }
+    if (isLotteryURL(url) && manager.enableAutoRewardTasks) {
+        id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
+        if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
+            manager.lotteryBridge = bridge;
+            manager.lotteryH5Url = url.absoluteString;
+        }
+        NSLog(@"[AntForestPort] 🎰 进入森林寻宝，已就绪 Bridge: %@", bridge);
+        [manager recordStage:@"森林寻宝：进入寻宝界面，已就绪 Bridge，开始拉取寻宝任务与抽奖机会..."];
+        NSArray<NSNumber *> *delays = @[@400, @1200, @2500];
+        for (NSNumber *d in delays) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([d integerValue] * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                NSURL *cur = urlFromController(self);
+                if (isLotteryURL(cur)) {
+                    id b = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
+                    if (b && [b respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
+                        manager.lotteryBridge = b;
+                        manager.lotteryH5Url = cur.absoluteString;
+                    }
+                    [manager queryLotteryTaskListWithForce:YES];
+                }
+            });
+        }
+    }
     if (isRewardTaskURL(url) && manager.enableAutoRewardTasks) {
         id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
         if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
@@ -2180,15 +2279,15 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(400 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             [manager queryVitalityTaskListWithForce:YES];
         });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            [manager queryVitalityTaskListWithForce:YES];
+        });
     }
     if (isOceanURL(url)) {
         id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
         if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
             manager.oceanBridge = bridge;
             manager.oceanH5Url = url.absoluteString;
-            if (!manager.rewardTaskBridge) {
-                manager.rewardTaskBridge = bridge;
-            }
         }
         if (manager.enableAutoOceanTasks) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
@@ -2201,13 +2300,37 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
             manager.aiFishBridge = bridge;
             manager.aiFishH5Url = url.absoluteString;
-            if (!manager.rewardTaskBridge) {
-                manager.rewardTaskBridge = bridge;
-            }
         }
         if (manager.enableAutoAIFish) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
                 [manager queryAIFishTaskListWithForce:YES];
+            });
+        }
+    }
+    if (isFarmURL(url)) {
+        id bridge = rewardBridgeFromController(self) ?: forestBridgeFromController(self);
+        if (bridge && [bridge respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
+            manager.farmBridge = bridge;
+            manager.farmH5Url = url.absoluteString;
+        }
+        if (manager.enableAutoFarmTasks) {
+            NSLog(@"[AntForestPort] 🌾 进入芭芭农场，已就绪 Bridge: %@", bridge);
+            [manager recordStage:@"芭芭农场：进入农场，已就绪 Bridge，开始监听与调度任务/肥料..."];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [manager queryFarmTaskListWithForce:YES];
+                [manager openFarmTaskPanelOnWebView];
+                [manager claimAllVisibleFarmRewardsOnWebView];
+            });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [manager openFarmTaskPanelOnWebView];
+                [manager claimAllVisibleFarmRewardsOnWebView];
+            });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [manager openFarmTaskPanelOnWebView];
+                [manager claimAllVisibleFarmRewardsOnWebView];
+            });
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [manager claimAllVisibleFarmRewardsOnWebView];
             });
         }
     }
@@ -2237,6 +2360,24 @@ static BOOL isNoiseProbeLog(NSString *log) {
     return NO;
 }
 
+static inline BOOL isRelevantPluginURL(NSString *urlStr) {
+    if (!urlStr.length) return NO;
+    NSString *u = [urlStr lowercaseString];
+    return [u containsString:@"forest"] || [u containsString:@"orchard"] || [u containsString:@"farm"] ||
+           [u containsString:@"ocean"] || [u containsString:@"aifish"] || [u containsString:@"patrol"] ||
+           [u containsString:@"monopoly"] || [u containsString:@"lottery"] || [u containsString:@"draw"] ||
+           [u containsString:@"vitality"] || [u containsString:@"antisle"] || [u containsString:@"hsdwy"] ||
+           [u containsString:@"manor"] || [u containsString:@"antfarm"] || [u containsString:@"66666674"] || [u containsString:@"2017090512380701"] ||
+           [u containsString:@"180020010001247580"] ||
+           [u containsString:@"180020010001263018"] || [u containsString:@"180020010001279274"] ||
+           [u containsString:@"180020010001290531"] || [u containsString:@"180020010001293606"] ||
+           [u containsString:@"2060090000398301"] ||
+           [u containsString:@"2021003115672468"];
+}
+
+#define ENABLE_PROBE_LOGS 0
+#define AFProbeLog(...) do { if (ENABLE_PROBE_LOGS) NSLog(__VA_ARGS__); } while(0)
+
 static const void *PortRPCOriginalIMPKey = &PortRPCOriginalIMPKey;
 static id portCallRPC(id self, SEL _cmd, id rpcConfig, id completeBlock) {
     @try {
@@ -2249,7 +2390,7 @@ static id portCallRPC(id self, SEL _cmd, id rpcConfig, id completeBlock) {
         if (!str) str = [rpcConfig description];
         
         if (str.length && !isNoiseProbeLog(str)) {
-            NSLog(@"\n🔍 [PatrolProbe-RPC-REQ]\n📦 %@", str);
+            AFProbeLog(@"\n🔍 [PatrolProbe-RPC-REQ]\n📦 %@", str);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[RPC-REQ] %@", str]];
         }
     } @catch (NSException *e) {}
@@ -2272,18 +2413,20 @@ static void (*originalDoFlushMessageQueue)(id, SEL, id, id);
 static void portDoFlushMessageQueue(id self, SEL _cmd, id msg, id url) {
     @try {
         NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
-        NSString *msgStr = nil;
-        if ([msg isKindOfClass:NSString.class]) {
-            msgStr = msg;
-        } else if ([NSJSONSerialization isValidJSONObject:msg]) {
-            NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
-            if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-        }
-        if (!msgStr) msgStr = [msg description];
-        
-        if (msgStr.length) {
-            NSLog(@"\n🔍 [PatrolProbe-REQ]\n📍 URL: %@\n📦 Request: %@\n", urlStr, msgStr);
-            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[REQ] URL: %@\nData: %@", urlStr, msgStr]];
+        if (isRelevantPluginURL(urlStr)) {
+            NSString *msgStr = nil;
+            if ([msg isKindOfClass:NSString.class]) {
+                msgStr = msg;
+            } else if ([NSJSONSerialization isValidJSONObject:msg]) {
+                NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
+                if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+            }
+            if (!msgStr) msgStr = [msg description];
+            
+            if (msgStr.length) {
+                AFProbeLog(@"\n🔍 [PatrolProbe-REQ]\n📍 URL: %@\n📦 Request: %@\n", urlStr, msgStr);
+                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[REQ] URL: %@\nData: %@", urlStr, msgStr]];
+            }
         }
     } @catch (NSException *e) {}
     
@@ -2296,16 +2439,18 @@ static void (*originalFlushMessageQueueWithMessage)(id, SEL, id, id);
 static void portFlushMessageQueueWithMessage(id self, SEL _cmd, id msg, id url) {
     @try {
         NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
-        NSString *msgStr = nil;
-        if ([msg isKindOfClass:NSString.class]) msgStr = msg;
-        else if ([NSJSONSerialization isValidJSONObject:msg]) {
-            NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
-            if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-        }
-        if (!msgStr) msgStr = [msg description];
-        if (msgStr.length) {
-            NSLog(@"\n🔍 [PatrolProbe-REQ]\n📍 URL: %@\n📦 Request: %@\n", urlStr, msgStr);
-            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[REQ] URL: %@\nData: %@", urlStr, msgStr]];
+        if (isRelevantPluginURL(urlStr)) {
+            NSString *msgStr = nil;
+            if ([msg isKindOfClass:NSString.class]) msgStr = msg;
+            else if ([NSJSONSerialization isValidJSONObject:msg]) {
+                NSData *d = [NSJSONSerialization dataWithJSONObject:msg options:0 error:nil];
+                if (d) msgStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+            }
+            if (!msgStr) msgStr = [msg description];
+            if (msgStr.length) {
+                AFProbeLog(@"\n🔍 [PatrolProbe-REQ]\n📍 URL: %@\n📦 Request: %@\n", urlStr, msgStr);
+                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[REQ] URL: %@\nData: %@", urlStr, msgStr]];
+            }
         }
     } @catch (NSException *e) {}
     if (originalFlushMessageQueueWithMessage) originalFlushMessageQueueWithMessage(self, _cmd, msg, url);
@@ -2316,7 +2461,7 @@ static id portDeserializeMessageJSON(id self, SEL _cmd, id json) {
     @try {
         NSString *str = [json isKindOfClass:NSString.class] ? json : [json description];
         if (str.length && !isNoiseProbeLog(str)) {
-            NSLog(@"\n🔍 [PatrolProbe-H5REQ]\n📦 %@", str);
+            AFProbeLog(@"\n🔍 [PatrolProbe-H5REQ]\n📦 %@", str);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[H5REQ] %@", str]];
         }
     } @catch (NSException *e) {}
@@ -2346,7 +2491,7 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
         }
         if ([str hasPrefix:@"PATROL_LOG:"]) {
             NSString *payload = [str substringFromIndex:11];
-            NSLog(@"\n🔍 [PatrolProbe-HOOK]\n📦 %@", payload);
+            AFProbeLog(@"\n🔍 [PatrolProbe-HOOK]\n📦 %@", payload);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[PATROL-HOOK] %@", payload]];
             
             NSDictionary *dict = nil;
@@ -2360,6 +2505,9 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
             if ([type isEqualToString:@"STATUS"] && msg.length) {
                 if (![msg containsString:@"AlipayJSBridge"]) {
                     [manager recordStage:msg];
+                }
+                if ([msg containsString:@"展开步数任务抽屉"] || [msg containsString:@"步数任务抽屉"] || [msg containsString:@"更多步数"]) {
+                    manager.monopolyDrawerOpened = YES;
                 }
             } else if ([action isEqualToString:@"patrol_forward"]) {
                 [manager recordStage:[NSString stringWithFormat:@"保护地巡护 · 自动走步（剩余机会 %@ 次）", dict[@"leftChance"] ?: @"1"]];
@@ -2383,7 +2531,7 @@ static void portRunJsTextInput(id self, SEL _cmd, id webView, id prompt, id defT
             return;
         }
         if (str.length && !isNoiseProbeLog(str)) {
-            NSLog(@"\n🔍 [PatrolProbe-PROMPT]\n📦 %@", str);
+            AFProbeLog(@"\n🔍 [PatrolProbe-PROMPT]\n📦 %@", str);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[PROMPT] %@", str]];
         }
     } @catch (NSException *e) {}
@@ -2401,7 +2549,7 @@ static void portDispatchMessage(id self, SEL _cmd, id msg) {
         }
         if (!msgStr) msgStr = [msg description];
         if (msgStr.length && !isNoiseProbeLog(msgStr)) {
-            NSLog(@"\n🔍 [PatrolProbe-DISPATCH]\n📦 %@", msgStr);
+            AFProbeLog(@"\n🔍 [PatrolProbe-DISPATCH]\n📦 %@", msgStr);
             [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[DISPATCH] %@", msgStr]];
         }
     } @catch (NSException *e) {}
@@ -2419,27 +2567,90 @@ static void portCallHandler(id self, SEL _cmd, id name, id data, id cb) {
         }
         if (!dataStr) dataStr = [data description];
         if (dataStr.length && !isNoiseProbeLog(dataStr)) {
-            NSLog(@"\n🔍 [PatrolProbe-HANDLER: %@]\n📦 %@", name, dataStr);
+            AFProbeLog(@"\n🔍 [PatrolProbe-HANDLER: %@]\n📦 %@", name, dataStr);
         }
         [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[HANDLER: %@] %@", name, dataStr]];
     } @catch (NSException *e) {}
     if (originalCallHandler) originalCallHandler(self, _cmd, name, data, cb);
 }
 
+static NSString *gLastRpcOperationType = nil;
 static void (*originalCallJsApi)(id, SEL, id, id, id, id);
 static void portCallJsApi(id self, SEL _cmd, id name, id url, id data, id cb) {
     @try {
         NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
-        NSString *dataStr = nil;
-        if ([data isKindOfClass:NSString.class]) dataStr = data;
-        else if ([NSJSONSerialization isValidJSONObject:data]) {
-            NSData *d = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
-            if (d) dataStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+        NSString *opType = nil;
+        if ([name isEqualToString:@"rpc"]) {
+            if ([data isKindOfClass:NSDictionary.class]) {
+                opType = data[@"operationType"];
+            } else if ([data isKindOfClass:NSArray.class]) {
+                NSDictionary *first = [((NSArray *)data).firstObject isKindOfClass:NSDictionary.class] ? ((NSArray *)data).firstObject : nil;
+                opType = first[@"operationType"] ?: first[@"data"][@"operationType"];
+            }
         }
-        if (!dataStr) dataStr = [data description];
+        if (opType.length) {
+            gLastRpcOperationType = [opType copy];
+            [AntForestManager sharedInstance].lastRpcOperationType = [opType copy];
+        }
         
-        NSLog(@"\n🔍 [PatrolProbe-JSAPI]\n📍 API: %@ | URL: %@\n📦 Data: %@\n", name, urlStr, dataStr);
-        [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[JSAPI: %@] URL: %@\nData: %@", name, urlStr, dataStr]];
+        BOOL isRelevant = isRelevantPluginURL(urlStr) ||
+                          (opType.length && ([opType containsString:@"forest"] || [opType containsString:@"orchard"] || [opType containsString:@"farm"] || [opType containsString:@"antiep"] || [opType containsString:@"ocean"] || [opType containsString:@"patrol"] || [opType containsString:@"manure"] || [opType containsString:@"draw"] || [opType containsString:@"lottery"] || [opType containsString:@"vitality"] || [opType containsString:@"monopoly"] || [opType containsString:@"antisle"] || [opType containsString:@"hsdwy"] || [opType containsString:@"antfarm"] || [opType containsString:@"manor"]));
+        
+        AntForestManager *manager = [AntForestManager sharedInstance];
+        BOOL isMonopolyRpc = (opType.length && ([opType containsString:@"monopoly"] || [opType containsString:@"antisle"] || [opType containsString:@"hsdwy"])) ||
+                             ([urlStr.lowercaseString containsString:@"180020010001293606"] || [urlStr.lowercaseString containsString:@"2060090000398301"] || [urlStr.lowercaseString containsString:@"monopoly"] || [urlStr.lowercaseString containsString:@"hsdwy"]);
+        if (isMonopolyRpc && manager.enableAutoPatrolNew && self != manager.jsBridge) {
+            BOOL isFirstBind = (manager.monopolyBridge != self);
+            if (isFirstBind) {
+                manager.monopolyBridge = self;
+                if (urlStr.length) manager.monopolyH5Url = urlStr;
+                [manager recordStage:@"新版保护地 · 已捕获大富翁 RPC 并绑定 Bridge"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                    [manager queryMonopolyTaskListWithForce:YES];
+                    if (!manager.monopolyDrawerOpened) {
+                        [manager openMonopolyTaskPanelOnWebView];
+                    }
+                });
+            }
+        }
+        
+        BOOL isManorRpc = (opType.length && ([opType containsString:@"antfarm"] || [opType containsString:@"manor"])) ||
+                          ([urlStr.lowercaseString containsString:@"66666674"] || [urlStr.lowercaseString containsString:@"2017090512380701"] || [urlStr.lowercaseString containsString:@"antfarm"] || [urlStr.lowercaseString containsString:@"manor"]);
+        if (isManorRpc && manager.enableAutoManor && self != manager.jsBridge) {
+            BOOL isFirstBind = (manager.manorBridge != self);
+            if (isFirstBind) {
+                manager.manorBridge = self;
+                if (urlStr.length) manager.manorH5Url = urlStr;
+                [manager recordStage:@"蚂蚁庄园 · 已捕获庄园 RPC 并绑定 Bridge"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                    [manager checkAndRunManorAutomations];
+                });
+            }
+        }
+        
+        if (isRelevant) {
+            NSString *dataStr = nil;
+            if ([data isKindOfClass:NSString.class]) dataStr = data;
+            else if ([NSJSONSerialization isValidJSONObject:data]) {
+                NSData *d = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
+                if (d) dataStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
+            }
+            if (!dataStr) dataStr = [data description];
+            
+            BOOL isFarm = [urlStr containsString:@"farm"] || [urlStr containsString:@"orchard"] || [opType containsString:@"farm"] || [opType containsString:@"orchard"] || [opType containsString:@"manure"];
+            BOOL isManor = [urlStr containsString:@"manor"] || [urlStr containsString:@"antfarm"] || [urlStr containsString:@"66666674"] || [opType containsString:@"antfarm"] || [opType containsString:@"manor"];
+            if (isManor) {
+                AFProbeLog(@"\n🐔 [ManorProbe-RPC-REQ]\n📍 RPC: %@ | URL: %@\n📦 Request: %@\n", opType ?: name, urlStr, dataStr);
+                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[蚂蚁庄园RPC-REQ: %@] %@", opType ?: name, dataStr]];
+            } else if (isFarm) {
+                AFProbeLog(@"\n🌾 [FarmProbe-RPC-REQ]\n📍 RPC: %@ | URL: %@\n📦 Request: %@\n", opType ?: name, urlStr, dataStr);
+                AFProbeLog(@"\n📥 [PatrolProbe-RES] 📍 芭芭农场发起RPC: %@\n", opType ?: name);
+                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[芭芭农场RPC-REQ: %@] %@", opType ?: name, dataStr]];
+            } else {
+                AFProbeLog(@"\n🔍 [PatrolProbe-JSAPI]\n📍 API: %@ | URL: %@\n📦 Data: %@\n", name, urlStr, dataStr);
+                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[JSAPI: %@] URL: %@\nData: %@", name, urlStr, dataStr]];
+            }
+        }
     } @catch (NSException *e) {}
     
     if (originalCallJsApi) originalCallJsApi(self, _cmd, name, url, data, cb);
@@ -2454,21 +2665,52 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
         return value;
     }
 
-    @try {
-        NSString *resStr = nil;
-        if ([NSJSONSerialization isValidJSONObject:value]) {
-            NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
-            if (data) resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        }
-        if (!resStr) resStr = [value description];
-        
-        if (resStr.length && !isNoiseProbeLog(resStr)) {
-            NSLog(@"\n📥 [PatrolProbe-RES]\n📦 Response: %@\n", resStr);
-            [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[RES] %@", resStr]];
-        }
-    } @catch (NSException *e) {}
-
     AntForestManager *manager = [AntForestManager sharedInstance];
+    NSDictionary *dict = [value isKindOfClass:NSDictionary.class] ? value : nil;
+    NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+
+    BOOL isManor = (manager.manorBridge == self) || [AntForestManager isManorResponse:value];
+    if (!isManor && controller) {
+        NSURL *ctrlUrl = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
+        if ([AntForestManager isManorURL:ctrlUrl]) isManor = YES;
+    }
+    if (isManor && manager.farmBridge == self) {
+        manager.farmBridge = nil;
+    }
+
+    BOOL isFarmResp = !isManor && ((manager.farmBridge == self) ||
+                      resData[@"limitedTimeChallenge"] || dict[@"limitedTimeChallenge"] ||
+                      resData[@"taskList"] || dict[@"taskList"] ||
+                      resData[@"manureFactory"] || dict[@"manureFactory"] ||
+                      resData[@"signTaskInfo"] || dict[@"signTaskInfo"] ||
+                      resData[@"balloonCooper"] || dict[@"balloonCooper"] ||
+                      resData[@"helpFarmChannelConfig"] || dict[@"helpFarmChannelConfig"] ||
+                      resData[@"subplotsActivityList"] || dict[@"subplotsActivityList"] ||
+                      resData[@"indexDeliveryList"] || dict[@"indexDeliveryList"]);
+    BOOL isOceanResp = resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class];
+    BOOL isForest = isForestResponse(value);
+    BOOL isTargetPluginResp = isForest || isFarmResp || isOceanResp || isManor ||
+                              (gLastRpcOperationType.length && ([gLastRpcOperationType containsString:@"forest"] || [gLastRpcOperationType containsString:@"orchard"] || [gLastRpcOperationType containsString:@"antiep"] || [gLastRpcOperationType containsString:@"ocean"] || [gLastRpcOperationType containsString:@"patrol"] || [gLastRpcOperationType containsString:@"manure"] || [gLastRpcOperationType containsString:@"draw"] || [gLastRpcOperationType containsString:@"lottery"] || [gLastRpcOperationType containsString:@"vitality"] || [gLastRpcOperationType containsString:@"antfarm"] || [gLastRpcOperationType containsString:@"manor"]));
+
+    if (isTargetPluginResp) {
+        @try {
+            NSString *resStr = nil;
+            if ([NSJSONSerialization isValidJSONObject:value]) {
+                NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
+                if (data) resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            }
+            if (!resStr) resStr = [value description];
+            
+            if (resStr.length && !isNoiseProbeLog(resStr)) {
+                if (gLastRpcOperationType.length) {
+                    AFProbeLog(@"\n📥 [PatrolProbe-RES] 📍 对应RPC: %@\n📦 Response: %@\n", gLastRpcOperationType, resStr);
+                } else {
+                    AFProbeLog(@"\n📥 [PatrolProbe-RES]\n📦 Response: %@\n", resStr);
+                }
+                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[RES] %@", resStr]];
+            }
+        } @catch (NSException *e) {}
+    }
     if (isForestResponse(value)) {
         if (manager.jsBridge != self) {
             manager.jsBridge = self;
@@ -2478,35 +2720,120 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     if ([self respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
         NSDictionary *dict = [value isKindOfClass:NSDictionary.class] ? value : nil;
         NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+        BOOL isFarmResp = !isManor && ((manager.farmBridge == self) ||
+                          resData[@"limitedTimeChallenge"] || dict[@"limitedTimeChallenge"] ||
+                          resData[@"taskList"] || dict[@"taskList"] ||
+                          resData[@"manureFactory"] || dict[@"manureFactory"] ||
+                          resData[@"signTaskInfo"] || dict[@"signTaskInfo"] ||
+                          resData[@"balloonCooper"] || dict[@"balloonCooper"] ||
+                          resData[@"helpFarmChannelConfig"] || dict[@"helpFarmChannelConfig"] ||
+                          resData[@"subplotsActivityList"] || dict[@"subplotsActivityList"] ||
+                          resData[@"indexDeliveryList"] || dict[@"indexDeliveryList"]);
+        if (isFarmResp && !isManor) {
+            BOOL isFirstBind = (manager.farmBridge != self);
+            if (isFirstBind) {
+                manager.farmBridge = self;
+                [manager recordStage:@"芭芭农场 · 已绑定农场 H5 Bridge"];
+                if (manager.enableAutoFarmTasks) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                        [manager queryFarmTaskList];
+                        [manager openFarmTaskPanelOnWebView];
+                        [manager claimAllVisibleFarmRewardsOnWebView];
+                    });
+                }
+            }
+            [manager handleFarmResponse:dict ?: resData];
+        }
+        if (isManor && manager.enableAutoManor && self != manager.jsBridge) {
+            BOOL isFirstBind = (manager.manorBridge != self);
+            if (isFirstBind) {
+                manager.manorBridge = self;
+                [manager recordStage:@"蚂蚁庄园 · 已绑定庄园 H5 Bridge"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                    [manager checkAndRunManorAutomations];
+                });
+            }
+            [manager handleManorResponse:dict ?: resData];
+        }
         if (resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class]) {
             if (manager.oceanBridge != self) {
                 manager.oceanBridge = self;
                 [manager recordStage:@"神奇海洋 · 已绑定海洋 H5 Bridge"];
             }
-            if (!manager.rewardTaskBridge) {
-                manager.rewardTaskBridge = self;
+        }
+        BOOL isMonopolyRpcResp = (gLastRpcOperationType.length && ([gLastRpcOperationType containsString:@"monopoly"] || [gLastRpcOperationType containsString:@"antisle"] || [gLastRpcOperationType containsString:@"hsdwy"]));
+        BOOL hasMonopolyData = resData[@"usingCreatureInfo"] || dict[@"usingCreatureInfo"] || resData[@"creatureCode"] || dict[@"creatureCode"] || resData[@"monopoly"] || dict[@"monopoly"] || resData[@"totalDiceCount"] || dict[@"totalDiceCount"] || resData[@"diceCount"] || dict[@"diceCount"];
+        if ((isMonopolyRpcResp || hasMonopolyData) && manager.enableAutoPatrolNew && self != manager.jsBridge) {
+            BOOL isFirstBind = (manager.monopolyBridge != self);
+            if (isFirstBind) {
+                manager.monopolyBridge = self;
+                [manager recordStage:@"新版保护地 · 已绑定大富翁 H5 Bridge (RPC响应)"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                    [manager queryMonopolyTaskListWithForce:YES];
+                    if (!manager.monopolyDrawerOpened) {
+                        [manager openMonopolyTaskPanelOnWebView];
+                    }
+                });
             }
         }
         NSArray *taskInfoList = [resData[@"taskInfoList"] isKindOfClass:NSArray.class] ? resData[@"taskInfoList"] : ([dict[@"taskInfoList"] isKindOfClass:NSArray.class] ? dict[@"taskInfoList"] : nil);
         if (resData[@"forestTasksNew"] || taskInfoList || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || [dict[@"currentSeasonInfo"] isKindOfClass:NSDictionary.class]) {
-            if (manager.rewardTaskBridge != self) {
-                manager.rewardTaskBridge = self;
-            }
-            if ([dict[@"currentSeasonInfo"] isKindOfClass:NSDictionary.class]) {
-                manager.aiFishBridge = self;
-            }
+            BOOL isMonopoly = (manager.monopolyBridge == self);
+            BOOL isAIFish = (manager.aiFishBridge == self) || [dict[@"currentSeasonInfo"] isKindOfClass:NSDictionary.class];
+            BOOL isOcean = (manager.oceanBridge == self);
+            BOOL isFarm = (manager.farmBridge == self);
+            BOOL isLottery = (manager.lotteryBridge == self);
             for (id t in taskInfoList) {
                 if ([t isKindOfClass:NSDictionary.class]) {
                     NSString *sc = t[@"taskBaseInfo"][@"sceneCode"];
-                    if ([sc containsString:@"AIFISH"]) {
-                        manager.aiFishBridge = self;
-                        break;
+                    if ([sc containsString:@"MONOPOLY"] || [sc containsString:@"HSDWY"]) {
+                        isMonopoly = YES;
+                    } else if ([sc containsString:@"AIFISH"]) {
+                        isAIFish = YES;
+                    } else if ([sc containsString:@"OCEAN"]) {
+                        isOcean = YES;
+                    } else if ([sc containsString:@"FARM"] || [sc containsString:@"ORCHARD"] || [sc isEqualToString:@"10021"] || [sc isEqualToString:@"3646"] || [sc hasPrefix:@"BABA_"]) {
+                        if (!isManor) {
+                            isFarm = YES;
+                        }
+                    } else if ([sc containsString:@"DRAW"] || [sc containsString:@"LOTTERY"]) {
+                        isLottery = YES;
                     }
+                }
+            }
+            if (resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"]) {
+                isLottery = YES;
+            }
+            if (isMonopoly) {
+                BOOL isFirstBind = (manager.monopolyBridge != self);
+                manager.monopolyBridge = self;
+                if (isFirstBind) {
+                    [manager recordStage:@"新版保护地 · 已绑定大富翁 H5 Bridge (任务列表)"];
+                }
+                manager.monopolyDrawerOpened = YES;
+            }
+            if (isAIFish) {
+                manager.aiFishBridge = self;
+            }
+            if (isOcean) {
+                manager.oceanBridge = self;
+            }
+            if (isFarm && !isManor) {
+                manager.farmBridge = self;
+            }
+            if (isLottery) {
+                manager.lotteryBridge = self;
+            }
+            if (!isMonopoly && !isAIFish && !isOcean && !isFarm && !isLottery && !isManor) {
+                if (manager.rewardTaskBridge != self) {
+                    manager.rewardTaskBridge = self;
                 }
             }
         }
     }
-    [manager matchFriendIdAndBubbles:value];
+    if (!isManor) {
+        [manager matchFriendIdAndBubbles:value];
+    }
     if (manager.enableAutoCollect && manager.enableSelfCollect && isMyHomeResponse(value, manager)) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(700 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{ tryAutoCollectWaterGift(); });
     }
@@ -2598,17 +2925,19 @@ static void installHooks(void) {
         
         Class psdClass = NSClassFromString(@"PSDJsBridge");
         Class rvkClass = NSClassFromString(@"RVKJsBridge");
-        Class targetBridgeClass = psdClass ?: rvkClass;
-        if (targetBridgeClass) {
-            hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-            hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
-            hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
-            hookMethod(targetBridgeClass, @selector(_flushMessageQueueWithMessage:url:), (IMP)portFlushMessageQueueWithMessage, (IMP *)&originalFlushMessageQueueWithMessage);
-            hookMethod(targetBridgeClass, @selector(_dispatchMessage:), (IMP)portDispatchMessage, (IMP *)&originalDispatchMessage);
-            hookMethod(targetBridgeClass, @selector(callHandler:data:responseCallback:), (IMP)portCallHandler, (IMP *)&originalCallHandler);
-            hookMethod(targetBridgeClass, @selector(_deserializeMessageJSON:), (IMP)portDeserializeMessageJSON, (IMP *)&originalDeserializeMessageJSON);
-            hookMethod(targetBridgeClass, @selector(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:), (IMP)portRunJsTextInput, (IMP *)&originalRunJsTextInput);
-            hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
+        NSArray *bridgeClasses = @[psdClass ?: [NSObject class], rvkClass ?: [NSObject class]];
+        for (Class targetBridgeClass in bridgeClasses) {
+            if (targetBridgeClass != [NSObject class]) {
+                hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
+                hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
+                hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
+                hookMethod(targetBridgeClass, @selector(_flushMessageQueueWithMessage:url:), (IMP)portFlushMessageQueueWithMessage, (IMP *)&originalFlushMessageQueueWithMessage);
+                hookMethod(targetBridgeClass, @selector(_dispatchMessage:), (IMP)portDispatchMessage, (IMP *)&originalDispatchMessage);
+                hookMethod(targetBridgeClass, @selector(callHandler:data:responseCallback:), (IMP)portCallHandler, (IMP *)&originalCallHandler);
+                hookMethod(targetBridgeClass, @selector(_deserializeMessageJSON:), (IMP)portDeserializeMessageJSON, (IMP *)&originalDeserializeMessageJSON);
+                hookMethod(targetBridgeClass, @selector(webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:), (IMP)portRunJsTextInput, (IMP *)&originalRunJsTextInput);
+                hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
+            }
         }
         
         int classCount = objc_getClassList(NULL, 0);

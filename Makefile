@@ -15,6 +15,7 @@ test:
 	sh tests/check_water_gift_recheck.sh
 	sh tests/check_reward_patrol_paths.sh
 	sh tests/check_ocean_task_paths.sh
+	sh tests/check_manor_automation_paths.sh
 
 $(TARGET): $(SOURCES)
 	@mkdir -p build
