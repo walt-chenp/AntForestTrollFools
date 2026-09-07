@@ -1442,32 +1442,7 @@ static void initDailyTaskCache(void) {
             NSArray *completed = [defaults objectForKey:@"vitality_daily_completed"];
             gDailyCompletedTasks = [NSMutableSet setWithArray:completed ?: @[]];
             NSArray *failed = [defaults objectForKey:@"vitality_daily_failed"];
-            NSMutableSet *clearedFailed = [NSMutableSet set];
-            for (NSString *key in failed ?: @[]) {
-                if (![key containsString:@"XIANYU"] &&
-                    ![key containsString:@"xianyu"] &&
-                    ![key containsString:@"taobao"] &&
-                    ![key containsString:@"BUSINESS"] &&
-                    ![key containsString:@"LIGHTS"] &&
-                    ![key containsString:@"XLIGHT"] &&
-                    ![key containsString:@"SQYT"] &&
-                    ![key containsString:@"ANTOCEAN"] &&
-                    ![key containsString:@"AIFISH"] &&
-                    ![key containsString:@"aifish"] &&
-                    ![key containsString:@"FLOATBALL"] &&
-                    ![key containsString:@"floatball"] &&
-                    ![key containsString:@"NCLY"] &&
-                    ![key containsString:@"ncly"] &&
-                    ![key containsString:@"BWXRK"] &&
-                    ![key containsString:@"bwxrk"] &&
-                    ![key containsString:@"ORCHARD"] &&
-                    ![key containsString:@"orchard"] &&
-                    ![key containsString:@"ANTFARM"] &&
-                    ![key containsString:@"antfarm"]) {
-                    [clearedFailed addObject:key];
-                }
-            }
-            gDailyFailedTasks = clearedFailed;
+            gDailyFailedTasks = [NSMutableSet setWithArray:failed ?: @[]];
         } else {
             gDailyCompletedTasks = [NSMutableSet set];
             gDailyFailedTasks = [NSMutableSet set];
@@ -1556,7 +1531,9 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     
     // 过滤真实付款与金融高危任务，注意避免误杀包含“支付宝”字样的安全浏览任务
     NSString *cleanTitle = [lowerTitle stringByReplacingOccurrencesOfString:@"支付宝" withString:@""];
-    if ([cleanTitle containsString:@"保障"] ||
+    if ([cleanTitle containsString:@"市集"] ||
+        [cleanTitle containsString:@"惊喜市集"] ||
+        [cleanTitle containsString:@"保障"] ||
         [cleanTitle containsString:@"保险"] ||
         [cleanTitle containsString:@"好医保"] ||
         [cleanTitle containsString:@"借呗"] ||
@@ -1598,7 +1575,10 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
-    // 明确不支持 finishTask RPC 的答题、捡垃圾、连续签到与外部小程序小游戏
+    // 明确不支持 finishTask RPC 的市集导流、答题、捡垃圾、连续签到与外部小程序小游戏
+    if ([lowerTitle containsString:@"市集"] || [lowerTitle containsString:@"惊喜市集"] || [lowerType containsString:@"shiji"] || [lowerType containsString:@"market"]) {
+        return NO;
+    }
     if ([lowerType containsString:@"dati"] || [lowerTitle containsString:@"答题"]) {
         return NO;
     }
@@ -2593,7 +2573,7 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                         }
                         @try {
                             [self receiveVitalityTaskAward:capturedTaskType sceneCode:capturedSceneCode taskTitle:capturedTitle awardName:capturedAwardName];
-                            [self recordStage:[NSString stringWithFormat:@"%@：已完成“%@”，正在提交领奖...", capturedScenePrefix, capturedTitle]];
+                            [self recordStage:[NSString stringWithFormat:@"%@：浏览“%@”完成，正在提交领奖...", capturedScenePrefix, capturedTitle]];
                         } @catch (NSException *e) {}
                         
                         double delayAfter = 1.2 + (arc4random_uniform(500) / 1000.0);
@@ -2766,9 +2746,6 @@ static BOOL isMultiStageTaskFromDict(NSDictionary *taskDict, NSDictionary *baseI
     if (awardCount <= 0) awardCount = [baseInfo[@"awardCount"] integerValue];
     
     if (limit > 1 && rightsTimes < limit) {
-        return YES;
-    }
-    if (awardCount > 0 && received < awardCount) {
         return YES;
     }
     
@@ -3141,7 +3118,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 严禁将累积肥料数量（如1400肥）与次数限制（如8次）错误比较！仅在非多阶段未完成、且（已明确RECEIVED或次数做满或总奖励领满）时才判定为全部完成
             BOOL isAllFinished = !isMultiIncomplete && ([taskStatus isEqualToString:@"RECEIVED"] ||
                                  (rightsTimesLimit > 0 && rightsTimes >= rightsTimesLimit) ||
-                                 (awardCount > 0 && alreadyReceive >= awardCount));
+                                 (rightsTimesLimit > 0 && alreadyReceive >= rightsTimesLimit));
             if (isAllFinished) {
                 @synchronized(self) {
                     [gDailyCompletedTasks addObject:taskKey];
@@ -3197,7 +3174,15 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     [gDailyFailedTasks addObject:taskKey];
                     saveDailyTaskCache();
                 }
-                [self recordStage:[NSString stringWithFormat:@"森林寻宝/任务中心：任务 [%@] 连续尝试未成功，触发熔断跳过", taskTitle]];
+                NSString *moduleTag = @"森林寻宝/任务中心";
+                if ([sceneCode containsString:@"OCEAN"] || [sceneCode containsString:@"RESCUE"]) {
+                    moduleTag = @"神奇海洋";
+                } else if ([sceneCode containsString:@"FARM"] || [sceneCode containsString:@"ORCHARD"] || [sceneCode isEqualToString:@"10021"] || [sceneCode isEqualToString:@"3646"] || [sceneCode hasPrefix:@"BABA_"]) {
+                    moduleTag = @"芭芭农场";
+                } else if ([sceneCode containsString:@"AIFISH"]) {
+                    moduleTag = @"AI摸鱼";
+                }
+                [self recordStage:[NSString stringWithFormat:@"%@：任务 [%@] 连续尝试未成功，触发熔断跳过", moduleTag, taskTitle]];
                 continue;
             }
             
