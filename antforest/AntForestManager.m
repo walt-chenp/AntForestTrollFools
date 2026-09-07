@@ -61,6 +61,7 @@ static NSUInteger reviveRequestToken = 0;
 static BOOL reviveRewardRefreshNeeded = NO;
 static NSMutableSet<NSString *> *todayCollectedAnimalKeys = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *lastAnimalCollectAttemptTimes = nil;
+static NSMutableSet<NSString *> *shieldReportedFriendsInRound = nil;
 
 // 定义一个全局串行队列
 dispatch_queue_t globalSerialQueueQuery;
@@ -84,6 +85,7 @@ dispatch_queue_t globalSerialQueueTest;
         reviveQueuedIds = [NSMutableSet set];
         todayCollectedAnimalKeys = [NSMutableSet set];
         lastAnimalCollectAttemptTimes = [NSMutableDictionary dictionary];
+        shieldReportedFriendsInRound = [NSMutableSet set];
     });
     return afm;
 }
@@ -5411,6 +5413,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
         deferredRankedFriendIds = nil;
         rankScanPending = YES;
         @synchronized (self) { [pendingCollectBubbles removeAllObjects]; }
+        [shieldReportedFriendsInRound removeAllObjects];
         [self recordStage:@"本轮扫描开始"];
         [self queryTotalRank];
         if (self.enableCleanOcean) {
@@ -6025,13 +6028,34 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 //判断是否有能量保护罩
                 if (!mine) {
                     NSArray *pArr = [dict objectForKey:@"usingUserProps"] ?: [dict objectForKey:@"usingUserPropsNew"];
-                    if(pArr) {
-                        for(NSDictionary *dic in pArr){
+                    if (pArr) {
+                        for (NSDictionary *dic in pArr) {
                             NSString *type = [dic objectForKey:@"type"] ?: [dic objectForKey:@"propGroup"] ?: @"";
-                            if([type containsString:@"Shield"] || [type containsString:@"shield"]){
+                            if ([type containsString:@"Shield"] || [type containsString:@"shield"]) {
                                 [self recordStage:@"诊断 · 好友气泡回包：检测到保护罩，跳过该好友"];
-                                NSString *log = [NSString stringWithFormat:@"%@\n检测到保护罩,跳过拾取",[[AntForestManager sharedInstance] getUserName:userId]];
-                                [[AntForestManager sharedInstance] addLog:log];
+                                static dispatch_once_t onceToken;
+                                dispatch_once(&onceToken, ^{
+                                    if (!shieldReportedFriendsInRound) {
+                                        shieldReportedFriendsInRound = [NSMutableSet set];
+                                    }
+                                });
+                                if (userId.length && ![shieldReportedFriendsInRound containsObject:userId]) {
+                                    [shieldReportedFriendsInRound addObject:userId];
+                                    NSString *friendName = nil;
+                                    id fInfo = userId.length ? self.friendsName[userId] : nil;
+                                    if ([fInfo isKindOfClass:NSString.class] && [(NSString *)fInfo length] > 0) {
+                                        friendName = (NSString *)fInfo;
+                                    } else if ([fInfo isKindOfClass:NSDictionary.class]) {
+                                        friendName = [AntForestManager extractNameFromDictionary:fInfo];
+                                    }
+                                    if (!friendName.length) {
+                                        friendName = dict[@"userEnergy"][@"displayName"] ?: dict[@"userBaseInfo"][@"displayName"];
+                                    }
+                                    if (!friendName.length) {
+                                        friendName = @"好友";
+                                    }
+                                    [self recordStage:[NSString stringWithFormat:@"好友“%@”开启了能量保护罩，已跳过", friendName]];
+                                }
                                 [self advanceTakeLookForFriend:userId];
                                 return;
                             }
