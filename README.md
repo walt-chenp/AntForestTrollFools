@@ -10,7 +10,9 @@
 
 ## 效果图
 
-![收取记录面板](docs/ui-preview.png)
+| 收取记录面板（v3.0 正式版） | 功能设置面板 |
+| :---: | :---: |
+| ![收取记录面板](docs/ui-preview.png) | ![功能设置面板](docs/ui-settings.png) |
 
 功能包括：
 
