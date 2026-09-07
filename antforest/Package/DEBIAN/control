@@ -1,6 +1,6 @@
 Package: com.vknote.antforest
 Name: antforest
-Version: 0.1-1
+Version: 3.0
 Description: 
 Section: Tweaks
 Depends: firmware (>= 5.0), mobilesubstrate
@@ -13,6 +13,5 @@ Maintainer: walt-chenp
 dev: 
 Homepage: 
 Depiction: 
-Maintainer: 
 Icon: 
 
