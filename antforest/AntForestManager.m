@@ -2436,6 +2436,7 @@ static NSString *sLastQueriedSceneCode = nil;
 }
 
 static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
+static NSInteger sVitalityAutoRefreshRounds = 0;
 
 - (void)executeNextVitalityTask {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -2461,8 +2462,9 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                     vitalityTaskRunning = NO;
                     gCurrentExecutingTaskKey = nil;
                     gCurrentExecutingTaskIsMultiStage = NO;
-                    if (sHasPerformedWorkInCurrentVitalityRound) {
+                    if (sHasPerformedWorkInCurrentVitalityRound && sVitalityAutoRefreshRounds < 1) {
                         sHasPerformedWorkInCurrentVitalityRound = NO;
+                        sVitalityAutoRefreshRounds++;
                         if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
                             [self recordStage:@"芭芭农场：本批次任务已执行完毕，2.5秒后刷新拉取农场任务最新进度..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -2504,6 +2506,8 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                             }
                         }
                     } else {
+                        sHasPerformedWorkInCurrentVitalityRound = NO;
+                        sVitalityAutoRefreshRounds = 0;
                         if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
                             [self recordStage:@"芭芭农场：当前所有任务奖励已全部领取完毕"];
                         } else if ([sLastExecutedSceneCode containsString:@"RESCUE"] || [sLastExecutedSceneCode containsString:@"OCEAN"]) {
@@ -3291,7 +3295,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                                       [taskStatus isEqualToString:@"WAIT_RECEIVE"] ||
                                       [taskStatus isEqualToString:@"TO_RECEIVE"] ||
                                       [taskStatus isEqualToString:@"SUCCESS"];
-            BOOL isProgressMet = (taskRequire > 0 && taskProgress >= taskRequire && (rightsTimesLimit <= 0 || alreadyReceive < rightsTimesLimit));
+            BOOL isProgressMet = (![taskStatus isEqualToString:@"TODO"] && taskRequire > 0 && taskProgress >= taskRequire && (rightsTimesLimit <= 0 || alreadyReceive < rightsTimesLimit));
             BOOL isDoneTimesMet = (![taskStatus isEqualToString:@"TODO"] && [bizInfo isKindOfClass:NSDictionary.class] && [bizInfo[@"doneTimes"] integerValue] > alreadyReceive && [bizInfo[@"doneTimes"] integerValue] > 0);
             
             BOOL hasPendingAward = NO;
@@ -3319,14 +3323,13 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 如果存在待领奖且之前在失败列表中，撤销失败并重置重试计数
             if (hasPendingAward) {
                 @synchronized(self) {
-                    if ([gDailyCompletedTasks containsObject:taskKey]) [gDailyCompletedTasks removeObject:taskKey];
                     if ([gDailyFailedTasks containsObject:taskKey]) {
                         [gDailyFailedTasks removeObject:taskKey];
                         gVitalityTaskRetryCounts[taskKey] = @0;
                     }
                     saveDailyTaskCache();
                 }
-            } else if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"] || [taskStatus isEqualToString:@"FINISHED"] || [taskStatus isEqualToString:@"CAN_RECEIVE"]) {
+            } else if (isMultiIncomplete) {
                 // 服务端仍为 TODO 时必须撤销旧版留下的误缓存：只要任务未彻底完结，必须立即从已完成缓存中主动撤销移除
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
@@ -3336,8 +3339,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 }
             }
             
-            // 如果今日已完成且非多阶段未完成任务且无待领奖，坚决跳过，绝不重复排队
-            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete && !hasPendingAward) {
+            // 如果今日已完成且非多阶段未完成任务，坚决跳过，绝不重复排队
+            if ([gDailyCompletedTasks containsObject:taskKey] && !isMultiIncomplete) {
                 continue;
             }
             
