@@ -789,7 +789,12 @@ static BOOL isNoiseProbeLog(NSString *log) {
         [log containsString:@"systemMemoryLevel"] ||
         [log containsString:@"screenReaderEnabled"] ||
         [log containsString:@"SHOULDUSENEWTOUCHEVENT"] ||
-        [log containsString:@"\"safeArea\""]) {
+        [log containsString:@"\"safeArea\""] ||
+        [log containsString:@"queryFriendHomePage"] ||
+        [log containsString:@"setAPDataStorage"] ||
+        [log containsString:@"getAPDataStorage"] ||
+        [log containsString:@"batchQuerySendTreeItems"] ||
+        [log containsString:@"querySendTreeFriendList"]) {
         return YES;
     }
     return NO;
@@ -4573,21 +4578,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSString *randNum = [AntForestManager getNumberRandom:15];
         NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
         
-        // 1. 标准 dailySign RPC
-        NSString *signArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.dailySign\",\"showError\":false,\"showLoading\":false,\"requestData\":[{}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
+        // 真实标准庄园签到底层 RPC: com.alipay.antfarm.sign
+        NSString *signArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.sign\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
         [bridge _doFlushMessageQueue:signArg url:url];
-        
-        // 2. 带 signKey
-        NSString *signArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.dailySign\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"signKey\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", today, timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:signArg2 url:url];
-        
-        // 3. IEP receiveTaskAward (SIGN)
-        NSString *signArg3 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFARM_FOOD_TASK\",\"taskType\":\"SIGN\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:signArg3 url:url];
-        
-        // 4. OpenGreen receiveTaskAward (SIGN)
-        NSString *signArg4 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.receiveTaskAwardopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFARM_FOOD_TASK\",\"taskType\":\"SIGN\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:signArg4 url:url];
     }
     
     [self executeManorScriptOnWebView:@"(()=>{try{"
@@ -4882,82 +4875,49 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 
 - (void)finishManorTask:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title {
     if (!self.enableAutoManor || !taskType.length) return;
-    
-    NSString *scene = sceneCode.length ? sceneCode : @"ANTFARM_FOOD_TASK";
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
-    if (!bridge) return;
-    
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
-    NSString *randNum = [AntForestManager getNumberRandom:15];
-    NSString *outBizNo = [NSString stringWithFormat:@"%@_%@_%@", taskType, timeStamp, [AntForestManager getNumberRandom:6]];
-    NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
-    
-    NSLog(@"🐔 [蚂蚁庄园·执行任务] 正在完成: %@ (%@)", title ?: taskType, taskType);
-    
-    // 1. 标准 antiep.finishTask
-    NSString *argIEP = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.finishTask\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@\",\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, timeStamp, randNum];
-    [bridge _doFlushMessageQueue:argIEP url:url];
-    
-    // 2. antieptask.finishTaskopengreen
-    NSString *argOG = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.finishTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"outBizNo\":\"%@_og\",\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, outBizNo, timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:argOG url:url];
-    
-    // 3. antfarm.biz.rpc.finishTask
-    NSString *argFarm = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.finishTask\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"taskId\":\"%@\",\"taskType\":\"%@\",\"sceneCode\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", taskType, taskType, scene, timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:argFarm url:url];
+    [self doManorFarmTaskWithBizKey:taskType];
 }
 
 - (void)receiveManorTaskAward:(NSString *)taskType sceneCode:(NSString *)sceneCode taskTitle:(NSString *)title awardName:(NSString *)awardName {
     if (!self.enableAutoManor || !taskType.length) return;
-    
-    NSString *scene = sceneCode.length ? sceneCode : @"ANTFARM_FOOD_TASK";
+    [self receiveManorFarmTaskAwardWithTaskId:taskType title:title];
+}
+
+- (void)queryManorFarmTasks {
+    if (!self.enableAutoManor) return;
     PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
     if (!bridge) return;
-    
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
     NSString *randNum = [AntForestManager getNumberRandom:15];
     NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
-    
-    NSLog(@"🐔 [蚂蚁庄园·领取奖励] 正在领取: %@ (%@)", title ?: taskType, awardName ?: @"饲料");
-    [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：已领取“%@”（%@）", title ?: taskType, awardName ?: @"饲料"]];
-    
-    // 1. 标准 antiep.receiveTaskAward
-    NSString *argIEP = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, randNum];
-    [bridge _doFlushMessageQueue:argIEP url:url];
-    
-    // 2. antieptask.receiveTaskAwardopengreen
-    NSString *argOG = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.receiveTaskAwardopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"taskType\":\"%@\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", scene, taskType, timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:argOG url:url];
-    
-    // 3. antfarm.biz.rpc.receiveTaskAward
-    NSString *argFarm = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.receiveTaskAward\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"taskId\":\"%@\",\"taskType\":\"%@\",\"sceneCode\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", taskType, taskType, scene, timeStamp, [AntForestManager getNumberRandom:15]];
-    [bridge _doFlushMessageQueue:argFarm url:url];
+    NSString *taskArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.listFarmTask\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
+    [bridge _doFlushMessageQueue:taskArg url:url];
 }
 
-- (void)silentFetchUrlIfNeeded:(NSString *)jumpUrl {
-    if (![jumpUrl isKindOfClass:NSString.class] || !jumpUrl.length) return;
-    NSString *cleanUrl = jumpUrl;
-    if ([jumpUrl containsString:@"url="]) {
-        NSRange r = [jumpUrl rangeOfString:@"url="];
-        NSString *sub = [jumpUrl substringFromIndex:r.location + 4];
-        NSRange amp = [sub rangeOfString:@"&"];
-        if (amp.location != NSNotFound) {
-            NSString *candidate = [sub substringToIndex:amp.location];
-            cleanUrl = [candidate stringByRemovingPercentEncoding] ?: candidate;
-        } else {
-            cleanUrl = [sub stringByRemovingPercentEncoding] ?: sub;
-        }
-    }
-    if ([cleanUrl hasPrefix:@"http://"] || [cleanUrl hasPrefix:@"https://"]) {
-        NSURL *reqUrl = [NSURL URLWithString:cleanUrl];
-        if (reqUrl) {
-            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:reqUrl cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
-            [req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Nebula AlipayDefined(nt:WIFI,ws:393|759,fx:393|852) AliApp(AP/12.12.16.6000) AlipayClient/12.12.16.6000 Language/zh-Hans" forHTTPHeaderField:@"User-Agent"];
-            [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(__unused NSData *d, __unused NSURLResponse *res, __unused NSError *err){}] resume];
-        }
-    }
+- (void)doManorFarmTaskWithBizKey:(NSString *)bizKey {
+    if (!self.enableAutoManor || !bizKey.length) return;
+    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    if (!bridge) return;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
+    NSString *randNum = [AntForestManager getNumberRandom:15];
+    NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
+    NSString *doTaskArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.doFarmTask\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"bizKey\":\"%@\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", bizKey, timeStamp, randNum];
+    [bridge _doFlushMessageQueue:doTaskArg url:url];
+}
+
+- (void)receiveManorFarmTaskAwardWithTaskId:(NSString *)taskId title:(NSString *)title {
+    if (!self.enableAutoManor || !taskId.length) return;
+    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    if (!bridge) return;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
+    NSString *randNum = [AntForestManager getNumberRandom:15];
+    NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
+    NSString *claimArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.receiveFarmTaskAward\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"taskId\":\"%@\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", taskId, timeStamp, randNum];
+    [bridge _doFlushMessageQueue:claimArg url:url];
+    [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：已提交领取“%@”（饲料奖励）...", title ?: taskId]];
 }
 
 - (void)handleManorTaskList:(NSArray *)taskList {
@@ -4970,27 +4930,37 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     initDailyTaskCache();
     
-    NSMutableArray<NSDictionary *> *tasksToClaim = [NSMutableArray array];
+    static NSArray *s_knownBizKeys = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        s_knownBizKeys = @[@"ADD_GONGGE_NEW", @"USER_STARVE_PUSH", @"HIRE_LOW_ACTIVITY",
+                           @"HEART_DONATION_ADVANCED_FOOD_V2", @"YEB_PURCHASE", @"DIANTAOHUANDUAN",
+                           @"TAO_GOLDEN_V2", @"WIDGET_addzujian", @"SHANGYEHUA_90_1",
+                           @"TAOBAO_tab2gzy", @"YITAO_appgyg"];
+    });
     
     for (NSDictionary *task in taskList) {
         if (![task isKindOfClass:NSDictionary.class]) continue;
-        NSString *bizKey = task[@"bizKey"] ?: task[@"taskId"];
-        if (!bizKey.length) continue;
+        NSString *bizKey = task[@"bizKey"] ?: @"";
+        NSString *taskId = task[@"taskId"] ?: @"";
         NSString *status = task[@"taskStatus"] ?: @"";
-        NSString *taskKey = [NSString stringWithFormat:@"ANTFARM_FOOD_TASK:%@", bizKey];
+        NSString *title = task[@"title"] ?: (bizKey.length ? bizKey : taskId);
+        NSString *mode = task[@"taskMode"] ?: @"";
+        NSInteger award = [task[@"awardCount"] integerValue] ?: ([task[@"canReceiveAwardCount"] integerValue] ?: 90);
         
         if ([status isEqualToString:@"RECEIVED"]) {
             if ([bizKey isEqualToString:@"ANSWER"]) {
                 NSString *today = getCurrentDateString();
                 [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastManorAnswerDate"];
             }
-            [gDailyCompletedTasks addObject:taskKey];
-            saveDailyTaskCache();
             continue;
         }
         
         if ([status isEqualToString:@"FINISHED"]) {
-            [tasksToClaim addObject:task];
+            if (taskId.length) {
+                [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现已完成任务“%@”，正在领取 %ldg 饲料...", title, (long)award]];
+                [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
+            }
             continue;
         }
         
@@ -5003,28 +4973,27 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         [self answerManorClassroomQuestion];
                     });
                 }
+            } else if ([mode isEqualToString:@"VIEW"] || (bizKey.length && [s_knownBizKeys containsObject:bizKey])) {
+                NSString *taskKey = [NSString stringWithFormat:@"ANTFARM_FOOD_TASK:%@", bizKey];
+                if (![gDailyCompletedTasks containsObject:taskKey]) {
+                    [gDailyCompletedTasks addObject:taskKey];
+                    saveDailyTaskCache();
+                    [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：正在完成浏览任务“%@”...", title]];
+                    [self doManorFarmTaskWithBizKey:bizKey];
+                    if (taskId.length) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                            [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
+                        });
+                    }
+                }
             }
-        }
-    }
-    
-    // 批量一键领取真实已完成的任务奖励（如支付送饲料、已达成活动等）
-    if (tasksToClaim.count > 0) {
-        [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现 %lu 个已达成任务待领奖，正在一键批量领饲料...", (unsigned long)tasksToClaim.count]];
-        for (NSInteger i = 0; i < tasksToClaim.count; i++) {
-            NSDictionary *t = tasksToClaim[i];
-            NSString *bizKey = t[@"bizKey"] ?: t[@"taskId"];
-            NSString *title = t[@"title"] ?: bizKey;
-            NSInteger award = [t[@"canReceiveAwardCount"] integerValue] ?: ([t[@"awardCount"] integerValue] ?: 90);
-            
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((i * 800 + 300) * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                [self receiveManorTaskAward:bizKey sceneCode:@"ANTFARM_FOOD_TASK" taskTitle:title awardName:[NSString stringWithFormat:@"%ldg饲料", (long)award]];
-            });
         }
     }
 }
 
 - (void)runManorTasks {
     if (!self.enableAutoManor) return;
+    [self queryManorFarmTasks];
     [self executeManorTaskProcessScript];
 }
 
@@ -5050,31 +5019,21 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSString *randNum = [AntForestManager getNumberRandom:15];
         NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
         
-        // A. com.alipay.antfarm.feedAnimal (核心原生 RPC)
-        if (self.lastManorFarmId.length) {
-            NSString *feedArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"animalId\":\"%@\",\"farmId\":\"%@\",\"operType\":\"FEED\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorAnimalId ?: @"", self.lastManorFarmId, timeStamp, randNum];
-            [bridge _doFlushMessageQueue:feedArg1 url:url];
-        }
-        
-        NSString *feedArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"operType\":\"FEED\",\"requestType\":\"RPC\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:feedArg2 url:url];
-        
-        // B. com.alipay.antfarm.biz.rpc.feedAnimal (兼容旧版 RPC)
-        if (self.lastManorFarmId.length) {
-            NSString *feedArg3 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"animalId\":\"%@\",\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorFarmId, self.lastManorAnimalId ?: @"", timeStamp, [AntForestManager getNumberRandom:15]];
-            [bridge _doFlushMessageQueue:feedArg3 url:url];
-        }
-        
-        NSString *feedArg4 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:feedArg4 url:url];
-        
-        NSString *feedArg5 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:feedArg5 url:url];
-        
-        // C. 同步小鸡进食状态
-        if (self.lastManorFarmId.length) {
-            NSString *syncArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.syncAnimalStatus\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"operType\":\"FEEDSYNC\",\"queryFoodStockInfo\":true,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorFarmId, timeStamp, [AntForestManager getNumberRandom:15]];
-            [bridge _doFlushMessageQueue:syncArg url:url];
+        NSString *farmId = self.lastManorFarmId ?: @"";
+        if (farmId.length) {
+            // 真实标准底层 RPC: com.alipay.antfarm.feedAnimal
+            NSString *feedArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"animalType\":\"CHICK\",\"canMock\":true,\"farmId\":\"%@\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId, timeStamp, randNum];
+            [bridge _doFlushMessageQueue:feedArg url:url];
+            
+            // 真实标准底层状态同步: com.alipay.antfarm.syncAnimalStatus
+            NSString *syncUserId = self.myUserId;
+            if (!syncUserId.length && farmId.length > 2) {
+                syncUserId = [farmId substringFromIndex:farmId.length / 2];
+            }
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                NSString *syncArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.syncAnimalStatus\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"operType\":\"FEEDSYNC\",\"queryFoodStockInfo\":false,\"recall\":false,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"userId\":\"%@\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId, syncUserId ?: @"", [NSString stringWithFormat:@"%ld", (long)([[NSDate date] timeIntervalSince1970] * 1000)], [AntForestManager getNumberRandom:15]];
+                [bridge _doFlushMessageQueue:syncArg url:url];
+            });
         }
     }
     
@@ -5138,12 +5097,23 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     });
 }
 
+- (void)collectManorChickenManurePot:(NSString *)potNo {
+    if (!self.enableAutoManor || !potNo.length) return;
+    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    if (!bridge) return;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
+    NSString *randNum = [AntForestManager getNumberRandom:15];
+    NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
+    NSString *manureArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.collectManurePot\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"manurePotNOs\":\"%@\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", potNo, timeStamp, randNum];
+    [bridge _doFlushMessageQueue:manureArg url:url];
+}
+
 - (void)collectManorChickenManure {
     if (!self.enableAutoManor) return;
     
     NSString *today = getCurrentDateString();
     if ([self.lastManorManureCollectDate isEqualToString:today]) {
-        NSLog(@"🐔 [蚂蚁庄园] 今日小鸡农场肥料已收过，跳过重复收取");
         return;
     }
     
@@ -5151,18 +5121,6 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     if (now - lastCollectTime < 15) return;
     lastCollectTime = now;
-    
-    [self recordStage:@"蚂蚁庄园：正在检测小鸡肥料并自动收取入账芭芭农场..."];
-    
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
-    if (bridge) {
-        NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
-        NSString *randNum = [AntForestManager getNumberRandom:15];
-        NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
-        
-        NSString *manureArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.orchard.manure.collect\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
-        [bridge _doFlushMessageQueue:manureArg url:url];
-    }
     
     [self executeManorScriptOnWebView:@"(()=>{try{"
      "function triggerClick(el){if(!el)return;try{el.click();}catch(e){}}"
@@ -5208,6 +5166,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         if (!self.isManorChickenEating && self.lastManorFarmId.length) {
             [self feedManorChicken];
         }
+    });
+    
+    // 5. 庄园任务体检与做任务
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self queryManorFarmTasks];
     });
 }
 
@@ -5304,15 +5267,15 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             NSDictionary *manureVO = [subFarm[@"manureVO"] isKindOfClass:NSDictionary.class] ? subFarm[@"manureVO"] : nil;
             if (manureVO) {
                 NSArray *potList = manureVO[@"manurePotList"];
-                CGFloat totalPotNum = 0;
                 for (NSDictionary *pot in potList) {
-                    if ([pot isKindOfClass:NSDictionary.class] && pot[@"manurePotNum"]) {
-                        totalPotNum += [pot[@"manurePotNum"] doubleValue];
+                    if ([pot isKindOfClass:NSDictionary.class]) {
+                        NSString *potNo = pot[@"manurePotNO"];
+                        NSInteger potNum = [pot[@"manurePotNum"] integerValue];
+                        if (potNo.length && potNum >= 100) {
+                            [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：打扫鸡屎/肥料（罐内 %ldg），正在自动收取...", (long)potNum]];
+                            [self collectManorChickenManurePot:potNo];
+                        }
                     }
-                }
-                if (totalPotNum >= 360) {
-                    [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：小鸡肥料已累积满（%.0f 肥），正在自动收取...", totalPotNum]];
-                    [self collectManorChickenManure];
                 }
             }
         }

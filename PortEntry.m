@@ -2360,7 +2360,12 @@ static BOOL isNoiseProbeLog(NSString *log) {
         [log containsString:@"systemMemoryLevel"] ||
         [log containsString:@"screenReaderEnabled"] ||
         [log containsString:@"SHOULDUSENEWTOUCHEVENT"] ||
-        [log containsString:@"\"safeArea\""]) {
+        [log containsString:@"\"safeArea\""] ||
+        [log containsString:@"queryFriendHomePage"] ||
+        [log containsString:@"setAPDataStorage"] ||
+        [log containsString:@"getAPDataStorage"] ||
+        [log containsString:@"batchQuerySendTreeItems"] ||
+        [log containsString:@"querySendTreeFriendList"]) {
         return YES;
     }
     return NO;
