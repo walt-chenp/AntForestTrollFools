@@ -89,6 +89,7 @@ dispatch_queue_t globalSerialQueueTest;
         
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [afm notifyActiveH5PageToRefresh];
                 if (afm.enableAutoPatrolNew) {
                     [afm queryMonopolyTaskListWithForce:YES];
                     [afm claimAllVisibleMonopolyRewardsOnWebView];
@@ -101,7 +102,8 @@ dispatch_queue_t globalSerialQueueTest;
                     [afm queryOceanTaskListWithForce:YES];
                 }
                 if (afm.enableAutoRewardTasks) {
-                    [afm queryVitalityTaskList];
+                    [afm queryVitalityTaskListWithForce:YES];
+                    [afm claimAllVisibleRewardTaskRewardsOnWebView];
                 }
                 if (afm.enableAutoFarmTasks) {
                     [afm queryFarmTaskListWithForce:YES];
@@ -1465,7 +1467,34 @@ static void initDailyTaskCache(void) {
             NSArray *completed = [defaults objectForKey:@"vitality_daily_completed"];
             gDailyCompletedTasks = [NSMutableSet setWithArray:completed ?: @[]];
             NSArray *failed = [defaults objectForKey:@"vitality_daily_failed"];
-            gDailyFailedTasks = [NSMutableSet setWithArray:failed ?: @[]];
+            NSMutableSet *clearedFailed = [NSMutableSet set];
+            for (NSString *key in failed ?: @[]) {
+                if (![key containsString:@"XIANYU"] &&
+                    ![key containsString:@"xianyu"] &&
+                    ![key containsString:@"taobao"] &&
+                    ![key containsString:@"BUSINESS"] &&
+                    ![key containsString:@"LIGHTS"] &&
+                    ![key containsString:@"XLIGHT"] &&
+                    ![key containsString:@"SQYT"] &&
+                    ![key containsString:@"ANTOCEAN"] &&
+                    ![key containsString:@"AIFISH"] &&
+                    ![key containsString:@"aifish"] &&
+                    ![key containsString:@"FLOATBALL"] &&
+                    ![key containsString:@"floatball"] &&
+                    ![key containsString:@"NCLY"] &&
+                    ![key containsString:@"ncly"] &&
+                    ![key containsString:@"BWXRK"] &&
+                    ![key containsString:@"bwxrk"] &&
+                    ![key containsString:@"ORCHARD"] &&
+                    ![key containsString:@"orchard"] &&
+                    ![key containsString:@"ANTFARM"] &&
+                    ![key containsString:@"antfarm"] &&
+                    ![key containsString:@"MONOPOLY"] &&
+                    ![key containsString:@"HSDWY"]) {
+                    [clearedFailed addObject:key];
+                }
+            }
+            gDailyFailedTasks = clearedFailed;
         } else {
             gDailyCompletedTasks = [NSMutableSet set];
             gDailyFailedTasks = [NSMutableSet set];
@@ -1925,6 +1954,11 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     } else if ([lowerUrl containsString:@"2021003115672468"] || [lowerUrl containsString:@"ocean"]) {
         if (self.enableAutoOceanTasks) {
             [self queryOceanTaskListWithForce:YES];
+        }
+    } else if ([lowerUrl containsString:@"180020010001247580"] || [lowerUrl containsString:@"vitality"] || [lowerUrl containsString:@"reward"]) {
+        if (self.enableAutoRewardTasks) {
+            [self queryVitalityTaskListWithForce:YES];
+            [self claimAllVisibleRewardTaskRewardsOnWebView];
         }
     }
 }
@@ -2405,7 +2439,6 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
             if (!anyTaskEnabled || !anyBridge) {
                 @synchronized(self) {
                     vitalityTaskRunning = NO;
-                    [vitalityTaskQueue removeAllObjects];
                     gCurrentExecutingTaskKey = nil;
                     gCurrentExecutingTaskIsMultiStage = NO;
                 }
@@ -2452,12 +2485,14 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                                 [self notifyActiveH5PageToRefresh];
                             });
                         } else {
-                            [self claimVitalityStageAwardsIfNeeded];
-                            [self recordStage:@"领奖励：本批次任务已执行完毕，2.5秒后自动刷新拉取新解锁任务与阶梯大奖..."];
-                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                                [self queryVitalityTaskListWithForce:YES];
-                                [self notifyActiveH5PageToRefresh];
-                            });
+                            if (self.enableAutoRewardTasks) {
+                                [self claimVitalityStageAwardsIfNeeded];
+                                [self recordStage:@"领奖励：本批次任务已执行完毕，2.5秒后自动刷新拉取新解锁任务与阶梯大奖..."];
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                    [self queryVitalityTaskListWithForce:YES];
+                                    [self notifyActiveH5PageToRefresh];
+                                });
+                            }
                         }
                     } else {
                         if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
@@ -2471,8 +2506,10 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                         } else if ([sLastExecutedSceneCode containsString:@"DRAW"] || [sLastExecutedSceneCode containsString:@"LOTTERY"]) {
                             [self recordStage:@"森林寻宝：当前所有任务奖励已全部领取完毕"];
                         } else {
-                            [self claimVitalityStageAwardsIfNeeded];
-                            [self recordStage:@"领奖励：所有常规任务与阶梯大奖已全部处理完毕"];
+                            if (self.enableAutoRewardTasks) {
+                                [self claimVitalityStageAwardsIfNeeded];
+                                [self recordStage:@"领奖励：所有常规任务与阶梯大奖已全部处理完毕"];
+                            }
                         }
                         [self notifyActiveH5PageToRefresh];
                     }
@@ -2511,21 +2548,11 @@ static BOOL sHasPerformedWorkInCurrentVitalityRound = NO;
                 bridge = self.lotteryBridge ?: self.rewardTaskBridge ?: self.jsBridge;
             }
             if (!bridge) {
-                if (isMonopolyScene) {
-                    [self recordStage:@"新版保护地：当前未处于保护地界面，跳过保护地任务调度"];
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [self executeNextVitalityTask];
-                    });
-                    return;
-                }
-                if (isLotteryScene) {
-                    [self recordStage:@"森林寻宝：当前未处于寻宝界面，跳过寻宝任务调度"];
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [self executeNextVitalityTask];
-                    });
-                    return;
-                }
-                @synchronized(self) { vitalityTaskRunning = NO; }
+                NSString *modTag = isMonopolyScene ? @"新版保护地" : (isLotteryScene ? @"森林寻宝" : (isOceanScene ? @"神奇海洋" : (isFarmScene ? @"芭芭农场" : ([sceneCode containsString:@"AIFISH"] ? @"AI摸鱼" : @"领奖励"))));
+                [self recordStage:[NSString stringWithFormat:@"%@：当前未处于对应界面，跳过本任务调度", modTag]];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self executeNextVitalityTask];
+                });
                 return;
             }
             
@@ -3086,9 +3113,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             }
         }
         
-        // 1. 签到处理
+        // 1. 签到处理 (仅在开启领奖励与寻宝时处理)
         NSDictionary *signVO = [data[@"energySignVO"] isKindOfClass:NSDictionary.class] ? data[@"energySignVO"] : nil;
-        if (signVO) {
+        if (self.enableAutoRewardTasks && signVO) {
             NSString *signId = [signVO[@"signId"] isKindOfClass:NSString.class] ? signVO[@"signId"] : @"";
             NSString *currKey = [signVO[@"currentSignKey"] isKindOfClass:NSString.class] ? signVO[@"currentSignKey"] : @"";
             NSArray *records = [signVO[@"signRecords"] isKindOfClass:NSArray.class] ? signVO[@"signRecords"] : nil;
@@ -3246,7 +3273,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                               [btnText isEqualToString:@"领取"] || [btnText isEqualToString:@"领奖"] ||
                               [btnText isEqualToString:@"领步数"] || [btnText isEqualToString:@"立即领取"] ||
                               [btnText isEqualToString:@"领取奖励"] || [btnText isEqualToString:@"领饲料"] ||
-                              [btnText isEqualToString:@"领机会"] || [btnText isEqualToString:@"领摸鱼次数"];
+                              [btnText isEqualToString:@"领机会"] || [btnText isEqualToString:@"领摸鱼次数"] ||
+                              [btnText isEqualToString:@"领能量"] || [btnText isEqualToString:@"领取能量"] ||
+                              [btnText isEqualToString:@"收下"] || [btnText isEqualToString:@"开心收下"];
             BOOL isStatusCanReceive = [taskStatus isEqualToString:@"FINISHED"] ||
                                       [taskStatus isEqualToString:@"CAN_RECEIVE"] ||
                                       [taskStatus isEqualToString:@"WAIT_AWARD"] ||
@@ -4116,12 +4145,14 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "function scanAndClick(){"
      "  const all=Array.from(document.querySelectorAll('*'));"
      "  let claimCnt=0;"
+"  const all=Array.from(document.querySelectorAll('*'));"
+     "  let claimCnt=0;"
      "  const clickedSet=new Set();"
      "  for(const el of all){"
      "    if(el.children.length===0&&el.innerText){"
      "      const txt=el.innerText.trim().replace(/\\s+/g,'');"
-     "      if(txt.includes('森林')||txt.includes('能量'))continue;"
-     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='开心收下'||txt==='我知道了'||txt==='领步数'||txt==='领骰子'){"
+     "      if(txt.includes('森林'))continue;"
+     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='开心收下'||txt==='我知道了'||txt==='领步数'||txt==='领骰子'||txt==='领能量'||txt==='领取能量'||txt.includes('领取')||txt.includes('领奖')){"
      "        const target=el.closest('button,[role=button],div[class*=btn],div[class*=button]')||el;"
      "        if(!clickedSet.has(target)){"
      "          clickedSet.add(target);"
@@ -4234,8 +4265,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "  for(const el of all){"
      "    if(el.children.length===0&&el.innerText){"
      "      const txt=el.innerText.trim().replace(/\\s+/g,'');"
-     "      if(txt.includes('森林')||txt.includes('能量'))continue;"
-     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='领机会'||txt==='领摸鱼次数'){"
+     "      if(txt.includes('森林'))continue;"
+     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='开心收下'||txt==='领机会'||txt==='领摸鱼次数'||txt==='领能量'||txt==='领取能量'||txt==='领摸鱼能量'||txt==='点击领能量'||txt.includes('领取')||txt.includes('领奖')){"
      "        const target=el.closest('button,[role=button],div[class*=btn],div[class*=button]')||el;"
      "        if(!clickedSet.has(target)){"
      "          clickedSet.add(target);"
@@ -4256,6 +4287,115 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "  setTimeout(()=>{try{obs.disconnect();window.__afAIFishRewardObserverInstalled=false;}catch(e){}},30000);"
      "}"
      "}catch(e){console.error('[AntForestPort] claimAllVisibleAIFishRewards error: ',e);}})();"];
+}
+
+- (void)executeRewardTaskScriptOnWebView:(NSString *)js {
+    if (!js.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSMutableSet *targets = [NSMutableSet set];
+        SEL evalSel = @selector(evaluateJavaScript:completionHandler:);
+        id bridge = self.rewardTaskBridge ?: self.jsBridge;
+        if (bridge) {
+            if ([bridge respondsToSelector:@selector(contentView)]) {
+                id cv = [bridge contentView];
+                if (cv && [cv respondsToSelector:evalSel]) [targets addObject:cv];
+                if ([cv respondsToSelector:@selector(webView)]) {
+                    id wv = ((id (*)(id, SEL))objc_msgSend)(cv, @selector(webView));
+                    if (wv && [wv respondsToSelector:evalSel]) [targets addObject:wv];
+                }
+            }
+            if ([bridge respondsToSelector:@selector(webView)]) {
+                id wv = ((id (*)(id, SEL))objc_msgSend)(bridge, @selector(webView));
+                if (wv && [wv respondsToSelector:evalSel]) [targets addObject:wv];
+            }
+        }
+        if (targets.count == 0) {
+            NSArray *windows = [UIApplication sharedApplication].windows;
+            for (UIWindow *win in windows) {
+                if (!win) continue;
+                NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
+                while (stack.count > 0) {
+                    UIView *v = stack.lastObject;
+                    [stack removeLastObject];
+                    if ([v respondsToSelector:evalSel]) {
+                        if (!v.hidden && v.alpha > 0.01) {
+                            if ([v respondsToSelector:@selector(URL)]) {
+                                NSURL *u = ((id (*)(id, SEL))objc_msgSend)(v, @selector(URL));
+                                if (u) {
+                                    NSString *us = u.absoluteString.lowercaseString;
+                                    if ([us containsString:@"180020010001247580"] || [us containsString:@"vitality"] || [us containsString:@"home.html"] || [us containsString:@"60000002"]) {
+                                        [targets addObject:v];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    [stack addObjectsFromArray:v.subviews];
+                }
+            }
+        }
+        for (id target in targets) {
+            if ([target respondsToSelector:evalSel]) {
+                @try {
+                    ((void (*)(id, SEL, NSString *, void (^)(id, NSError *)))objc_msgSend)(target, evalSel, js, nil);
+                } @catch (NSException *e) {}
+            }
+        }
+    });
+}
+
+- (void)claimAllVisibleRewardTaskRewardsOnWebView {
+    [self executeRewardTaskScriptOnWebView:@"(()=>{try{"
+     "function triggerClick(el){"
+     "  if(!el)return;"
+     "  try{"
+     "    const r=el.getBoundingClientRect();"
+     "    const x=r.left+r.width/2,y=r.top+r.height/2;"
+     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
+     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
+     "    try{"
+     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
+     "    try{"
+     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
+     "    try{el.click();}catch(e){}"
+     "  }catch(e){try{el.click();}catch(e2){}}"
+     "}"
+     "function scanAndClick(){"
+     "  const all=Array.from(document.querySelectorAll('*'));"
+     "  let claimCnt=0;"
+     "  const clickedSet=new Set();"
+     "  for(const el of all){"
+     "    if(el.children.length===0&&el.innerText){"
+     "      const txt=el.innerText.trim().replace(/\\s+/g,'');"
+     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='开心收下'||txt==='领能量'||txt==='领取能量'||txt==='领摸鱼能量'||txt==='领步数'||txt.includes('领取')||txt.includes('领奖')){"
+     "        const target=el.closest('button,[role=button],div[class*=btn],div[class*=button]')||el;"
+     "        if(!clickedSet.has(target)){"
+     "          clickedSet.add(target);"
+     "          triggerClick(target);"
+     "          triggerClick(el);"
+     "          claimCnt++;"
+     "        }"
+     "      }"
+     "    }"
+     "  }"
+     "  if(claimCnt>0)console.log('[AntForestPort] Auto-claimed '+claimCnt+' reward buttons');"
+     "}"
+     "scanAndClick();"
+     "if(!window.__afRewardTaskObserverInstalled){"
+     "  window.__afRewardTaskObserverInstalled=true;"
+     "  const obs=new MutationObserver(()=>{scanAndClick();});"
+     "  obs.observe(document.body||document.documentElement,{childList:true,subtree:true});"
+     "  setTimeout(()=>{try{obs.disconnect();window.__afRewardTaskObserverInstalled=false;}catch(e){}},30000);"
+     "}"
+     "}catch(e){console.error('[AntForestPort] claimAllVisibleRewardTaskRewards error: ',e);}})();"];
 }
 
 - (void)collectFarmChickenManure {

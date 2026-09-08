@@ -114,6 +114,8 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)claimAllVisibleMonopolyRewardsOnWebView;
 -(void)executeAIFishScriptOnWebView:(NSString *)js;
 -(void)claimAllVisibleAIFishRewardsOnWebView;
+-(void)executeRewardTaskScriptOnWebView:(NSString *)js;
+-(void)claimAllVisibleRewardTaskRewardsOnWebView;
 +(BOOL)isManorURL:(NSURL *)url;
 +(BOOL)isManorResponse:(id)value;
 -(void)handleManorResponse:(NSDictionary *)dict;
