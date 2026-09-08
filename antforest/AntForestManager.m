@@ -3268,10 +3268,10 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire) || isMultiStageTaskFromDict(t, baseInfo, bizInfo);
             
             // 待领取状态判定：
-            // 1. 服务端 taskStatus 为 FINISHED, CAN_RECEIVE, WAIT_AWARD, WAIT_RECEIVE 等；
-            // 2. rightsTimes > alreadyReceive（已做次数大于已领次数，存在未领取奖励）；
-            // 3. taskProgress >= taskRequire（要求已达成但尚未领奖）；
-            // 4. 按钮文案明确带有“领”（如“领取”、“立即领取”、“领步数”），且不含“去”。
+            // 1. 服务端 taskStatus 明确为 FINISHED, CAN_RECEIVE, WAIT_AWARD, WAIT_RECEIVE 等；
+            // 2. 进度已达标且未领完：taskRequire > 0 && taskProgress >= taskRequire && (rightsTimesLimit <= 0 || alreadyReceive < rightsTimesLimit)；
+            // 3. 按钮文案明确带有“领”（如“领取”、“立即领取”），且绝对不含“去”，且 taskStatus 不为 TODO；
+            // 4. doneTimes > alreadyReceive 仅在明确非 TODO 状态下有效（严禁将 TODO 任务误判为待领奖）。
             NSString *finishedBtnText = bizInfo[@"finishedBtnText"] ?: @"";
             NSString *btnText = bizInfo[@"btnText"] ?: bizInfo[@"buttonText"] ?: baseInfo[@"btnText"] ?: t[@"btnText"] ?: @"";
             if (!btnText.length && [t[@"taskDisplayConfig"] isKindOfClass:NSDictionary.class]) {
@@ -3291,12 +3291,15 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                                       [taskStatus isEqualToString:@"WAIT_RECEIVE"] ||
                                       [taskStatus isEqualToString:@"TO_RECEIVE"] ||
                                       [taskStatus isEqualToString:@"SUCCESS"];
-            BOOL hasPendingAward = (
-                isStatusCanReceive ||
-                (rightsTimes > alreadyReceive && rightsTimes > 0) ||
-                (taskRequire > 0 && taskProgress >= taskRequire && (rightsTimesLimit <= 0 || alreadyReceive < rightsTimesLimit)) ||
-                isClaimBtn
-            );
+            BOOL isProgressMet = (taskRequire > 0 && taskProgress >= taskRequire && (rightsTimesLimit <= 0 || alreadyReceive < rightsTimesLimit));
+            BOOL isDoneTimesMet = (![taskStatus isEqualToString:@"TODO"] && [bizInfo isKindOfClass:NSDictionary.class] && [bizInfo[@"doneTimes"] integerValue] > alreadyReceive && [bizInfo[@"doneTimes"] integerValue] > 0);
+            
+            BOOL hasPendingAward = NO;
+            if (isStatusCanReceive || isProgressMet || isDoneTimesMet) {
+                hasPendingAward = YES;
+            } else if (![taskStatus isEqualToString:@"TODO"] && isClaimBtn && ![btnText containsString:@"去"]) {
+                hasPendingAward = YES;
+            }
             
             // 严禁将累积肥料数量（如1400肥）与次数限制（如8次）错误比较！
             // 只要存在未领取的奖励（hasPendingAward），或者属于多阶段未完结任务，绝不视为全部完成！
@@ -3313,12 +3316,14 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
             
-            // 如果存在待领奖，必须立即从已完成与失败缓存中主动撤销移除，重置重试计数
+            // 如果存在待领奖且之前在失败列表中，撤销失败并重置重试计数
             if (hasPendingAward) {
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) [gDailyCompletedTasks removeObject:taskKey];
-                    if ([gDailyFailedTasks containsObject:taskKey]) [gDailyFailedTasks removeObject:taskKey];
-                    gVitalityTaskRetryCounts[taskKey] = @0;
+                    if ([gDailyFailedTasks containsObject:taskKey]) {
+                        [gDailyFailedTasks removeObject:taskKey];
+                        gVitalityTaskRetryCounts[taskKey] = @0;
+                    }
                     saveDailyTaskCache();
                 }
             } else if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"] || [taskStatus isEqualToString:@"FINISHED"] || [taskStatus isEqualToString:@"CAN_RECEIVE"]) {
@@ -3341,9 +3346,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
 
-            // 防死循环熔断：如果该任务已连续尝试 2 次以上未成功且当前无待领奖，立即熔断加入失败缓存
+            // 防死循环熔断：如果该任务已连续尝试 2 次以上未成功，立即熔断加入失败缓存
             NSInteger vRetries = [gVitalityTaskRetryCounts[taskKey] integerValue];
-            if (vRetries >= 2 && !hasPendingAward) {
+            if (vRetries >= 2) {
                 @synchronized(self) {
                     [gDailyFailedTasks addObject:taskKey];
                     saveDailyTaskCache();
