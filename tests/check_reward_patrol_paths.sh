@@ -22,4 +22,5 @@ grep -Fq 'objc_getClassList(classes, classCount)' "$entry_file"
 grep -Fq 'startSilentRewardContext' "$entry_file"
 grep -Fq 'daemonView' "$entry_file"
 grep -Fq '会话探针 session=' "$entry_file"
-if grep -Fq 'startFirstLoadRequest:' "$entry_file"; then exit 1; fi
+grep -Fq '优先执行能量签到以激活今日累计阶梯奖励' "$source_file"
+grep -Fq 'queryVitalityTaskListWithForce:YES' "$source_file"

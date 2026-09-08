@@ -3136,6 +3136,17 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     [self recordStage:[NSString stringWithFormat:@"%@：服务端已确认领取成功", moduleTag]];
                 }
             }
+        } else if ([opType containsString:@"antiep.sign"] || [opType isEqualToString:@"com.alipay.antiep.sign"]) {
+            if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [resDesc containsString:@"成功"] || [resDesc containsString:@"已签到"]) {
+                @synchronized(self) {
+                    [gDailyCompletedTasks addObject:@"SIGN_TODAY"];
+                    saveDailyTaskCache();
+                }
+                [self recordStage:@"领奖励：今日能量签到成功，已重置并激活今日累计阶梯奖励"];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self queryVitalityTaskListWithForce:YES];
+                });
+            }
         } else if ([resCode isEqualToString:@"3000"] || [args[@"error"] integerValue] == 3000 || [data[@"error"] integerValue] == 3000 || [args[@"error"] integerValue] == 999) {
             BOOL isLegacyAntiepRpc = [opType hasPrefix:@"com.alipay.antiep."] && ![opType containsString:@"antieptask"];
             if (!isLegacyAntiepRpc) {
@@ -3188,27 +3199,20 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     [gDailyCompletedTasks addObject:signTaskKey];
                 }
             } else if (signId.length) {
-                BOOL alreadyInQueue = NO;
+                // 核心业务依赖：每日零点后必须先完成签到，服务端才会重置并激活今日累计任务阶梯（40g/60g/100g）。
+                // 若未签到就执行普通任务，任务完成次数不会被计入今日累计进度，导致阶梯奖励无法生效领取！
+                // 因此未签到时强制优先执行签到，并彻底阻断后续普通任务解析入队，待签到成功并刷新列表后再执行。
                 @synchronized(self) {
-                    if ([gDailyCompletedTasks containsObject:signTaskKey]) {
-                        alreadyInQueue = YES;
-                    } else {
-                        for (NSDictionary *q in vitalityTaskQueue) {
-                            if ([q[@"action"] isEqualToString:@"sign"]) { alreadyInQueue = YES; break; }
-                        }
-                    }
+                    [gDailyCompletedTasks removeObject:signTaskKey];
                 }
-                if (!alreadyInQueue) {
-                    @synchronized(self) {
-                        [vitalityTaskQueue addObject:@{
-                            @"action": @"sign",
-                            @"signId": signId,
-                            @"title": @"每日签到",
-                            @"awardName": @"能量",
-                            @"sceneCode": @"ANTFOREST_VITALITY_TASK"
-                        }];
-                    }
-                }
+                [self recordStage:@"领奖励：检测到今日尚未签到，正在优先执行能量签到以激活今日累计阶梯奖励..."];
+                [self signVitalityTask:signId];
+                
+                // 延时 1.8 秒后主动刷新任务列表，此时服务端已完成签到处理与今日阶梯重置，届时再正常执行常规任务
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [self queryVitalityTaskListWithForce:YES];
+                });
+                return;
             }
         }
         
@@ -3560,8 +3564,12 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             if (newlyParsedTasks.count > 0) {
                 BOOL isMainVitality = [newlyParsedTasks.firstObject[@"sceneCode"] isEqualToString:@"ANTFOREST_VITALITY_TASK"];
                 if (isMainVitality && vitalityTaskQueue.count > 0) {
-                    // 主线领奖励任务优先插入队列前方执行
-                    NSIndexSet *indexes = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, newlyParsedTasks.count)];
+                    // 主线领奖励任务优先插入队列前方执行（若队首为每日签到，保持签到在第 0 位优先执行）
+                    NSInteger insertIdx = 0;
+                    if ([vitalityTaskQueue.firstObject[@"action"] isEqualToString:@"sign"]) {
+                        insertIdx = 1;
+                    }
+                    NSIndexSet *indexes = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(insertIdx, newlyParsedTasks.count)];
                     [vitalityTaskQueue insertObjects:newlyParsedTasks atIndexes:indexes];
                 } else {
                     [vitalityTaskQueue addObjectsFromArray:newlyParsedTasks];
