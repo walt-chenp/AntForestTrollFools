@@ -1531,9 +1531,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     
     // 过滤真实付款与金融高危任务，注意避免误杀包含“支付宝”字样的安全浏览任务
     NSString *cleanTitle = [lowerTitle stringByReplacingOccurrencesOfString:@"支付宝" withString:@""];
-    if ([cleanTitle containsString:@"市集"] ||
-        [cleanTitle containsString:@"惊喜市集"] ||
-        [cleanTitle containsString:@"保障"] ||
+    if ([cleanTitle containsString:@"保障"] ||
         [cleanTitle containsString:@"保险"] ||
         [cleanTitle containsString:@"好医保"] ||
         [cleanTitle containsString:@"借呗"] ||
@@ -1562,7 +1560,7 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [cleanTitle containsString:@"我的花园"] ||
         [cleanTitle containsString:@"花园小镇"] ||
         [cleanTitle containsString:@"连续"] ||
-        [cleanTitle containsString:@"清理垃圾"] ||
+        [cleanTitle containsString:@"垃圾"] ||
         [cleanTitle containsString:@"帮好友清理"] ||
         [cleanTitle containsString:@"给随机好友"]) {
         return NO;
@@ -1575,14 +1573,11 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
-    // 明确不支持 finishTask RPC 的市集导流、答题、捡垃圾、连续签到与外部小程序小游戏
-    if ([lowerTitle containsString:@"市集"] || [lowerTitle containsString:@"惊喜市集"] || [lowerType containsString:@"shiji"] || [lowerType containsString:@"market"]) {
-        return NO;
-    }
+    // 明确不支持 finishTask RPC 的答题、捡垃圾、连续签到与外部小程序小游戏
     if ([lowerType containsString:@"dati"] || [lowerTitle containsString:@"答题"]) {
         return NO;
     }
-    if ([lowerType containsString:@"rubbishclean"] || [lowerTitle containsString:@"清理垃圾"]) {
+    if ([lowerType containsString:@"rubbish"] || [lowerTitle containsString:@"垃圾"]) {
         return NO;
     }
     if ([lowerType containsString:@"visisit"] || [lowerType containsString:@"consecutive"] || [lowerTitle containsString:@"连续"] || [lowerTitle containsString:@"3天"]) {
@@ -3181,6 +3176,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     moduleTag = @"芭芭农场";
                 } else if ([sceneCode containsString:@"AIFISH"]) {
                     moduleTag = @"AI摸鱼";
+                } else if ([sceneCode containsString:@"MONOPOLY"] || [sceneCode containsString:@"HSDWY"]) {
+                    moduleTag = @"新版保护地";
                 }
                 [self recordStage:[NSString stringWithFormat:@"%@：任务 [%@] 连续尝试未成功，触发熔断跳过", moduleTag, taskTitle]];
                 continue;
@@ -3202,6 +3199,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             } else if ([sceneCode containsString:@"AIFISH"]) {
                 if (!self.enableAutoAIFish) continue;
                 if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeAIFishTask(taskType, taskTitle)) continue;
+            } else if ([sceneCode containsString:@"MONOPOLY"] || [sceneCode containsString:@"HSDWY"]) {
+                if (!self.enableAutoPatrolNew) continue;
+                if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
             } else {
                 if (!self.enableAutoRewardTasks) continue;
                 if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
