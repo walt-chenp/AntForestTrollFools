@@ -6699,6 +6699,17 @@ static BOOL oceanPlanLoggedThisRound = NO;
             id userInfoMap = dict[@"userBaseInfo"] ?: resData[@"userBaseInfo"] ?: dict[@"loginUserBaseInfo"] ?: resData[@"loginUserBaseInfo"] ?: dict[@"userEnergy"] ?: resData[@"userEnergy"] ?: dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"] ?: resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"];
             
             if((bubblesList || wateringBubblesList) && userInfoMap) {
+                // 1. 提取登录账户 UID (loginUserBaseInfo 恒等于当前登录用户)
+                NSString *loginUid = dict[@"loginUserBaseInfo"][@"userId"] ?: resData[@"loginUserBaseInfo"][@"userId"];
+                if (loginUid.length) {
+                    if (!self.myUserId.length || ![self.myUserId isEqualToString:loginUid]) {
+                        self.myUserId = loginUid;
+                        [self recordStage:@"本人账户已识别"];
+                        [[NSUserDefaults standardUserDefaults] setObject:loginUid forKey:@"lastKnownUserId"];
+                    }
+                }
+                
+                // 2. 提取当前气泡所属页面用户的 UID (好友页为好友 UID，本人首页为本人 UID)
                 NSString *userId = nil;
                 if([dict objectForKey:@"userBaseInfo"]) {
                     NSDictionary *pDic = [dict objectForKey:@"userBaseInfo"];
@@ -6712,25 +6723,17 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 } else if ([resData objectForKey:@"userEnergy"]) {
                     NSDictionary *pDic = [resData objectForKey:@"userEnergy"];
                     userId = [pDic objectForKey:@"userId"];
-                } else if ([dict objectForKey:@"loginUserBaseInfo"]) {
-                    NSDictionary *pDic = [dict objectForKey:@"loginUserBaseInfo"];
-                    userId = [pDic objectForKey:@"userId"];
-                } else if ([resData objectForKey:@"loginUserBaseInfo"]) {
-                    NSDictionary *pDic = [resData objectForKey:@"loginUserBaseInfo"];
-                    userId = [pDic objectForKey:@"userId"];
                 } else if (resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"]) {
                     userId = resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"];
                 } else if (dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"]) {
                     userId = dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"];
                 }
-                if (userId.length && !self.myUserId.length) {
-                    self.myUserId = userId;
-                    [self recordStage:@"本人账户已识别"];
-                    [[NSUserDefaults standardUserDefaults] setObject:userId forKey:@"lastKnownUserId"];
+                
+                if (!userId.length) {
+                    userId = loginUid ?: self.myUserId;
                 }
-                if (!userId.length) userId = self.myUserId;
-                if (!userId.length && !self.myUserId.length) {
-                    [self recordStage:@"诊断 · 气泡回包跳过：本人账户尚未识别"];
+                if (!userId.length) {
+                    [self recordStage:@"诊断 · 气泡回包跳过：账户尚未识别"];
                     return;
                 }
                 
@@ -6739,10 +6742,19 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     self.friendsName[userId] = dName;
                 }
                 
-                BOOL mine = (dict[@"loginUserBaseInfo"] && !dict[@"userBaseInfo"] && !dict[@"userEnergy"]) || 
-                            (resData[@"loginUserBaseInfo"] && !resData[@"userBaseInfo"] && !resData[@"userEnergy"]) ||
-                            (resData[@"combineHandlerVOMap"] != nil || dict[@"combineHandlerVOMap"] != nil) ||
-                            (userId.length && [userId isEqualToString:self.myUserId]);
+                // 3. 严格判定是否为本人首页：
+                // 如果回包为好友页面（包含 nextAction=="Friend"，或者 userBaseInfo/userEnergy 且不等于本人 UID），则绝非本人首页
+                BOOL isFriendPage = [resData[@"nextAction"] isEqualToString:@"Friend"] || 
+                                    [dict[@"nextAction"] isEqualToString:@"Friend"] ||
+                                    (dict[@"userBaseInfo"][@"userId"] && self.myUserId.length && ![dict[@"userBaseInfo"][@"userId"] isEqualToString:self.myUserId]) ||
+                                    (resData[@"userBaseInfo"][@"userId"] && self.myUserId.length && ![resData[@"userBaseInfo"][@"userId"] isEqualToString:self.myUserId]) ||
+                                    (dict[@"userEnergy"][@"userId"] && self.myUserId.length && ![dict[@"userEnergy"][@"userId"] isEqualToString:self.myUserId]) ||
+                                    (resData[@"userEnergy"][@"userId"] && self.myUserId.length && ![resData[@"userEnergy"][@"userId"] isEqualToString:self.myUserId]);
+                
+                BOOL mine = !isFriendPage && (
+                    (userId.length && self.myUserId.length && [userId isEqualToString:self.myUserId]) ||
+                    (!dict[@"userBaseInfo"] && !dict[@"userEnergy"] && !resData[@"userBaseInfo"] && !resData[@"userEnergy"])
+                );
                 
                 if (self.enableAutoRevive && !mine && userId.length) {
                     NSDictionary *userInfo = [dict[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? dict[@"userBaseInfo"] : nil;
@@ -6881,7 +6893,6 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     }
                 }
                 [self recordStage:[NSString stringWithFormat:@"诊断 · %@气泡回包：总 %lu 个，可收 %lu 个，等待 %lu 个", mine ? @"本人" : @"好友", (unsigned long)dictBubbles.count, (unsigned long)available, (unsigned long)waiting]];
-                if (mine) [self recordStage:[NSString stringWithFormat:@"本人首页回包：总 %lu 个，可收 %lu 个，等待 %lu 个", (unsigned long)dictBubbles.count, (unsigned long)available, (unsigned long)waiting]];
                 if (mine && !self.enableSelfCollect) {
                     [self recordStage:@"已跳过本人能量"];
                     [self releaseSelfPriorityForCycle:collectionCycle reason:@"本人收取已关闭"];
@@ -6906,8 +6917,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         
                     }
                     if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"INSUFFICIENT"]){
-                        NSString *log = [NSString stringWithFormat:@"%@\n能量不足,剩%@g, %@",[[AntForestManager sharedInstance] getUserName:bUserId],remainEnergy,bid];
-                        [[AntForestManager sharedInstance] addLog:log];
+                        // 能量不足只记录调试日志，避免在主日志面板中刷屏
+                        NSLog(@"[AntForestPort] 能量不足: %@, 剩%@g, %@", [[AntForestManager sharedInstance] getUserName:bUserId], remainEnergy, bid);
                     }
                     //等待中放入字典树中
                     if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"WAITING"] && overTime){
@@ -6918,8 +6929,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fb requiringSecureCoding:NO error:nil];
                         [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsBubbles"];
                         [[NSUserDefaults standardUserDefaults] synchronize];
-                        NSString *log = [NSString stringWithFormat:@"%@\n找到等待能量球(%@g) 入库, %@",[[AntForestManager sharedInstance] getUserName:bUserId],remainEnergy,bid];
-                        [[AntForestManager sharedInstance] addLog:log];
+                        // 等待能量球入库只进系统日志，避免每颗气泡挤爆用户面板
+                        NSLog(@"[AntForestPort] 等待能量球入库: %@, %@g, %@", [[AntForestManager sharedInstance] getUserName:bUserId], remainEnergy, bid);
                     }
                     //可帮助直接帮助
                     if([[bubble objectForKey:@"canHelpCollect"] isEqualToNumber:@1]){
@@ -6931,6 +6942,12 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 // 匹配 wateringBubbles（包含好友浇水赠能、保护地巡护动物每日巡护能量球）
                 NSArray *wateringBubbles = dict[@"wateringBubbles"] ?: resData[@"wateringBubbles"];
                 if ([wateringBubbles isKindOfClass:NSArray.class]) {
+                    static NSMutableSet *collectedWateringBids = nil;
+                    static dispatch_once_t wbOnce;
+                    dispatch_once(&wbOnce, ^{
+                        collectedWateringBids = [NSMutableSet set];
+                    });
+                    
                     for (NSDictionary *wb in wateringBubbles) {
                         if (![wb isKindOfClass:NSDictionary.class]) continue;
                         NSNumber *bidNum = wb[@"id"] ?: wb[@"bubbleId"];
@@ -6938,13 +6955,19 @@ static BOOL oceanPlanLoggedThisRound = NO;
                             NSString *bid = [bidNum stringValue];
                             NSString *bizType = [NSString stringWithFormat:@"%@", wb[@"bizType"] ?: @""];
                             NSString *fullEnergy = [NSString stringWithFormat:@"%@", wb[@"fullEnergy"] ?: wb[@"energy"] ?: @""];
-                            NSString *giverUid = wb[@"userId"] ?: @"";
                             
+                            // 严防误收与刷屏：
                             // 仅本人首页的赠能/巡护能量，或动物巡护能量，或好友页明确允许代收(canHelpCollect)才收
                             if (mine || [bizType containsString:@"animal"] || [wb[@"canHelpCollect"] isEqualToNumber:@1]) {
+                                if ([collectedWateringBids containsObject:bid]) {
+                                    continue;
+                                }
+                                if (collectedWateringBids.count > 500) {
+                                    [collectedWateringBids removeAllObjects];
+                                }
+                                [collectedWateringBids addObject:bid];
+                                
                                 NSString *targetUid = (mine || [bizType containsString:@"animal"]) ? (self.myUserId.length ? self.myUserId : userId) : (userId ?: self.myUserId);
-                                NSString *log = [NSString stringWithFormat:@"%@\n找到赠能/巡护能量球(%@g) 收取, %@", giverUid.length ? [[AntForestManager sharedInstance] getUserName:giverUid] : [[AntForestManager sharedInstance] getUserName:targetUid], fullEnergy, bid];
-                                [[AntForestManager sharedInstance] addLog:log];
                                 [self recordStage:[NSString stringWithFormat:@"发现赠能/巡护能量（%@g，ID：%@）并自动收取", fullEnergy, bid]];
                                 dispatch_async(globalSerialQueueCollect, ^{
                                     [[AntForestManager sharedInstance] collectBubbles:targetUid bubblesId:bid];
