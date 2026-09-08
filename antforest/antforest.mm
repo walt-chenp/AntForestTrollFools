@@ -492,6 +492,21 @@ CHOptimizedMethod(1, self, void, H5WebViewController, viewDidAppear, _Bool,arg1)
     //添加一个显示日志的按钮
     [self showIcon];
     
+    @try {
+        NSURL *url = nil;
+        if ([self respondsToSelector:@selector(url)]) {
+            url = [self url];
+        }
+        if (!url && [self respondsToSelector:@selector(lastMainRequest)]) {
+            url = [[self lastMainRequest] URL];
+        }
+        if (url) {
+            NSString *urlStr = url.absoluteString;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [[AntForestManager sharedInstance] checkAndTriggerPageActionsForUrl:urlStr];
+            });
+        }
+    } @catch (NSException *e) {}
 }
 
 #pragma mark ---control
@@ -501,15 +516,16 @@ CHDeclareClass(PSDJsBridge); // declare class
 // - (void)_doFlushMessageQueue:(id)arg1 url:(id)arg2;
 CHOptimizedMethod(2, self,void,PSDJsBridge,_doFlushMessageQueue,id,arg1,url,id,arg2) {
     CHSuper(2, PSDJsBridge,_doFlushMessageQueue,arg1,url,arg2);
-    //FileLog(@"anthook _doFlushMessageQueue:\narg1: %@\narg2: %@\n",arg1,arg2);
-    //FileLog(@"anthook _doFlushMessageQueue 调用\n",arg1,arg2);
+    if ([arg2 isKindOfClass:[NSString class]]) {
+        [[AntForestManager sharedInstance] registerBridge:self withUrl:(NSString *)arg2];
+    } else {
+        [[AntForestManager sharedInstance] registerBridge:self withUrl:nil];
+    }
 }
 
 // - (id)transformResponseData:(id)arg1;
 CHOptimizedMethod(1, self,id,PSDJsBridge,transformResponseData,id,arg1) {
-    //FileLog(@"anthook transformResponseData:\n%@\n",arg1);
-    //FileLog(@"anthook transformResponseData 调用\n",arg1);
-    [[AntForestManager sharedInstance] setJsBridge:self];
+    [[AntForestManager sharedInstance] registerBridge:self withUrl:nil];
     //拦截返回数据判断
     [[AntForestManager sharedInstance] matchFriendIdAndBubbles:arg1];
     return CHSuper(1, PSDJsBridge,transformResponseData,arg1);
@@ -524,7 +540,7 @@ CHConstructor // code block that runs immediately upon load
         CHHook(1,H5WebViewController, viewDidAppear);
         
         CHLoadLateClass(PSDJsBridge);
-        //CHHook2(PSDJsBridge,_doFlushMessageQueue,url);
+        CHHook2(PSDJsBridge,_doFlushMessageQueue,url);
         CHHook1(PSDJsBridge,transformResponseData);
         
         //CHLoadLateClass(DFClientDelegate);

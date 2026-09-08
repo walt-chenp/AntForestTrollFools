@@ -86,6 +86,29 @@ dispatch_queue_t globalSerialQueueTest;
         todayCollectedAnimalKeys = [NSMutableSet set];
         lastAnimalCollectAttemptTimes = [NSMutableDictionary dictionary];
         shieldReportedFriendsInRound = [NSMutableSet set];
+        
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                if (afm.enableAutoPatrolNew) {
+                    [afm queryMonopolyTaskListWithForce:YES];
+                    [afm claimAllVisibleMonopolyRewardsOnWebView];
+                }
+                if (afm.enableAutoAIFish) {
+                    [afm queryAIFishTaskListWithForce:YES];
+                    [afm claimAllVisibleAIFishRewardsOnWebView];
+                }
+                if (afm.enableAutoOceanTasks) {
+                    [afm queryOceanTaskListWithForce:YES];
+                }
+                if (afm.enableAutoRewardTasks) {
+                    [afm queryVitalityTaskList];
+                }
+                if (afm.enableAutoFarmTasks) {
+                    [afm queryFarmTaskListWithForce:YES];
+                    [afm claimAllVisibleFarmRewardsOnWebView];
+                }
+            });
+        }];
     });
     return afm;
 }
@@ -1559,6 +1582,11 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [cleanTitle containsString:@"源星战域"] ||
         [cleanTitle containsString:@"我的花园"] ||
         [cleanTitle containsString:@"花园小镇"] ||
+        [cleanTitle containsString:@"市集"] ||
+        [cleanTitle containsString:@"惊喜市集"] ||
+        [cleanTitle containsString:@"新版保护地"] ||
+        [cleanTitle containsString:@"进入新版保护地"] ||
+        [cleanTitle containsString:@"保护地"] ||
         [cleanTitle containsString:@"连续"] ||
         [cleanTitle containsString:@"垃圾"] ||
         [cleanTitle containsString:@"帮好友清理"] ||
@@ -1573,6 +1601,14 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
+    // 明确不做神奇海洋“逛一逛惊喜市集”与外部市集
+    if ([lowerType containsString:@"shiji"] || [lowerTitle containsString:@"市集"] || [lowerTitle containsString:@"惊喜市集"]) {
+        return NO;
+    }
+    // 明确不做“进入新版保护地”与保护地跳转任务
+    if ([lowerTitle containsString:@"新版保护地"] || [lowerTitle containsString:@"进入新版保护地"] || [lowerTitle containsString:@"保护地"] || [lowerType containsString:@"monopoly"]) {
+        return NO;
+    }
     // 明确不支持 finishTask RPC 的答题、捡垃圾、连续签到与外部小程序小游戏
     if ([lowerType containsString:@"dati"] || [lowerTitle containsString:@"答题"]) {
         return NO;
@@ -1608,13 +1644,36 @@ static BOOL isSafeAIFishTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     if ([lowerType containsString:@"kuaishou"] || [lowerTitle containsString:@"快手"] ||
+        [lowerType containsString:@"xianyu"] || [lowerTitle containsString:@"闲鱼"] ||
+        [lowerTitle containsString:@"让闲置循环"] ||
         [lowerType containsString:@"zhuanhua"] || [lowerType containsString:@"cnxdy"] ||
-        [lowerTitle containsString:@"击败"] || [lowerTitle containsString:@"打怪"] || [lowerTitle containsString:@"玩一玩超"]) {
+        [lowerTitle containsString:@"击败"] || [lowerTitle containsString:@"打怪"] || [lowerTitle containsString:@"玩一玩超"] ||
+        [lowerTitle containsString:@"安装"] || [lowerTitle containsString:@"下载"]) {
         return NO;
     }
     if ([lowerType containsString:@"aifish"] || [lowerType containsString:@"touch_fish"] || [lowerTitle containsString:@"摸鱼"]) {
         return YES;
     }
+    return isSafeRewardTask(taskType, title);
+}
+
+static BOOL isSafeMonopolyTask(NSString *taskType, NSString *title) {
+    if (!taskType.length) return NO;
+    NSString *lowerType = taskType.lowercaseString;
+    NSString *lowerTitle = title ? title.lowercaseString : @"";
+    
+    // 外部App跳转类（如闲鱼、淘宝、快手等）无法通过简单的 finishTask RPC 完成，由用户手动做，手动做完后自动领奖
+    if ([lowerType containsString:@"xianyu"] || [lowerTitle containsString:@"闲鱼"] || [lowerTitle containsString:@"让闲置循环"] ||
+        [lowerType containsString:@"kuaishou"] || [lowerTitle containsString:@"快手"] ||
+        [lowerTitle containsString:@"安装"] || [lowerTitle containsString:@"下载"]) {
+        return NO;
+    }
+    
+    // 带有导流前缀 DAOLIU_ 的是纯跳转/浏览安全任务
+    if ([lowerType hasPrefix:@"daoliu_"] || [lowerType containsString:@"daoliu"]) {
+        return YES;
+    }
+    
     return isSafeRewardTask(taskType, title);
 }
 
@@ -1806,6 +1865,68 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         } @catch (NSException *e) {}
     }
     return nil;
+}
+
+- (void)registerBridge:(id)bridge withUrl:(NSString *)url {
+    if (!bridge) return;
+    self.jsBridge = bridge;
+    
+    NSString *effectiveUrl = url.length ? url : [self effectiveUrlForBridge:bridge];
+    NSString *lowerUrl = effectiveUrl.lowercaseString;
+    
+    if (lowerUrl.length) {
+        if ([lowerUrl containsString:@"180020010001293606"] || [lowerUrl containsString:@"monopoly"] || [lowerUrl containsString:@"hsdwy"] || [lowerUrl containsString:@"patrol"] || [lowerUrl containsString:@"guardian"]) {
+            self.monopolyBridge = bridge;
+            self.monopolyH5Url = effectiveUrl;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [self claimAllVisibleMonopolyRewardsOnWebView];
+            });
+        } else if ([lowerUrl containsString:@"180020010001290531"] || [lowerUrl containsString:@"aifish"] || [lowerUrl containsString:@"antaifish"]) {
+            self.aiFishBridge = bridge;
+            self.aiFishH5Url = effectiveUrl;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [self claimAllVisibleAIFishRewardsOnWebView];
+            });
+        } else if ([lowerUrl containsString:@"180020010001263018"] || [lowerUrl containsString:@"farm"] || [lowerUrl containsString:@"orchard"]) {
+            self.farmBridge = bridge;
+            self.farmH5Url = effectiveUrl;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [self claimAllVisibleFarmRewardsOnWebView];
+            });
+        } else if ([lowerUrl containsString:@"2021003115672468"] || [lowerUrl containsString:@"ocean"]) {
+            self.oceanBridge = bridge;
+            self.oceanH5Url = effectiveUrl;
+        } else if ([lowerUrl containsString:@"180020010001279274"] || [lowerUrl containsString:@"lotterymachine"] || [lowerUrl containsString:@"draw"]) {
+            self.lotteryBridge = bridge;
+            self.lotteryH5Url = effectiveUrl;
+        }
+    }
+}
+
+- (void)checkAndTriggerPageActionsForUrl:(NSString *)urlStr {
+    if (!urlStr.length) return;
+    NSString *lowerUrl = urlStr.lowercaseString;
+    
+    if ([lowerUrl containsString:@"180020010001293606"] || [lowerUrl containsString:@"monopoly"] || [lowerUrl containsString:@"hsdwy"] || [lowerUrl containsString:@"patrol"] || [lowerUrl containsString:@"guardian"]) {
+        if (self.enableAutoPatrolNew) {
+            [self queryMonopolyTaskListWithForce:YES];
+            [self claimAllVisibleMonopolyRewardsOnWebView];
+        }
+    } else if ([lowerUrl containsString:@"180020010001290531"] || [lowerUrl containsString:@"aifish"] || [lowerUrl containsString:@"antaifish"]) {
+        if (self.enableAutoAIFish) {
+            [self queryAIFishTaskListWithForce:YES];
+            [self claimAllVisibleAIFishRewardsOnWebView];
+        }
+    } else if ([lowerUrl containsString:@"180020010001263018"] || [lowerUrl containsString:@"farm"] || [lowerUrl containsString:@"orchard"]) {
+        if (self.enableAutoFarmTasks) {
+            [self queryFarmTaskListWithForce:YES];
+            [self claimAllVisibleFarmRewardsOnWebView];
+        }
+    } else if ([lowerUrl containsString:@"2021003115672468"] || [lowerUrl containsString:@"ocean"]) {
+        if (self.enableAutoOceanTasks) {
+            [self queryOceanTaskListWithForce:YES];
+        }
+    }
 }
 
 - (NSString *)urlForSceneCode:(NSString *)scene bridge:(PSDJsBridge *)bridge {
@@ -3110,10 +3231,42 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             // 优先评估多阶段任务未完成状态
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(taskTitle, taskProgress, taskRequire) || isMultiStageTaskFromDict(t, baseInfo, bizInfo);
             
-            // 严禁将累积肥料数量（如1400肥）与次数限制（如8次）错误比较！仅在非多阶段未完成、且（已明确RECEIVED或次数做满或总奖励领满）时才判定为全部完成
-            BOOL isAllFinished = !isMultiIncomplete && ([taskStatus isEqualToString:@"RECEIVED"] ||
-                                 (rightsTimesLimit > 0 && rightsTimes >= rightsTimesLimit) ||
-                                 (rightsTimesLimit > 0 && alreadyReceive >= rightsTimesLimit));
+            // 待领取状态判定：
+            // 1. 服务端 taskStatus 为 FINISHED, CAN_RECEIVE, WAIT_AWARD, WAIT_RECEIVE 等；
+            // 2. rightsTimes > alreadyReceive（已做次数大于已领次数，存在未领取奖励）；
+            // 3. taskProgress >= taskRequire（要求已达成但尚未领奖）；
+            // 4. 按钮文案明确带有“领”（如“领取”、“立即领取”、“领步数”），且不含“去”。
+            NSString *finishedBtnText = bizInfo[@"finishedBtnText"] ?: @"";
+            NSString *btnText = bizInfo[@"btnText"] ?: bizInfo[@"buttonText"] ?: baseInfo[@"btnText"] ?: t[@"btnText"] ?: @"";
+            if (!btnText.length && [t[@"taskDisplayConfig"] isKindOfClass:NSDictionary.class]) {
+                btnText = t[@"taskDisplayConfig"][@"buttonText"] ?: t[@"taskDisplayConfig"][@"btnText"] ?: @"";
+            }
+            BOOL isClaimBtn = ([btnText containsString:@"领"] && ![btnText containsString:@"去"]) ||
+                              ([finishedBtnText containsString:@"领"] && ![finishedBtnText containsString:@"去"]) ||
+                              [btnText isEqualToString:@"领取"] || [btnText isEqualToString:@"领奖"] ||
+                              [btnText isEqualToString:@"领步数"] || [btnText isEqualToString:@"立即领取"] ||
+                              [btnText isEqualToString:@"领取奖励"] || [btnText isEqualToString:@"领饲料"] ||
+                              [btnText isEqualToString:@"领机会"] || [btnText isEqualToString:@"领摸鱼次数"];
+            BOOL isStatusCanReceive = [taskStatus isEqualToString:@"FINISHED"] ||
+                                      [taskStatus isEqualToString:@"CAN_RECEIVE"] ||
+                                      [taskStatus isEqualToString:@"WAIT_AWARD"] ||
+                                      [taskStatus isEqualToString:@"WAIT_RECEIVE"] ||
+                                      [taskStatus isEqualToString:@"TO_RECEIVE"] ||
+                                      [taskStatus isEqualToString:@"SUCCESS"];
+            BOOL hasPendingAward = (
+                isStatusCanReceive ||
+                (rightsTimes > alreadyReceive && rightsTimes > 0) ||
+                (taskRequire > 0 && taskProgress >= taskRequire && (rightsTimesLimit <= 0 || alreadyReceive < rightsTimesLimit)) ||
+                isClaimBtn
+            );
+            
+            // 严禁将累积肥料数量（如1400肥）与次数限制（如8次）错误比较！
+            // 只要存在未领取的奖励（hasPendingAward），或者属于多阶段未完结任务，绝不视为全部完成！
+            // 仅在明确已领完（RECEIVED且已领>=限制，或alreadyReceive>=rightsTimesLimit且无未领奖）时才判定为全部完成
+            BOOL isAllFinished = !hasPendingAward && !isMultiIncomplete && (
+                ([taskStatus isEqualToString:@"RECEIVED"] && (rightsTimesLimit <= 0 || alreadyReceive >= rightsTimesLimit)) ||
+                (rightsTimesLimit > 0 && alreadyReceive >= rightsTimesLimit)
+            );
             if (isAllFinished) {
                 @synchronized(self) {
                     [gDailyCompletedTasks addObject:taskKey];
@@ -3122,33 +3275,21 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
             
-            // 服务端仍为 TODO 时必须撤销旧版留下的误缓存：只要任务未彻底完结（多阶段未完成、或仍为TODO/FINISHED/CAN_RECEIVE），必须立即从已完成缓存中主动撤销移除
-            if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"] || [taskStatus isEqualToString:@"FINISHED"] || [taskStatus isEqualToString:@"CAN_RECEIVE"]) {
+            // 如果存在待领奖，必须立即从已完成与失败缓存中主动撤销移除，重置重试计数
+            if (hasPendingAward) {
+                @synchronized(self) {
+                    if ([gDailyCompletedTasks containsObject:taskKey]) [gDailyCompletedTasks removeObject:taskKey];
+                    if ([gDailyFailedTasks containsObject:taskKey]) [gDailyFailedTasks removeObject:taskKey];
+                    gVitalityTaskRetryCounts[taskKey] = @0;
+                    saveDailyTaskCache();
+                }
+            } else if (isMultiIncomplete || [taskStatus isEqualToString:@"TODO"] || [taskStatus isEqualToString:@"FINISHED"] || [taskStatus isEqualToString:@"CAN_RECEIVE"]) {
+                // 服务端仍为 TODO 时必须撤销旧版留下的误缓存：只要任务未彻底完结，必须立即从已完成缓存中主动撤销移除
                 @synchronized(self) {
                     if ([gDailyCompletedTasks containsObject:taskKey]) {
                         [gDailyCompletedTasks removeObject:taskKey];
                         saveDailyTaskCache();
                     }
-                }
-            }
-            
-            // 待领取状态判定：
-            // 1. 服务端 taskStatus 为 FINISHED 或 CAN_RECEIVE；
-            // 2. rightsTimes > alreadyReceive（已做次数大于已领次数，存在未领取奖励）；
-            // 3. finishedBtnText（完成时按钮文案）明确带有“领”字，且当前非初始 TODO 状态；
-            // 严禁将 todoBtnText（如“去领机会”）作为待领奖判定，避免未做任务误入领奖死循环。
-            NSString *finishedBtnText = bizInfo[@"finishedBtnText"] ?: @"";
-            BOOL hasPendingAward = (!isAllFinished && (
-                [taskStatus isEqualToString:@"FINISHED"] ||
-                [taskStatus isEqualToString:@"CAN_RECEIVE"] ||
-                (rightsTimes > alreadyReceive && rightsTimes > 0) ||
-                ([finishedBtnText containsString:@"领"] && ![taskStatus isEqualToString:@"TODO"])
-            ));
-            
-            if (hasPendingAward) {
-                @synchronized(self) {
-                    if ([gDailyCompletedTasks containsObject:taskKey]) [gDailyCompletedTasks removeObject:taskKey];
-                    saveDailyTaskCache();
                 }
             }
             
@@ -3162,9 +3303,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
 
-            // 防死循环熔断：如果该任务已连续尝试 2 次以上未成功，立即熔断加入失败缓存，当天不再重复排队
+            // 防死循环熔断：如果该任务已连续尝试 2 次以上未成功且当前无待领奖，立即熔断加入失败缓存
             NSInteger vRetries = [gVitalityTaskRetryCounts[taskKey] integerValue];
-            if (vRetries >= 2) {
+            if (vRetries >= 2 && !hasPendingAward) {
                 @synchronized(self) {
                     [gDailyFailedTasks addObject:taskKey];
                     saveDailyTaskCache();
@@ -3188,23 +3329,25 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 continue;
             }
             
-            // 仅拦截未完成的高风险任务与不可通过RPC自动完成的任务
+            // 仅拦截未完成的高风险任务与不可通过RPC自动完成的任务（已完成待领奖的任务绝不拦截，允许自动领奖）
             if ([sceneCode containsString:@"FARM"] || [sceneCode containsString:@"ORCHARD"] || [sceneCode isEqualToString:@"10021"] || [sceneCode isEqualToString:@"3646"] || [sceneCode hasPrefix:@"BABA_"]) {
                 if (!self.enableAutoFarmTasks || !self.farmBridge) continue;
                 if ([taskType containsString:@"ORCHARD_POP"] || [taskType containsString:@"MIGRATE"] || [taskType containsString:@"POP_MIGRATE"]) continue;
-                if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeFarmTask(taskType, taskTitle)) continue;
+                if (!hasPendingAward && ![taskStatus isEqualToString:@"FINISHED"] && ![taskStatus isEqualToString:@"CAN_RECEIVE"] && !isSafeFarmTask(taskType, taskTitle)) continue;
             } else if ([sceneCode containsString:@"RESCUE"] || [sceneCode containsString:@"OCEAN"]) {
                 if (!self.enableAutoOceanTasks) continue;
-                if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeOceanTask(taskType, taskTitle)) continue;
+                if (!hasPendingAward && ![taskStatus isEqualToString:@"FINISHED"] && ![taskStatus isEqualToString:@"CAN_RECEIVE"] && !isSafeOceanTask(taskType, taskTitle)) continue;
             } else if ([sceneCode containsString:@"AIFISH"]) {
                 if (!self.enableAutoAIFish) continue;
-                if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeAIFishTask(taskType, taskTitle)) continue;
+                if (!hasPendingAward && ![taskStatus isEqualToString:@"FINISHED"] && ![taskStatus isEqualToString:@"CAN_RECEIVE"] && !isSafeAIFishTask(taskType, taskTitle)) continue;
             } else if ([sceneCode containsString:@"MONOPOLY"] || [sceneCode containsString:@"HSDWY"]) {
                 if (!self.enableAutoPatrolNew) continue;
-                if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
+                if (!hasPendingAward && ![taskStatus isEqualToString:@"FINISHED"] && ![taskStatus isEqualToString:@"CAN_RECEIVE"] && !isSafeMonopolyTask(taskType, taskTitle)) continue;
             } else {
                 if (!self.enableAutoRewardTasks) continue;
-                if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
+                if (!hasPendingAward && ![taskStatus isEqualToString:@"CAN_RECEIVE"]) {
+                    if (![taskStatus isEqualToString:@"FINISHED"] && !isSafeRewardTask(taskType, taskTitle)) continue;
+                }
             }
             
             // 阶梯大奖 (阶段宝箱 / 额外累计奖励)
@@ -3936,6 +4079,183 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "  setTimeout(findAndOpenPanel, 500);"
      "}"
      "}catch(e){console.error('[AntForestPort] openMonopolyTaskPanel error: ',e);}})();"];
+    
+    // 打开面板后，顺便扫描并自动领取已完成的步数奖励
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self claimAllVisibleMonopolyRewardsOnWebView];
+    });
+}
+
+- (void)claimAllVisibleMonopolyRewardsOnWebView {
+    [self executeMonopolyScriptOnWebView:@"(()=>{try{"
+     "const curUrl=(window.location.href||'').toLowerCase();"
+     "if(!curUrl.includes('180020010001293606')&&!curUrl.includes('2060090000398301')&&!curUrl.includes('monopoly')&&!curUrl.includes('hsdwy')&&!curUrl.includes('patrol')&&!curUrl.includes('guardian'))return;"
+     "if(curUrl.includes('60000002')||curUrl.includes('180020010001247580')||curUrl.includes('home.html'))return;"
+     "function triggerClick(el){"
+     "  if(!el)return;"
+     "  try{"
+     "    const r=el.getBoundingClientRect();"
+     "    const x=r.left+r.width/2,y=r.top+r.height/2;"
+     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
+     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
+     "    try{"
+     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
+     "    try{"
+     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
+     "    try{el.click();}catch(e){}"
+     "  }catch(e){try{el.click();}catch(e2){}}"
+     "}"
+     "function scanAndClick(){"
+     "  const all=Array.from(document.querySelectorAll('*'));"
+     "  let claimCnt=0;"
+     "  const clickedSet=new Set();"
+     "  for(const el of all){"
+     "    if(el.children.length===0&&el.innerText){"
+     "      const txt=el.innerText.trim().replace(/\\s+/g,'');"
+     "      if(txt.includes('森林')||txt.includes('能量'))continue;"
+     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='开心收下'||txt==='我知道了'||txt==='领步数'||txt==='领骰子'){"
+     "        const target=el.closest('button,[role=button],div[class*=btn],div[class*=button]')||el;"
+     "        if(!clickedSet.has(target)){"
+     "          clickedSet.add(target);"
+     "          triggerClick(target);"
+     "          triggerClick(el);"
+     "          claimCnt++;"
+     "        }"
+     "      }"
+     "    }"
+     "  }"
+     "  if(claimCnt>0)console.log('[AntForestPort] Auto-claimed '+claimCnt+' monopoly reward buttons');"
+     "}"
+     "scanAndClick();"
+     "if(!window.__afMonopolyRewardObserverInstalled){"
+     "  window.__afMonopolyRewardObserverInstalled=true;"
+     "  const obs=new MutationObserver(()=>{scanAndClick();});"
+     "  obs.observe(document.body||document.documentElement,{childList:true,subtree:true});"
+     "  setTimeout(()=>{try{obs.disconnect();window.__afMonopolyRewardObserverInstalled=false;}catch(e){}},30000);"
+     "}"
+     "}catch(e){console.error('[AntForestPort] claimAllVisibleMonopolyRewards error: ',e);}})();"];
+}
+
+- (void)executeAIFishScriptOnWebView:(NSString *)js {
+    if (!js.length) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSMutableSet *targets = [NSMutableSet set];
+        SEL evalSel = @selector(evaluateJavaScript:completionHandler:);
+        id bridge = self.aiFishBridge;
+        if (bridge && bridge != self.jsBridge) {
+            if ([bridge respondsToSelector:@selector(contentView)]) {
+                id cv = [bridge contentView];
+                if (cv && [cv respondsToSelector:evalSel]) [targets addObject:cv];
+                if ([cv respondsToSelector:@selector(webView)]) {
+                    id wv = ((id (*)(id, SEL))objc_msgSend)(cv, @selector(webView));
+                    if (wv && [wv respondsToSelector:evalSel]) [targets addObject:wv];
+                }
+            }
+            if ([bridge respondsToSelector:@selector(webView)]) {
+                id wv = ((id (*)(id, SEL))objc_msgSend)(bridge, @selector(webView));
+                if (wv && [wv respondsToSelector:evalSel]) [targets addObject:wv];
+            }
+        }
+        if (targets.count == 0) {
+            NSArray *windows = [UIApplication sharedApplication].windows;
+            for (UIWindow *win in windows) {
+                if (!win) continue;
+                NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
+                while (stack.count > 0) {
+                    UIView *v = stack.lastObject;
+                    [stack removeLastObject];
+                    if ([v respondsToSelector:evalSel]) {
+                        if (!v.hidden && v.alpha > 0.01) {
+                            if ([v respondsToSelector:@selector(URL)]) {
+                                NSURL *u = ((id (*)(id, SEL))objc_msgSend)(v, @selector(URL));
+                                if (u) {
+                                    NSString *us = u.absoluteString.lowercaseString;
+                                    if ([us containsString:@"60000002"] || [us containsString:@"home.html"]) continue;
+                                    if ([us containsString:@"180020010001290531"] || [us containsString:@"aifish"] || [us containsString:@"antaifish"]) {
+                                        [targets addObject:v];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    [stack addObjectsFromArray:v.subviews];
+                }
+            }
+        }
+        for (id target in targets) {
+            if ([target respondsToSelector:evalSel]) {
+                @try {
+                    ((void (*)(id, SEL, NSString *, void (^)(id, NSError *)))objc_msgSend)(target, evalSel, js, nil);
+                } @catch (NSException *e) {}
+            }
+        }
+    });
+}
+
+- (void)claimAllVisibleAIFishRewardsOnWebView {
+    [self executeAIFishScriptOnWebView:@"(()=>{try{"
+     "const curUrl=(window.location.href||'').toLowerCase();"
+     "if(!curUrl.includes('180020010001290531')&&!curUrl.includes('aifish')&&!curUrl.includes('antaifish'))return;"
+     "if(curUrl.includes('60000002')||curUrl.includes('home.html'))return;"
+     "function triggerClick(el){"
+     "  if(!el)return;"
+     "  try{"
+     "    const r=el.getBoundingClientRect();"
+     "    const x=r.left+r.width/2,y=r.top+r.height/2;"
+     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
+     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
+     "    try{"
+     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
+     "    try{"
+     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
+     "    try{el.click();}catch(e){}"
+     "  }catch(e){try{el.click();}catch(e2){}}"
+     "}"
+     "function scanAndClick(){"
+     "  const all=Array.from(document.querySelectorAll('*'));"
+     "  let claimCnt=0;"
+     "  const clickedSet=new Set();"
+     "  for(const el of all){"
+     "    if(el.children.length===0&&el.innerText){"
+     "      const txt=el.innerText.trim().replace(/\\s+/g,'');"
+     "      if(txt.includes('森林')||txt.includes('能量'))continue;"
+     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='领机会'||txt==='领摸鱼次数'){"
+     "        const target=el.closest('button,[role=button],div[class*=btn],div[class*=button]')||el;"
+     "        if(!clickedSet.has(target)){"
+     "          clickedSet.add(target);"
+     "          triggerClick(target);"
+     "          triggerClick(el);"
+     "          claimCnt++;"
+     "        }"
+     "      }"
+     "    }"
+     "  }"
+     "  if(claimCnt>0)console.log('[AntForestPort] Auto-claimed '+claimCnt+' aifish reward buttons');"
+     "}"
+     "scanAndClick();"
+     "if(!window.__afAIFishRewardObserverInstalled){"
+     "  window.__afAIFishRewardObserverInstalled=true;"
+     "  const obs=new MutationObserver(()=>{scanAndClick();});"
+     "  obs.observe(document.body||document.documentElement,{childList:true,subtree:true});"
+     "  setTimeout(()=>{try{obs.disconnect();window.__afAIFishRewardObserverInstalled=false;}catch(e){}},30000);"
+     "}"
+     "}catch(e){console.error('[AntForestPort] claimAllVisibleAIFishRewards error: ',e);}})();"];
 }
 
 - (void)collectFarmChickenManure {

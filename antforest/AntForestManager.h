@@ -109,6 +109,11 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)executeFarmScriptOnWebView:(NSString *)js;
 -(void)openFarmTaskPanelOnWebView;
 -(void)claimAllVisibleFarmRewardsOnWebView;
+-(void)executeMonopolyScriptOnWebView:(NSString *)js;
+-(void)openMonopolyTaskPanelOnWebView;
+-(void)claimAllVisibleMonopolyRewardsOnWebView;
+-(void)executeAIFishScriptOnWebView:(NSString *)js;
+-(void)claimAllVisibleAIFishRewardsOnWebView;
 +(BOOL)isManorURL:(NSURL *)url;
 +(BOOL)isManorResponse:(id)value;
 -(void)handleManorResponse:(NSDictionary *)dict;
@@ -153,6 +158,8 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)queryMonopolyTaskList;
 -(void)queryMonopolyTaskListWithForce:(BOOL)force;
 -(void)executeMonopolyScriptOnWebView:(NSString *)js;
+-(void)registerBridge:(id)bridge withUrl:(NSString *)url;
+-(void)checkAndTriggerPageActionsForUrl:(NSString *)urlStr;
 -(void)openMonopolyTaskPanelOnWebView;
 -(void)handleVitalityTaskListResponse:(id)args;
 -(void)signVitalityTask:(NSString *)signId;
