@@ -1853,6 +1853,12 @@ static void installEarnEnergyCollector(id controller) {
         [fullOutput appendString:@"没有常规收取日志\n"];
     }
     
+    NSArray *probes = manager.probeRecords;
+    if (probes.count) {
+        [fullOutput appendFormat:@"\n\n========================================\n📋 全量抓包探针数据（共 %lu 条）\n========================================\n\n", (unsigned long)probes.count];
+        [fullOutput appendString:[probes componentsJoinedByString:@"\n\n"]];
+    }
+    
     UIPasteboard.generalPasteboard.string = fullOutput;
     [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -2375,7 +2381,7 @@ static inline BOOL isRelevantPluginURL(NSString *urlStr) {
            [u containsString:@"2021003115672468"];
 }
 
-#define ENABLE_PROBE_LOGS 0
+#define ENABLE_PROBE_LOGS 1
 #define AFProbeLog(...) do { if (ENABLE_PROBE_LOGS) NSLog(__VA_ARGS__); } while(0)
 
 static const void *PortRPCOriginalIMPKey = &PortRPCOriginalIMPKey;
@@ -2616,7 +2622,7 @@ static void portCallJsApi(id self, SEL _cmd, id name, id url, id data, id cb) {
         
         BOOL isManorRpc = (opType.length && ([opType containsString:@"antfarm"] || [opType containsString:@"manor"])) ||
                           ([urlStr.lowercaseString containsString:@"66666674"] || [urlStr.lowercaseString containsString:@"2017090512380701"] || [urlStr.lowercaseString containsString:@"antfarm"] || [urlStr.lowercaseString containsString:@"manor"]);
-        if (isManorRpc && manager.enableAutoManor && self != manager.jsBridge) {
+        if (isManorRpc && manager.enableAutoManor) {
             BOOL isFirstBind = (manager.manorBridge != self);
             if (isFirstBind) {
                 manager.manorBridge = self;
