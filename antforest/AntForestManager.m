@@ -4938,6 +4938,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     initDailyTaskCache();
     
+    NSInteger taskDelayIndex = 0;
+    
     for (NSDictionary *task in taskList) {
         if (![task isKindOfClass:NSDictionary.class]) continue;
         NSString *bizKey = task[@"bizKey"] ?: @"";
@@ -4997,22 +4999,39 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             if ([cat isEqualToString:@"Public_Welfare_Behavior"] ||
                 [bizKey containsString:@"DONATE"] || [bizKey containsString:@"DONATION"] ||
                 [bizKey containsString:@"PAY"] || [bizKey containsString:@"PURCHASE"] ||
+                [bizKey containsString:@"ZhangDanTZ"] || [title containsString:@"信用卡"] ||
+                [bizKey isEqualToString:@"JINGTAN_FEED_FISH"] ||
                 [desc containsString:@"捐"] || [desc containsString:@"付款"] || [desc containsString:@"支付"] || [desc containsString:@"实付"]) {
                 continue;
             }
             
-            // 仅对明确为 VIEW 模式且未完成的纯浏览任务做尝试
-            if ([mode isEqualToString:@"VIEW"]) {
+            // 过滤纯游戏玩局类任务 (Game / Game_Charge)
+            if ([cat isEqualToString:@"Game"] || [cat isEqualToString:@"Game_Charge"]) {
+                continue;
+            }
+            
+            // 针对 VIEW 或 TRIGGER 模式的浏览、逛一逛、功能开启类常规任务进行自动触发
+            if ([mode isEqualToString:@"VIEW"] || [mode isEqualToString:@"TRIGGER"]) {
                 NSString *taskKey = [NSString stringWithFormat:@"ANTFARM_FOOD_TASK:%@", bizKey];
                 if (![gDailyCompletedTasks containsObject:taskKey]) {
                     [gDailyCompletedTasks addObject:taskKey];
                     saveDailyTaskCache();
                     [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：正在完成浏览任务“%@”...", title]];
-                    [self doManorFarmTaskWithBizKey:bizKey];
-                    // 服务端将任务标记为 FINISHED 后，下次刷新任务列表时将安全自动领取
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(taskDelayIndex * 350 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                        [self doManorFarmTaskWithBizKey:bizKey];
+                    });
+                    taskDelayIndex++;
                 }
             }
         }
+    }
+    
+    // 如果有触发的任务，延时后重新查询任务列表，以便自动检测到 FINISHED 并领取饲料入包
+    if (taskDelayIndex > 0) {
+        int64_t refreshDelay = (int64_t)((taskDelayIndex * 350 + 2500) * NSEC_PER_MSEC);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, refreshDelay), dispatch_get_main_queue(), ^{
+            [self queryManorFarmTasks];
+        });
     }
 }
 
@@ -5020,6 +5039,25 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     if (!self.enableAutoManor) return;
     [self queryManorFarmTasks];
     [self executeManorTaskProcessScript];
+}
+
+@synthesize myUserId = _myUserId;
+
+- (NSString *)myUserId {
+    if (_myUserId.length) return _myUserId;
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"lastKnownUserId"];
+    if (saved.length) {
+        _myUserId = [saved copy];
+        return _myUserId;
+    }
+    return nil;
+}
+
+- (void)setMyUserId:(NSString *)myUserId {
+    if (![myUserId isKindOfClass:NSString.class] || !myUserId.length) return;
+    _myUserId = [myUserId copy];
+    [[NSUserDefaults standardUserDefaults] setObject:_myUserId forKey:@"lastKnownUserId"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 @synthesize lastManorFarmId = _lastManorFarmId;
@@ -5066,7 +5104,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 - (void)feedManorChicken {
     if (!self.enableAutoManor) return;
     if (self.isManorChickenEating) {
-        NSLog(@"🐔 [蚂蚁庄园] 小鸡当前正在进食中，无需重复投喂");
+        [self recordStage:@"蚂蚁庄园：小鸡当前正在进食中，暂无需投喂"];
         return;
     }
     
@@ -5078,30 +5116,31 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     // 1. 投喂前，先关闭抽屉面板，确保院子小鸡与饲料袋完全暴露
     [self closeManorTaskPanelOnWebView];
     
+    [self recordStage:@"蚂蚁庄园：正在投喂小鸡（180g 饲料）..."];
+    
     PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (bridge) {
-        [self recordStage:@"蚂蚁庄园：正在投喂小鸡（180g 饲料）..."];
         NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
         NSString *randNum = [AntForestManager getNumberRandom:15];
         NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
         
         NSString *farmId = self.lastManorFarmId ?: @"";
-        if (farmId.length) {
-            // 真实标准底层 RPC: com.alipay.antfarm.feedAnimal
-            NSString *feedArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"animalType\":\"CHICK\",\"canMock\":true,\"farmId\":\"%@\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId, timeStamp, randNum];
-            [bridge _doFlushMessageQueue:feedArg url:url];
-            
-            // 真实标准底层状态同步: com.alipay.antfarm.syncAnimalStatus
-            NSString *syncUserId = self.myUserId;
-            if (!syncUserId.length && farmId.length > 2) {
-                syncUserId = [farmId substringFromIndex:farmId.length / 2];
-            }
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                NSString *syncArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.syncAnimalStatus\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"operType\":\"FEEDSYNC\",\"queryFoodStockInfo\":false,\"recall\":false,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"userId\":\"%@\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId, syncUserId ?: @"", [NSString stringWithFormat:@"%ld", (long)([[NSDate date] timeIntervalSince1970] * 1000)], [AntForestManager getNumberRandom:15]];
-                [bridge _doFlushMessageQueue:syncArg url:url];
-            });
-        } else {
-            // 没有 farmId，主动触发一次 enterManorFarm 以获取最新 farmId 与状态
+        // 真实标准底层 RPC: com.alipay.antfarm.feedAnimal
+        NSString *feedArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"animalType\":\"CHICK\",\"canMock\":true,\"farmId\":\"%@\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId ?: @"", timeStamp, randNum];
+        [bridge _doFlushMessageQueue:feedArg url:url];
+        
+        // 真实标准底层状态同步: com.alipay.antfarm.syncAnimalStatus
+        NSString *syncUserId = self.myUserId;
+        if (!syncUserId.length && farmId.length > 2) {
+            syncUserId = [farmId substringFromIndex:farmId.length / 2];
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+            NSString *syncArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.syncAnimalStatus\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"operType\":\"FEEDSYNC\",\"queryFoodStockInfo\":false,\"recall\":false,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"userId\":\"%@\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId ?: @"", syncUserId ?: @"", [NSString stringWithFormat:@"%ld", (long)([[NSDate date] timeIntervalSince1970] * 1000)], [AntForestManager getNumberRandom:15]];
+            [bridge _doFlushMessageQueue:syncArg url:url];
+        });
+        
+        if (!farmId.length) {
+            // 没有 farmId 时触发一次 enterManorFarm 以便探明 farmId 并拉取最新主页状态
             [self enterManorFarm];
         }
     }
@@ -5234,8 +5273,10 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     static NSTimeInterval lastCheckTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - lastCheckTime < 60.0) return;
+    if (now - lastCheckTime < 15.0) return;
     lastCheckTime = now;
+    
+    self.isManorChickenEating = NO;
     
     [self recordStage:@"蚂蚁庄园：正在执行日常自动化体检..."];
     
@@ -5253,20 +5294,18 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     // 3. 收取肥料（仅在今日未收取时尝试）
     NSString *today = getCurrentDateString();
     if (![self.lastManorManureCollectDate isEqualToString:today]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             [self collectManorChickenManure];
         });
     }
     
-    // 4. 自动投喂小鸡（若当前未在进食）
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-        if (!self.isManorChickenEating) {
-            [self feedManorChicken];
-        }
+    // 4. 自动投喂小鸡
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self feedManorChicken];
     });
     
     // 5. 庄园任务体检与做任务
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4600 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
         [self queryManorFarmTasks];
     });
 }
