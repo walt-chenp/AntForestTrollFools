@@ -4541,22 +4541,36 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     [self recordStage:@"蚂蚁庄园：检测到今日未签到，正在自动签到领 180g 饲料..."];
     
-    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : (self.rewardTaskBridge ?: self.jsBridge);
     if (bridge) {
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
         NSString *randNum = [AntForestManager getNumberRandom:15];
         NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
         
+        // 1. 标准 dailySign RPC
         NSString *signArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.dailySign\",\"showError\":false,\"showLoading\":false,\"requestData\":[{}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
         [bridge _doFlushMessageQueue:signArg url:url];
+        
+        // 2. 带 signKey
+        NSString *signArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.dailySign\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"signKey\":\"%@\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", today, timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:signArg2 url:url];
+        
+        // 3. IEP receiveTaskAward (SIGN)
+        NSString *signArg3 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antiep.receiveTaskAward\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFARM_FOOD_TASK\",\"taskType\":\"SIGN\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:signArg3 url:url];
+        
+        // 4. OpenGreen receiveTaskAward (SIGN)
+        NSString *signArg4 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.receiveTaskAwardopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFARM_FOOD_TASK\",\"taskType\":\"SIGN\",\"ignoreLimit\":false,\"requestType\":\"RPC\",\"source\":\"antfarm\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:signArg4 url:url];
     }
     
     [self executeManorScriptOnWebView:@"(()=>{try{"
      "function triggerClick(el){"
-     "  if(!el)return;"
+     "  if(!el)return false;"
      "  try{"
      "    const r=el.getBoundingClientRect();"
+     "    if(r.width===0&&r.height===0)return false;"
      "    const x=r.left+r.width/2,y=r.top+r.height/2;"
      "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
      "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
@@ -4573,27 +4587,34 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "    }catch(e){}"
      "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
      "    try{el.click();}catch(e){}"
-     "  }catch(e){try{el.click();}catch(e2){}}"
+     "    return true;"
+     "  }catch(e){try{el.click();return true;}catch(e2){return false;}}"
      "}"
-     "const all=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span,img'));"
+     "const all=Array.from(document.querySelectorAll('*'));"
      "for(const el of all){"
-     "  const t=(el.innerText||el.getAttribute('aria-label')||'').trim();"
+     "  const t=(el.innerText||el.textContent||'').trim();"
      "  if(t==='签到'||t==='点击签到'||t==='今日签到'||t==='签到领饲料'||t.includes('签到领饲料')){"
      "    triggerClick(el.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||el);"
-     "    setTimeout(()=>{"
-     "      const close=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'))"
-     "        .find(c=>{"
-     "          const ct=(c.innerText||'').trim();"
-     "          return ct==='开心收下'||ct==='我知道了'||ct==='收下饲料';"
-     "        });"
-     "      if(close)triggerClick(close);"
-     "    },600);"
      "    break;"
      "  }"
+     "  if(t==='领取'){"
+     "    const p=el.parentElement?el.parentElement.innerText:'';"
+     "    const gp=el.parentElement&&el.parentElement.parentElement?el.parentElement.parentElement.innerText:'';"
+     "    if(p.includes('180g')||p.includes('今天')||p.includes('连签')||p.includes('第')||gp.includes('180g')||gp.includes('今天')||gp.includes('连签')){"
+     "      triggerClick(el.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||el);"
+     "      break;"
+     "    }"
+     "  }"
      "}"
+     "setTimeout(()=>{"
+     "  const close=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'))"
+     "    .find(c=>{"
+     "      const ct=(c.innerText||'').trim();"
+     "      return ct==='开心收下'||ct==='我知道了'||ct==='收下饲料';"
+     "    });"
+     "  if(close)triggerClick(close);"
+     "},600);"
      "}catch(e){console.error(e);}})();"];
-    
-    [[NSUserDefaults standardUserDefaults] setObject:today forKey:@"lastManorSignDate"];
 }
 
 - (void)executeClassroomAnswerScript {
@@ -4755,12 +4776,38 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 - (void)executeManorTaskProcessScript {
     // 纯静默领奖兜底：仅扫描并点击“领取”/“一键领取”，严禁模拟点击“去完成”/“去逛逛”，杜绝跳出看视频或离开当前页面
     [self executeManorScriptOnWebView:@"(()=>{try{"
-     "function triggerClick(el){if(!el)return;try{el.click();}catch(e){}}"
+     "function triggerClick(el){"
+     "  if(!el)return false;"
+     "  try{"
+     "    const r=el.getBoundingClientRect();"
+     "    if(r.width===0&&r.height===0)return false;"
+     "    const x=r.left+r.width/2,y=r.top+r.height/2;"
+     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
+     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
+     "    try{"
+     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
+     "    try{"
+     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
+     "    try{el.click();}catch(e){}"
+     "    return true;"
+     "  }catch(e){try{el.click();return true;}catch(e2){return false;}}"
+     "}"
      "const allBtns=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'));"
      "for(const btn of allBtns){"
-     "  const t=(btn.innerText||'').trim();"
+     "  const t=(btn.innerText||btn.textContent||'').trim();"
      "  if(t==='领取'||t==='一键领取'||t==='领奖励'){"
-     "    triggerClick(btn);"
+     "    const r=btn.getBoundingClientRect();"
+     "    if(r.width>0&&r.height>0&&r.top>0&&r.top<window.innerHeight){"
+     "      triggerClick(btn.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||btn);"
+     "    }"
      "  }"
      "}"
      "}catch(e){console.error(e);}})();"];
@@ -4890,18 +4937,42 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     [bridge _doFlushMessageQueue:argFarm url:url];
 }
 
+- (void)silentFetchUrlIfNeeded:(NSString *)jumpUrl {
+    if (![jumpUrl isKindOfClass:NSString.class] || !jumpUrl.length) return;
+    NSString *cleanUrl = jumpUrl;
+    if ([jumpUrl containsString:@"url="]) {
+        NSRange r = [jumpUrl rangeOfString:@"url="];
+        NSString *sub = [jumpUrl substringFromIndex:r.location + 4];
+        NSRange amp = [sub rangeOfString:@"&"];
+        if (amp.location != NSNotFound) {
+            NSString *candidate = [sub substringToIndex:amp.location];
+            cleanUrl = [candidate stringByRemovingPercentEncoding] ?: candidate;
+        } else {
+            cleanUrl = [sub stringByRemovingPercentEncoding] ?: sub;
+        }
+    }
+    if ([cleanUrl hasPrefix:@"http://"] || [cleanUrl hasPrefix:@"https://"]) {
+        NSURL *reqUrl = [NSURL URLWithString:cleanUrl];
+        if (reqUrl) {
+            NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:reqUrl cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
+            [req setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Nebula AlipayDefined(nt:WIFI,ws:393|759,fx:393|852) AliApp(AP/12.12.16.6000) AlipayClient/12.12.16.6000 Language/zh-Hans" forHTTPHeaderField:@"User-Agent"];
+            [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(__unused NSData *d, __unused NSURLResponse *res, __unused NSError *err){}] resume];
+        }
+    }
+}
+
 - (void)handleManorTaskList:(NSArray *)taskList {
     if (!self.enableAutoManor || !taskList.count) return;
     
     static NSTimeInterval lastProcessTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - lastProcessTime < 8.0) return;
+    if (now - lastProcessTime < 4.0) return;
     lastProcessTime = now;
     
     initDailyTaskCache();
     
     NSMutableArray<NSDictionary *> *tasksToClaim = [NSMutableArray array];
-    NSInteger todoInteractiveCount = 0;
+    NSMutableArray<NSDictionary *> *tasksToExecute = [NSMutableArray array];
     
     for (NSDictionary *task in taskList) {
         if (![task isKindOfClass:NSDictionary.class]) continue;
@@ -4909,6 +4980,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         if (!bizKey.length) continue;
         NSString *status = task[@"taskStatus"] ?: @"";
         NSString *taskKey = [NSString stringWithFormat:@"ANTFARM_FOOD_TASK:%@", bizKey];
+        NSString *title = task[@"title"] ?: bizKey;
         
         if ([status isEqualToString:@"RECEIVED"]) {
             if ([bizKey isEqualToString:@"ANSWER"]) {
@@ -4935,14 +5007,42 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     });
                 }
             } else {
-                todoInteractiveCount++;
+                BOOL isPayTask = [bizKey containsString:@"PAY"] || [bizKey containsString:@"xiadan"] || [bizKey containsString:@"DONATE"] || [title containsString:@"支付"] || [title containsString:@"付款"] || [title containsString:@"捐赠"] || [title containsString:@"实付"];
+                if (!isPayTask) {
+                    if (![gDailyCompletedTasks containsObject:taskKey] && ![gDailyFailedTasks containsObject:taskKey]) {
+                        [tasksToExecute addObject:task];
+                    }
+                }
             }
         }
     }
     
-    // 1. 批量一键领取已完成的任务奖励（如支付送饲料、已达成活动等）
+    // 1. 执行待完成的常规饲料任务（视频、杂货铺、抽抽乐、新村、厨房等）
+    if (tasksToExecute.count > 0) {
+        [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现 %lu 个待完成饲料任务，正在自动批量执行并领饲料...", (unsigned long)tasksToExecute.count]];
+        for (NSInteger i = 0; i < tasksToExecute.count; i++) {
+            NSDictionary *t = tasksToExecute[i];
+            NSString *bizKey = t[@"bizKey"] ?: t[@"taskId"];
+            NSString *title = t[@"title"] ?: bizKey;
+            NSInteger award = [t[@"canReceiveAwardCount"] integerValue] ?: ([t[@"awardCount"] integerValue] ?: 90);
+            NSString *jumpUrl = t[@"targetUrl"] ?: t[@"url"];
+            
+            int64_t delayMs = i * 2200 + 400;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayMs * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                [self silentFetchUrlIfNeeded:jumpUrl];
+                [self finishManorTask:bizKey sceneCode:@"ANTFARM_FOOD_TASK" taskTitle:title];
+                
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                    [self receiveManorTaskAward:bizKey sceneCode:@"ANTFARM_FOOD_TASK" taskTitle:title awardName:[NSString stringWithFormat:@"%ldg饲料", (long)award]];
+                    [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：已完成“%@”，正在领取 %ldg 饲料...", title, (long)award]];
+                });
+            });
+        }
+    }
+    
+    // 2. 批量一键领取已完成的任务奖励（如支付送饲料、已达成活动等）
     if (tasksToClaim.count > 0) {
-        [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现 %lu 个已完成任务待领奖（如支付送饲料等），正在一键批量领饲料...", (unsigned long)tasksToClaim.count]];
+        [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现 %lu 个已达成任务待领奖，正在一键批量领饲料...", (unsigned long)tasksToClaim.count]];
         for (NSInteger i = 0; i < tasksToClaim.count; i++) {
             NSDictionary *t = tasksToClaim[i];
             NSString *bizKey = t[@"bizKey"] ?: t[@"taskId"];
@@ -4953,19 +5053,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 [self receiveManorTaskAward:bizKey sceneCode:@"ANTFARM_FOOD_TASK" taskTitle:title awardName:[NSString stringWithFormat:@"%ldg饲料", (long)award]];
             });
         }
-    } else {
-        if (todoInteractiveCount > 0) {
-            static NSTimeInterval lastTodoNoticeTime = 0;
-            if (now - lastTodoNoticeTime > 300.0) { // 5分钟内最多提示一次，避免日志刷屏
-                lastTodoNoticeTime = now;
-                [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：保底饲料任务已就绪，其余 %ld 个推广/视频类任务需在端内手动浏览", (long)todoInteractiveCount]];
-            }
-        } else {
-            [self recordStage:@"蚂蚁庄园：日常饲料任务已全部完成并领取入库"];
-        }
     }
+    
+    // 3. 触发 DOM 端内领奖兜底
+    [self executeManorTaskProcessScript];
 }
-
 
 - (void)runManorTasks {
     if (!self.enableAutoManor) return;
@@ -4982,10 +5074,10 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     static NSTimeInterval lastFeedTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - lastFeedTime < 20) return;
+    if (now - lastFeedTime < 6.0) return;
     lastFeedTime = now;
     
-    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : (self.rewardTaskBridge ?: self.jsBridge);
     if (bridge) {
         NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
         NSString *randNum = [AntForestManager getNumberRandom:15];
@@ -5000,19 +5092,68 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             NSString *feedArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"animalId\":\"%@\",\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorFarmId, self.lastManorAnimalId ?: @"", timeStamp, [AntForestManager getNumberRandom:15]];
             [bridge _doFlushMessageQueue:feedArg2 url:url];
         }
+        
+        // 3. 补充带 operType FEED
+        NSString *feedArg3 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:feedArg3 url:url];
     }
     
     [self executeManorScriptOnWebView:@"(()=>{try{"
-     "function triggerClick(el){if(!el)return;try{el.click();}catch(e){}}"
-     "const all=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],[class*=\"feed\"],div,span,img'));"
+     "function triggerTouch(el,x,y){"
+     "  if(!el)return false;"
+     "  try{"
+     "    const r=el.getBoundingClientRect();"
+     "    if(!x||!y){"
+     "      x=r.left+r.width/2;y=r.top+r.height/2;"
+     "    }"
+     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
+     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
+     "    try{"
+     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y,pageX:x,pageY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
+     "    try{"
+     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y,pageX:x,pageY:y});"
+     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
+     "    }catch(e){}"
+     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
+     "    try{el.click();}catch(e){}"
+     "    return true;"
+     "  }catch(e){try{el.click();return true;}catch(e2){return false;}}"
+     "}"
+     "let feedEl=null;"
+     "const all=Array.from(document.querySelectorAll('*'));"
      "for(const el of all){"
-     "  const t=(el.innerText||el.getAttribute('aria-label')||'').trim();"
-     "  if(t==='喂食'||t==='投喂'||t==='喂小鸡'||(t.endsWith('g')&&parseInt(t)>=180)||t.includes('求投喂')){"
-     "    triggerClick(el.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||el);"
-     "    break;"
+     "  const t=(el.innerText||el.textContent||'').trim();"
+     "  const cls=(el.className||'').toString().toLowerCase();"
+     "  if((t.endsWith('g')&&parseInt(t)>0)||cls.includes('feed')||cls.includes('food')||t==='喂食'||t==='投喂'||t==='喂小鸡'){"
+     "    const r=el.getBoundingClientRect();"
+     "    if(r.width>0&&r.height>0&&r.top>window.innerHeight*0.5&&r.left>window.innerWidth*0.5){"
+     "      feedEl=el.closest('button,a,[role=\"button\"],[class*=\"btn\"],[class*=\"feed\"]')||el;"
+     "      break;"
+     "    }"
      "  }"
      "}"
-     "}catch(e){}})();"];
+     "if(feedEl){"
+     "  triggerTouch(feedEl);"
+     "}else{"
+     "  const x=window.innerWidth*0.88,y=window.innerHeight*0.92;"
+     "  const ptEl=document.elementFromPoint(x,y);"
+     "  if(ptEl)triggerTouch(ptEl,x,y);"
+     "}"
+     "setTimeout(()=>{"
+     "  const btns=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'));"
+     "  for(const b of btns){"
+     "    const bt=(b.innerText||b.textContent||'').trim();"
+     "    if(bt==='投喂'||bt==='喂食'||bt==='确认'||bt==='开心收下'||bt==='我知道了'){"
+     "      triggerTouch(b);"
+     "    }"
+     "  }"
+     "},600);"
+     "}catch(e){console.error(e);}})();"];
 }
 
 - (void)collectManorChickenManure {
@@ -5070,12 +5211,17 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     // 2. 每日签到
     [self signManorDaily];
     
-    // 3. 智能答题
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+    // 3. 触发端内任务领奖与签到点击兜底
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self executeManorTaskProcessScript];
+    });
+    
+    // 4. 智能答题
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
         [self answerManorClassroomQuestion];
     });
     
-    // 4. 收取肥料（仅在今日未收取时尝试）
+    // 5. 收取肥料（仅在今日未收取时尝试）
     NSString *today = getCurrentDateString();
     if (![self.lastManorManureCollectDate isEqualToString:today]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
