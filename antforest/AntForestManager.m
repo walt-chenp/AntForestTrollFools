@@ -803,38 +803,44 @@ static BOOL isNoiseProbeLog(NSString *log) {
 + (BOOL)isManorURL:(NSURL *)url {
     if (!url) return NO;
     NSString *text = [url.absoluteString lowercaseString];
+    if ([text containsString:@"180020010001247580"] || [text containsString:@"home.html"]) return NO; // 森林首页
+    if ([text containsString:@"180020010001263018"] || [text containsString:@"68687599"] || [text containsString:@"babafarm"] || [text containsString:@"alipayfarm"]) return NO; // 芭芭农场
+    if ([text containsString:@"2021003115672468"] || [text containsString:@"antocean"]) return NO; // 神奇海洋
     return [text containsString:@"66666674"] ||
            [text containsString:@"2017090512380701"] ||
            [text containsString:@"antfarm"] ||
-           [text containsString:@"ant_farm"] ||
-           [text containsString:@"manor"];
+           [text containsString:@"ant_farm"];
 }
 
 + (BOOL)isManorResponse:(id)value {
     if (![value isKindOfClass:NSDictionary.class]) return NO;
     NSDictionary *dict = (NSDictionary *)value;
     NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : dict;
+    
+    // 明确的森林与农场回包，绝不当做庄园处理！
+    if (dict[@"bubbles"] || resData[@"bubbles"] ||
+        dict[@"wateringBubbles"] || resData[@"wateringBubbles"] ||
+        dict[@"totalDatas"] || resData[@"totalDatas"] ||
+        dict[@"friendRanking"] || resData[@"friendRanking"] ||
+        dict[@"combineHandlerVOMap"] || resData[@"combineHandlerVOMap"] ||
+        dict[@"limitedTimeChallenge"] || resData[@"limitedTimeChallenge"] ||
+        dict[@"manureFactory"] || resData[@"manureFactory"] ||
+        dict[@"subplotsActivityList"] || resData[@"subplotsActivityList"]) {
+        return NO;
+    }
+    
     NSString *opType = [NSString stringWithFormat:@"%@", (dict[@"operationType"] ?: resData[@"operationType"]) ?: @""];
-    if ([opType containsString:@"antfarm"] || [opType containsString:@"manor"]) return YES;
-    if (resData[@"subFarmVO"] || dict[@"subFarmVO"] ||
-        resData[@"ownAnimal"] || dict[@"ownAnimal"] ||
-        resData[@"farmTaskList"] || dict[@"farmTaskList"] ||
-        resData[@"signList"] || dict[@"signList"] ||
-        resData[@"antfarmP2POfflineTime"] || dict[@"antfarmP2POfflineTime"] ||
-        resData[@"ownAnimalShowInfo"] || dict[@"ownAnimalShowInfo"] ||
-        resData[@"otherAnimalShowInfoList"] || dict[@"otherAnimalShowInfoList"] ||
-        resData[@"cuisineList"] || dict[@"cuisineList"] ||
-        resData[@"happyPoint"] || dict[@"happyPoint"] ||
-        resData[@"accountInfo"][@"happyPoint"] || dict[@"accountInfo"][@"happyPoint"] ||
-        resData[@"dailyManureUpgrade"] || dict[@"dailyManureUpgrade"] ||
-        resData[@"strayAnimalSyncInfoVO"] || dict[@"strayAnimalSyncInfoVO"] ||
-        resData[@"deliverChickInfoVO"] || dict[@"deliverChickInfoVO"] ||
-        resData[@"dadaAnswerSwitch"] || dict[@"dadaAnswerSwitch"] ||
-        resData[@"userOpenOrchard"] || dict[@"userOpenOrchard"] ||
-        [resData[@"bubbleConfig"][@"bubbleType"] isEqualToString:@"NEW_DAILY_MANURE"] ||
-        [dict[@"bubbleConfig"][@"bubbleType"] isEqualToString:@"NEW_DAILY_MANURE"] ||
-        ([resData[@"spaceCode"] isKindOfClass:NSString.class] && [resData[@"spaceCode"] containsString:@"ANTFARM"]) ||
-        ([dict[@"spaceCode"] isKindOfClass:NSString.class] && [dict[@"spaceCode"] containsString:@"ANTFARM"])) {
+    if ([opType containsString:@"com.alipay.antfarm"] || [opType containsString:@"antfarm."]) return YES;
+    
+    // 庄园进入主页核心结构：包含 subFarmVO 或 farmTaskList
+    if ((resData[@"subFarmVO"] && (resData[@"subFarmVO"][@"foodInTrough"] || resData[@"subFarmVO"][@"animals"])) ||
+        (dict[@"subFarmVO"] && (dict[@"subFarmVO"][@"foodInTrough"] || dict[@"subFarmVO"][@"animals"]))) {
+        return YES;
+    }
+    if (resData[@"farmTaskList"] || dict[@"farmTaskList"]) {
+        return YES;
+    }
+    if (resData[@"antfarmP2POfflineTime"] || dict[@"antfarmP2POfflineTime"]) {
         return YES;
     }
     return NO;
@@ -6463,7 +6469,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
             
             // 自动识别本人ID
-            NSString *curUid = resData[@"userBaseInfo"][@"userId"] ?: dict[@"userBaseInfo"][@"userId"] ?: resData[@"userEnergy"][@"userId"] ?: dict[@"userEnergy"][@"userId"] ?: resData[@"loginUserBaseInfo"][@"userId"] ?: dict[@"loginUserBaseInfo"][@"userId"];
+            NSString *curUid = resData[@"userBaseInfo"][@"userId"] ?: dict[@"userBaseInfo"][@"userId"] ?: resData[@"userEnergy"][@"userId"] ?: dict[@"userEnergy"][@"userId"] ?: resData[@"loginUserBaseInfo"][@"userId"] ?: dict[@"loginUserBaseInfo"][@"userId"] ?: resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"] ?: dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"];
             if (curUid.length) {
                 if (!self.myUserId.length) {
                     self.myUserId = curUid;
@@ -6580,22 +6586,40 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     [[AntForestManager sharedInstance] queryFriendsBubbles:friendId];
                 });
             }
-            // 匹配查询好的返回的所有能量球（兼容 userBaseInfo、userEnergy 与 loginUserBaseInfo）
-            if((dict[@"bubbles"] || dict[@"wateringBubbles"]) && (dict[@"userBaseInfo"] || dict[@"loginUserBaseInfo"] || dict[@"userEnergy"])) {
+            // 匹配查询好的返回的所有能量球（兼容 userBaseInfo、userEnergy、loginUserBaseInfo 与 combineHandlerVOMap）
+            id bubblesList = dict[@"bubbles"] ?: resData[@"bubbles"];
+            id wateringBubblesList = dict[@"wateringBubbles"] ?: resData[@"wateringBubbles"];
+            id userInfoMap = dict[@"userBaseInfo"] ?: resData[@"userBaseInfo"] ?: dict[@"loginUserBaseInfo"] ?: resData[@"loginUserBaseInfo"] ?: dict[@"userEnergy"] ?: resData[@"userEnergy"] ?: dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"] ?: resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"];
+            
+            if((bubblesList || wateringBubblesList) && userInfoMap) {
                 NSString *userId = nil;
                 if([dict objectForKey:@"userBaseInfo"]) {
                     NSDictionary *pDic = [dict objectForKey:@"userBaseInfo"];
                     userId = [pDic objectForKey:@"userId"];
+                } else if ([resData objectForKey:@"userBaseInfo"]) {
+                    NSDictionary *pDic = [resData objectForKey:@"userBaseInfo"];
+                    userId = [pDic objectForKey:@"userId"];
                 } else if ([dict objectForKey:@"userEnergy"]) {
                     NSDictionary *pDic = [dict objectForKey:@"userEnergy"];
+                    userId = [pDic objectForKey:@"userId"];
+                } else if ([resData objectForKey:@"userEnergy"]) {
+                    NSDictionary *pDic = [resData objectForKey:@"userEnergy"];
                     userId = [pDic objectForKey:@"userId"];
                 } else if ([dict objectForKey:@"loginUserBaseInfo"]) {
                     NSDictionary *pDic = [dict objectForKey:@"loginUserBaseInfo"];
                     userId = [pDic objectForKey:@"userId"];
-                    if (userId.length && !self.myUserId.length) {
-                        self.myUserId = userId;
-                        [self recordStage:@"本人账户已识别"];
-                    }
+                } else if ([resData objectForKey:@"loginUserBaseInfo"]) {
+                    NSDictionary *pDic = [resData objectForKey:@"loginUserBaseInfo"];
+                    userId = [pDic objectForKey:@"userId"];
+                } else if (resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"]) {
+                    userId = resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"];
+                } else if (dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"]) {
+                    userId = dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"][@"userId"];
+                }
+                if (userId.length && !self.myUserId.length) {
+                    self.myUserId = userId;
+                    [self recordStage:@"本人账户已识别"];
+                    [[NSUserDefaults standardUserDefaults] setObject:userId forKey:@"lastKnownUserId"];
                 }
                 if (!userId.length) userId = self.myUserId;
                 if (!userId.length && !self.myUserId.length) {
@@ -6603,12 +6627,15 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     return;
                 }
                 
-                NSString *dName = dict[@"userEnergy"][@"displayName"] ?: dict[@"userBaseInfo"][@"displayName"];
+                NSString *dName = dict[@"userEnergy"][@"displayName"] ?: resData[@"userEnergy"][@"displayName"] ?: dict[@"userBaseInfo"][@"displayName"] ?: resData[@"userBaseInfo"][@"displayName"];
                 if (userId.length && [dName isKindOfClass:NSString.class] && dName.length && !self.friendsName[userId]) {
                     self.friendsName[userId] = dName;
                 }
                 
-                BOOL mine = (dict[@"loginUserBaseInfo"] && !dict[@"userBaseInfo"] && !dict[@"userEnergy"]) || (userId.length && [userId isEqualToString:self.myUserId]);
+                BOOL mine = (dict[@"loginUserBaseInfo"] && !dict[@"userBaseInfo"] && !dict[@"userEnergy"]) || 
+                            (resData[@"loginUserBaseInfo"] && !resData[@"userBaseInfo"] && !resData[@"userEnergy"]) ||
+                            (resData[@"combineHandlerVOMap"] != nil || dict[@"combineHandlerVOMap"] != nil) ||
+                            (userId.length && [userId isEqualToString:self.myUserId]);
                 
                 if (self.enableAutoRevive && !mine && userId.length) {
                     NSDictionary *userInfo = [dict[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? dict[@"userBaseInfo"] : nil;
@@ -6662,7 +6689,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     }
                 }
                 
-                NSMutableDictionary *dictBubbles = [dict objectForKey:@"bubbles"];
+                NSMutableDictionary *dictBubbles = [dict objectForKey:@"bubbles"] ?: [resData objectForKey:@"bubbles"];
                 NSUInteger available = 0, waiting = 0;
                 for (NSDictionary *bubble in dictBubbles) {
                     if ([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"]) available++;

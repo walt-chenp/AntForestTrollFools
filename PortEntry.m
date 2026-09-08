@@ -63,7 +63,7 @@ static BOOL isForestHomeURL(NSURL *url) {
     if (isEnergyRainURL(url)) return NO;
     NSString *str = url.absoluteString ?: @"";
     if ([str containsString:@"exchange.html"] || [str containsString:@"listRank.html"] || [str containsString:@"cert.html"]) return NO;
-    return [str containsString:@"180020010001247580/home.html"] || ([str containsString:@"60000002"] && [str containsString:@"home.html"]);
+    return [str containsString:@"180020010001247580"] || ([str containsString:@"60000002"] && [str containsString:@"home.html"]);
 }
 
 static BOOL isSelfForestHomeURL(NSURL *url) {
@@ -245,14 +245,20 @@ static BOOL isForestResponse(id value) {
     if (![value isKindOfClass:NSDictionary.class]) return NO;
     NSDictionary *response = value;
     NSDictionary *data = [response[@"resData"] isKindOfClass:NSDictionary.class] ? response[@"resData"] : nil;
-    return ((response[@"bubbles"] || response[@"wateringBubbles"]) && (response[@"userBaseInfo"] || response[@"loginUserBaseInfo"] || response[@"userEnergy"])) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"];
+    BOOL hasBubbles = (response[@"bubbles"] || response[@"wateringBubbles"] || data[@"bubbles"] || data[@"wateringBubbles"]);
+    BOOL hasUser = (response[@"userBaseInfo"] || response[@"loginUserBaseInfo"] || response[@"userEnergy"] || data[@"userBaseInfo"] || data[@"loginUserBaseInfo"] || data[@"userEnergy"] || data[@"combineHandlerVOMap"]);
+    return (hasBubbles && hasUser) || data[@"totalDatas"] || data[@"friendRanking"] || data[@"myself"] || data[@"friendId"] || data[@"combineHandlerVOMap"];
 }
 
 static BOOL isMyHomeResponse(id value, AntForestManager *manager) {
     NSDictionary *response = [value isKindOfClass:NSDictionary.class] ? value : nil;
     if (!response) return NO;
+    NSDictionary *resData = [response[@"resData"] isKindOfClass:NSDictionary.class] ? response[@"resData"] : response;
     if (response[@"loginUserBaseInfo"] && !response[@"userBaseInfo"]) return YES;
-    NSDictionary *base = [response[@"loginUserBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"loginUserBaseInfo"] : ([response[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"userBaseInfo"] : nil);
+    NSDictionary *base = [response[@"loginUserBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"loginUserBaseInfo"] :
+                         ([response[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? response[@"userBaseInfo"] :
+                         ([resData[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? resData[@"userBaseInfo"] :
+                         ([resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"] : nil)));
     return manager.myUserId.length && [base[@"userId"] isEqualToString:manager.myUserId];
 }
 
@@ -2625,9 +2631,14 @@ static void portCallJsApi(id self, SEL _cmd, id name, id url, id data, id cb) {
             }
         }
         
-        BOOL isManorRpc = (opType.length && ([opType containsString:@"antfarm"] || [opType containsString:@"manor"])) ||
-                          ([urlStr.lowercaseString containsString:@"66666674"] || [urlStr.lowercaseString containsString:@"2017090512380701"] || [urlStr.lowercaseString containsString:@"antfarm"] || [urlStr.lowercaseString containsString:@"manor"]);
-        if (isManorRpc && manager.enableAutoManor) {
+        NSURL *callUrl = [url isKindOfClass:NSURL.class] ? (NSURL *)url : ([urlStr length] ? [NSURL URLWithString:urlStr] : nil);
+        BOOL isForestUrl = [urlStr containsString:@"180020010001247580"] || [urlStr containsString:@"60000002"];
+        BOOL isFarmUrl = [urlStr containsString:@"alipayfarm"] || [urlStr containsString:@"babafarm"] || [urlStr containsString:@"orchard"] || [urlStr containsString:@"180020010001263018"] || [urlStr containsString:@"68687599"];
+        
+        BOOL isManorRpc = [AntForestManager isManorURL:callUrl] || 
+                          (!isForestUrl && !isFarmUrl && self != manager.jsBridge && self != manager.farmBridge &&
+                           (opType.length && ([opType containsString:@"com.alipay.antfarm"] || [opType containsString:@"antfarm."])));
+        if (isManorRpc && manager.enableAutoManor && self != manager.jsBridge && self != manager.farmBridge) {
             BOOL isFirstBind = (manager.manorBridge != self);
             if (isFirstBind) {
                 manager.manorBridge = self;
@@ -2680,26 +2691,49 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     NSDictionary *dict = [value isKindOfClass:NSDictionary.class] ? value : nil;
     NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
 
-    BOOL isManor = (manager.manorBridge == self) || [AntForestManager isManorResponse:value];
-    if (!isManor && controller) {
-        NSURL *ctrlUrl = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
-        if ([AntForestManager isManorURL:ctrlUrl]) isManor = YES;
-    }
-    if (isManor && manager.farmBridge == self) {
-        manager.farmBridge = nil;
+    NSURL *ctrlUrl = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
+
+    // 1. 判断是否为森林回包或处于森林首页
+    BOOL isForest = isForestResponse(value) || (manager.jsBridge == self);
+    if (!isForest && ctrlUrl && isForestHomeURL(ctrlUrl)) {
+        isForest = YES;
     }
 
-    BOOL isFarmResp = !isManor && ((manager.farmBridge == self) ||
-                      resData[@"limitedTimeChallenge"] || dict[@"limitedTimeChallenge"] ||
-                      resData[@"taskList"] || dict[@"taskList"] ||
-                      resData[@"manureFactory"] || dict[@"manureFactory"] ||
-                      resData[@"signTaskInfo"] || dict[@"signTaskInfo"] ||
-                      resData[@"balloonCooper"] || dict[@"balloonCooper"] ||
-                      resData[@"helpFarmChannelConfig"] || dict[@"helpFarmChannelConfig"] ||
-                      resData[@"subplotsActivityList"] || dict[@"subplotsActivityList"] ||
-                      resData[@"indexDeliveryList"] || dict[@"indexDeliveryList"]);
+    // 2. 严格互斥：只有在确定不是森林的前提下，才可能为农场或庄园
+    BOOL isFarmResp = NO;
+    BOOL isManor = NO;
+
+    if (isForest) {
+        if (manager.manorBridge == self) manager.manorBridge = nil;
+        if (manager.farmBridge == self) manager.farmBridge = nil;
+    } else {
+        // 判断农场
+        BOOL isFarmByUrl = ctrlUrl && isFarmURL(ctrlUrl);
+        BOOL isFarmByBridge = (manager.farmBridge == self);
+        BOOL isFarmByData = (resData[@"limitedTimeChallenge"] || dict[@"limitedTimeChallenge"] ||
+                             resData[@"taskList"] || dict[@"taskList"] ||
+                             resData[@"manureFactory"] || dict[@"manureFactory"] ||
+                             resData[@"signTaskInfo"] || dict[@"signTaskInfo"] ||
+                             resData[@"balloonCooper"] || dict[@"balloonCooper"] ||
+                             resData[@"helpFarmChannelConfig"] || dict[@"helpFarmChannelConfig"] ||
+                             resData[@"subplotsActivityList"] || dict[@"subplotsActivityList"] ||
+                             resData[@"indexDeliveryList"] || dict[@"indexDeliveryList"]);
+        if (isFarmByUrl || isFarmByBridge || isFarmByData) {
+            isFarmResp = YES;
+            if (manager.manorBridge == self) manager.manorBridge = nil;
+        } else {
+            // 判断庄园（只有既不是森林也不是农场时才可能为庄园）
+            BOOL isManorByUrl = ctrlUrl && [AntForestManager isManorURL:ctrlUrl];
+            BOOL isManorByBridge = (manager.manorBridge == self);
+            BOOL isManorByData = [AntForestManager isManorResponse:value];
+            if (isManorByUrl || isManorByBridge || isManorByData) {
+                isManor = YES;
+                if (manager.farmBridge == self) manager.farmBridge = nil;
+            }
+        }
+    }
+
     BOOL isOceanResp = resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class];
-    BOOL isForest = isForestResponse(value);
     BOOL isTargetPluginResp = isForest || isFarmResp || isOceanResp || isManor ||
                               (gLastRpcOperationType.length && ([gLastRpcOperationType containsString:@"forest"] || [gLastRpcOperationType containsString:@"orchard"] || [gLastRpcOperationType containsString:@"antiep"] || [gLastRpcOperationType containsString:@"ocean"] || [gLastRpcOperationType containsString:@"patrol"] || [gLastRpcOperationType containsString:@"manure"] || [gLastRpcOperationType containsString:@"draw"] || [gLastRpcOperationType containsString:@"lottery"] || [gLastRpcOperationType containsString:@"vitality"] || [gLastRpcOperationType containsString:@"antfarm"] || [gLastRpcOperationType containsString:@"manor"]));
 
@@ -2722,25 +2756,14 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
             }
         } @catch (NSException *e) {}
     }
-    if (isForestResponse(value)) {
+    if (isForest) {
         if (manager.jsBridge != self) {
             manager.jsBridge = self;
             [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
         }
     }
     if ([self respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
-        NSDictionary *dict = [value isKindOfClass:NSDictionary.class] ? value : nil;
-        NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
-        BOOL isFarmResp = !isManor && ((manager.farmBridge == self) ||
-                          resData[@"limitedTimeChallenge"] || dict[@"limitedTimeChallenge"] ||
-                          resData[@"taskList"] || dict[@"taskList"] ||
-                          resData[@"manureFactory"] || dict[@"manureFactory"] ||
-                          resData[@"signTaskInfo"] || dict[@"signTaskInfo"] ||
-                          resData[@"balloonCooper"] || dict[@"balloonCooper"] ||
-                          resData[@"helpFarmChannelConfig"] || dict[@"helpFarmChannelConfig"] ||
-                          resData[@"subplotsActivityList"] || dict[@"subplotsActivityList"] ||
-                          resData[@"indexDeliveryList"] || dict[@"indexDeliveryList"]);
-        if (isFarmResp && !isManor) {
+        if (isFarmResp) {
             BOOL isFirstBind = (manager.farmBridge != self);
             if (isFirstBind) {
                 manager.farmBridge = self;
@@ -2829,13 +2852,13 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
             if (isOcean) {
                 manager.oceanBridge = self;
             }
-            if (isFarm && !isManor) {
+            if (isFarm && !isManor && !isForest) {
                 manager.farmBridge = self;
             }
             if (isLottery) {
                 manager.lotteryBridge = self;
             }
-            if (!isMonopoly && !isAIFish && !isOcean && !isFarm && !isLottery && !isManor) {
+            if (!isMonopoly && !isAIFish && !isOcean && !isFarm && !isLottery && !isManor && !isForest) {
                 if (manager.rewardTaskBridge != self) {
                     manager.rewardTaskBridge = self;
                 }
