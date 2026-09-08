@@ -4958,8 +4958,24 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         
         if ([status isEqualToString:@"FINISHED"]) {
             if (taskId.length) {
-                [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现已完成任务“%@”，正在领取 %ldg 饲料...", title, (long)award]];
-                [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
+                NSInteger stock = self.lastManorFoodStock;
+                NSInteger limit = self.lastManorFoodStockLimit > 0 ? self.lastManorFoodStockLimit : 1800;
+                if (stock >= limit && limit > 0) {
+                    static NSTimeInterval lastFullLogTime = 0;
+                    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                    if (now - lastFullLogTime > 60) {
+                        lastFullLogTime = now;
+                        [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：饲料背包已满（%ldg/%ldg），暂不领取“%@”，待小鸡进食后再领", (long)stock, (long)limit, title]];
+                    }
+                    continue;
+                }
+                NSString *claimKey = [NSString stringWithFormat:@"ANTFARM_CLAIM_TASK:%@", taskId];
+                if (![gDailyCompletedTasks containsObject:claimKey]) {
+                    [gDailyCompletedTasks addObject:claimKey];
+                    saveDailyTaskCache();
+                    [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：发现已完成任务“%@”，正在领取 %ldg 饲料...", title, (long)award]];
+                    [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
+                }
             }
             continue;
         }
@@ -4981,9 +4997,16 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：正在完成浏览任务“%@”...", title]];
                     [self doManorFarmTaskWithBizKey:bizKey];
                     if (taskId.length) {
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                            [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
-                        });
+                        NSInteger stock = self.lastManorFoodStock;
+                        NSInteger limit = self.lastManorFoodStockLimit > 0 ? self.lastManorFoodStockLimit : 1800;
+                        if (stock < limit || limit == 0) {
+                            NSString *claimKey = [NSString stringWithFormat:@"ANTFARM_CLAIM_TASK:%@", taskId];
+                            [gDailyCompletedTasks addObject:claimKey];
+                            saveDailyTaskCache();
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                                [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
+                            });
+                        }
                     }
                 }
             }
@@ -5223,6 +5246,13 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             } else if (dict[@"foodStock"]) {
                 foodStock = [dict[@"foodStock"] integerValue];
             }
+            NSInteger foodStockLimit = [subFarm[@"foodStockLimit"] respondsToSelector:@selector(integerValue)] ? [subFarm[@"foodStockLimit"] integerValue] : ([resData[@"foodStockLimit"] respondsToSelector:@selector(integerValue)] ? [resData[@"foodStockLimit"] integerValue] : 1800);
+            if (foodStock > 0 || subFarm[@"foodStock"] != nil) {
+                self.lastManorFoodStock = foodStock;
+            }
+            if (foodStockLimit > 0) {
+                self.lastManorFoodStockLimit = foodStockLimit;
+            }
             
             NSInteger foodInTrough = 0;
             if (subFarm[@"foodInTrough"]) {
@@ -5338,6 +5368,31 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         // E. 检查并执行日常体检
         if (subFarm || ownAnimal || taskList.count > 0 || signDict) {
             [self checkAndRunManorAutomations];
+        }
+        
+        // F. 领饲料奖励回包处理 (receiveFarmTaskAward)
+        NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: (self.lastRpcOperationType ?: @""))];
+        if (resData[@"haveAddFoodStock"] || [opType containsString:@"receiveFarmTaskAward"]) {
+            NSInteger addFood = [resData[@"haveAddFoodStock"] integerValue];
+            NSInteger curFood = [resData[@"foodStock"] integerValue];
+            if (addFood > 0) {
+                if (curFood > 0) self.lastManorFoodStock = curFood;
+                [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：成功领取饲料 +%ldg（背包存量 %ldg）", (long)addFood, (long)(curFood > 0 ? curFood : self.lastManorFoodStock)]];
+            } else if ([resData[@"memo"] isEqualToString:@"SUCCESS"] || [dict[@"memo"] isEqualToString:@"SUCCESS"]) {
+                if (curFood > 0) self.lastManorFoodStock = curFood;
+                [self recordStage:@"蚂蚁庄园：成功领取饲料奖励"];
+            }
+        }
+        
+        // G. 投喂小鸡回包处理 (feedAnimal)
+        if ([opType containsString:@"feedAnimal"] && ([resData[@"memo"] isEqualToString:@"SUCCESS"] || [dict[@"memo"] isEqualToString:@"SUCCESS"] || resData[@"foodStock"] != nil)) {
+            NSInteger curFood = [resData[@"foodStock"] integerValue];
+            if (curFood > 0 || resData[@"foodStock"] != nil) {
+                NSInteger prevFood = self.lastManorFoodStock;
+                self.lastManorFoodStock = curFood;
+                NSInteger fed = (prevFood > curFood && prevFood > 0) ? (prevFood - curFood) : 180;
+                [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：小鸡投喂成功（消耗 %ldg 饲料，背包剩余 %ldg）", (long)fed, (long)curFood]];
+            }
         }
     } @catch (NSException *e) {
         NSLog(@"[AntForestPort] Exception in handleManorResponse: %@", e);
