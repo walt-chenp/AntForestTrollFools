@@ -128,6 +128,7 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)executeManorScriptOnWebView:(NSString *)js;
 -(void)openManorTaskPanelOnWebView;
 -(void)closeManorTaskPanelOnWebView;
+-(void)enterManorFarm;
 -(void)checkAndRunManorAutomations;
 -(void)signManorDaily;
 -(void)answerManorClassroomQuestion;

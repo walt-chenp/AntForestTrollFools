@@ -832,9 +832,11 @@ static BOOL isNoiseProbeLog(NSString *log) {
     NSString *opType = [NSString stringWithFormat:@"%@", (dict[@"operationType"] ?: resData[@"operationType"]) ?: @""];
     if ([opType containsString:@"com.alipay.antfarm"] || [opType containsString:@"antfarm."]) return YES;
     
-    // 庄园进入主页核心结构：包含 subFarmVO 或 farmTaskList
-    if ((resData[@"subFarmVO"] && (resData[@"subFarmVO"][@"foodInTrough"] || resData[@"subFarmVO"][@"animals"])) ||
-        (dict[@"subFarmVO"] && (dict[@"subFarmVO"][@"foodInTrough"] || dict[@"subFarmVO"][@"animals"]))) {
+    // 庄园进入主页核心结构：包含 subFarmVO 或 dynamicGlobalConfig 或 farmTaskList
+    if (resData[@"subFarmVO"] || dict[@"subFarmVO"]) {
+        return YES;
+    }
+    if (resData[@"dynamicGlobalConfig"] || dict[@"dynamicGlobalConfig"]) {
         return YES;
     }
     if (resData[@"farmTaskList"] || dict[@"farmTaskList"]) {
@@ -5020,6 +5022,47 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     [self executeManorTaskProcessScript];
 }
 
+@synthesize lastManorFarmId = _lastManorFarmId;
+
+- (NSString *)lastManorFarmId {
+    if (_lastManorFarmId.length) return _lastManorFarmId;
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"antforest_lastManorFarmId"];
+    if (saved.length) {
+        _lastManorFarmId = [saved copy];
+        return _lastManorFarmId;
+    }
+    return nil;
+}
+
+- (void)setLastManorFarmId:(NSString *)lastManorFarmId {
+    _lastManorFarmId = [lastManorFarmId copy];
+    if (_lastManorFarmId.length) {
+        [[NSUserDefaults standardUserDefaults] setObject:_lastManorFarmId forKey:@"antforest_lastManorFarmId"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+}
+
+- (void)enterManorFarm {
+    if (!self.enableAutoManor) return;
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
+    if (!bridge) return;
+    
+    NSString *uid = self.myUserId.length ? self.myUserId : ([[NSUserDefaults standardUserDefaults] stringForKey:@"lastKnownUserId"] ?: @"");
+    NSString *farmId = self.lastManorFarmId ?: @"";
+    if (!uid.length && farmId.length > 2) {
+        uid = [farmId substringFromIndex:farmId.length / 2];
+    }
+    
+    NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
+    NSString *randNum = [AntForestManager getNumberRandom:15];
+    
+    // 真实标准底层 RPC: com.alipay.antfarm.enterFarm
+    NSString *enterArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.enterFarm\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"animalId\":\"\",\"cityAdCode\":\"000000\",\"districtAdCode\":\"000000\",\"farmId\":\"%@\",\"masterFarmId\":\"\",\"queryLastRecordNum\":true,\"recall\":false,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"touchRecordId\":\"\",\"userId\":\"%@\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId, uid, timeStamp, randNum];
+    [bridge _doFlushMessageQueue:enterArg url:url];
+}
+
 - (void)feedManorChicken {
     if (!self.enableAutoManor) return;
     if (self.isManorChickenEating) {
@@ -5057,6 +5100,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 NSString *syncArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.syncAnimalStatus\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"operType\":\"FEEDSYNC\",\"queryFoodStockInfo\":false,\"recall\":false,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\",\"userId\":\"%@\",\"version\":\"1.8.2302070202.46\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", farmId, syncUserId ?: @"", [NSString stringWithFormat:@"%ld", (long)([[NSDate date] timeIntervalSince1970] * 1000)], [AntForestManager getNumberRandom:15]];
                 [bridge _doFlushMessageQueue:syncArg url:url];
             });
+        } else {
+            // 没有 farmId，主动触发一次 enterManorFarm 以获取最新 farmId 与状态
+            [self enterManorFarm];
         }
     }
     
@@ -5065,15 +5111,39 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         [self executeManorScriptOnWebView:@"(()=>{try{"
          "function sendTouch(target, type, x, y){"
          "  if(!target) return;"
+         "  let t = null;"
          "  try{"
-         "    const t = new Touch({identifier:Date.now(), target:target, clientX:x, clientY:y, pageX:x, pageY:y, screenX:x, screenY:y, radiusX:15, radiusY:15});"
-         "    const evt = new TouchEvent(type, {bubbles:true, cancelable:true, view:window, touches:(type==='touchend'?[]:[t]), targetTouches:(type==='touchend'?[]:[t]), changedTouches:[t]});"
-         "    target.dispatchEvent(evt);"
+         "    t = new Touch({identifier:Date.now(), target:target, clientX:x, clientY:y, pageX:x, pageY:y, screenX:x, screenY:y, radiusX:15, radiusY:15});"
          "  }catch(e){}"
+         "  if(!t && document.createTouch){"
+         "    try{ t = document.createTouch(window, target, 1, x, y, x, y); }catch(e){}"
+         "  }"
+         "  if(t){"
+         "    try{"
+         "      const evt = new TouchEvent(type, {bubbles:true, cancelable:true, view:window, touches:(type==='touchend'?[]:[t]), targetTouches:(type==='touchend'?[]:[t]), changedTouches:[t]});"
+         "      target.dispatchEvent(evt);"
+         "    }catch(e){"
+         "      if(document.createTouchList){"
+         "        try{"
+         "          const evt = document.createEvent('TouchEvent');"
+         "          const touchList = (type==='touchend'?document.createTouchList():document.createTouchList(t));"
+         "          evt.initTouchEvent(type, true, true, window, 0, 0, 0, x, y, false, false, false, false, touchList, touchList, document.createTouchList(t), 1, 0);"
+         "          target.dispatchEvent(evt);"
+         "        }catch(ee){}"
+         "      }"
+         "    }"
+         "  }"
          "  try{"
-         "    const opts = {bubbles:true, cancelable:true, view:window, clientX:x, clientY:y};"
-         "    if(type==='touchstart'){target.dispatchEvent(new PointerEvent('pointerdown',opts)); target.dispatchEvent(new MouseEvent('mousedown',opts));}"
-         "    else if(type==='touchend'){target.dispatchEvent(new PointerEvent('pointerup',opts)); target.dispatchEvent(new MouseEvent('mouseup',opts)); target.dispatchEvent(new MouseEvent('click',opts)); try{target.click();}catch(ce){}}"
+         "    const opts = {bubbles:true, cancelable:true, view:window, clientX:x, clientY:y, button:0};"
+         "    if(type==='touchstart'){"
+         "      target.dispatchEvent(new PointerEvent('pointerdown', opts));"
+         "      target.dispatchEvent(new MouseEvent('mousedown', opts));"
+         "    } else if(type==='touchend'){"
+         "      target.dispatchEvent(new PointerEvent('pointerup', opts));"
+         "      target.dispatchEvent(new MouseEvent('mouseup', opts));"
+         "      target.dispatchEvent(new MouseEvent('click', opts));"
+         "      try{ target.click(); }catch(ce){}"
+         "    }"
          "  }catch(e){}"
          "}"
          "const W = window.innerWidth, H = window.innerHeight;"
@@ -5106,10 +5176,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
          "  if(el.closest && el.closest('.ant-drawer, [class*=\"drawer\"], [class*=\"modal\"], [class*=\"dialog\"], [class*=\"task\"], [role=\"dialog\"], ul, ol')) continue;"
          "  if(el.tagName==='A' || (el.closest && el.closest('a[href]'))) continue;"
          "  const r = el.getBoundingClientRect();"
-         "  if(r.width>0 && r.height>0 && r.top > H*0.75 && r.left > W*0.65){"
+         "  if(r.width>0 && r.height>0 && r.top > H*0.70 && r.left > W*0.60){"
          "    const t = (el.innerText||el.textContent||'').trim();"
          "    const cls = (el.className||'').toString().toLowerCase();"
-         "    if(t==='投喂' || t==='喂食' || t==='喂小鸡' || cls.includes('feed') || cls.includes('food') || cls.includes('stock')){"
+         "    const aria = (el.getAttribute('aria-label')||'').toLowerCase();"
+         "    if(t==='投喂' || t==='喂食' || t==='喂小鸡' || t.includes('饲料') || cls.includes('feed') || cls.includes('food') || cls.includes('stock') || aria.includes('喂食') || aria.includes('饲料')){"
          "      sendTouch(el, 'touchstart', r.left+r.width/2, r.top+r.height/2);"
          "      sendTouch(el, 'touchend', r.left+r.width/2, r.top+r.height/2);"
          "      break;"
@@ -5168,6 +5239,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     [self recordStage:@"蚂蚁庄园：正在执行日常自动化体检..."];
     
+    // 0. 主动刷新庄园主页状态（获取小鸡进食、饭盆余粮、饲料存量等状态）
+    [self enterManorFarm];
+    
     // 1. 每日签到
     [self signManorDaily];
     
@@ -5184,9 +5258,9 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         });
     }
     
-    // 4. 自动投喂小鸡（若当前未在进食且饭盆空闲）
+    // 4. 自动投喂小鸡（若当前未在进食）
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-        if (!self.isManorChickenEating && self.lastManorFarmId.length) {
+        if (!self.isManorChickenEating) {
             [self feedManorChicken];
         }
     });
@@ -5380,13 +5454,16 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         }
         
         // G. 投喂小鸡回包处理 (feedAnimal)
-        if ([opType containsString:@"feedAnimal"] && ([resData[@"memo"] isEqualToString:@"SUCCESS"] || [dict[@"memo"] isEqualToString:@"SUCCESS"] || resData[@"foodStock"] != nil)) {
+        if ([opType containsString:@"feedAnimal"] && ([resData[@"memo"] isEqualToString:@"SUCCESS"] || [dict[@"memo"] isEqualToString:@"SUCCESS"] || [resData[@"resultCode"] isEqualToString:@"100"] || [dict[@"resultCode"] isEqualToString:@"100"] || resData[@"foodStock"] != nil)) {
+            self.isManorChickenEating = YES;
             NSInteger curFood = [resData[@"foodStock"] integerValue];
             if (curFood > 0 || resData[@"foodStock"] != nil) {
                 NSInteger prevFood = self.lastManorFoodStock;
                 self.lastManorFoodStock = curFood;
                 NSInteger fed = (prevFood > curFood && prevFood > 0) ? (prevFood - curFood) : 180;
                 [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：小鸡投喂成功（消耗 %ldg 饲料，背包剩余 %ldg）", (long)fed, (long)curFood]];
+            } else {
+                [self recordStage:@"蚂蚁庄园：小鸡投喂成功（已倒入 180g 饲料）"];
             }
         }
     } @catch (NSException *e) {
