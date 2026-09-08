@@ -2744,7 +2744,7 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
             }
             [manager handleFarmResponse:dict ?: resData];
         }
-        if (isManor && manager.enableAutoManor && self != manager.jsBridge) {
+        if (isManor && manager.enableAutoManor) {
             BOOL isFirstBind = (manager.manorBridge != self);
             if (isFirstBind) {
                 manager.manorBridge = self;
