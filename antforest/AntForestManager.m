@@ -4592,25 +4592,20 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "}"
      "const all=Array.from(document.querySelectorAll('*'));"
      "for(const el of all){"
+     "  if(el.closest && el.closest('.ant-drawer, [class*=\"drawer\"], [class*=\"task\"], ul, ol')) continue;"
+     "  if(el.tagName==='A' || (el.closest && el.closest('a[href]'))) continue;"
      "  const t=(el.innerText||el.textContent||'').trim();"
      "  if(t==='签到'||t==='点击签到'||t==='今日签到'||t==='签到领饲料'||t.includes('签到领饲料')){"
-     "    triggerClick(el.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||el);"
+     "    triggerClick(el.closest('button,[role=\"button\"],[class*=\"btn\"]')||el);"
      "    break;"
-     "  }"
-     "  if(t==='领取'){"
-     "    const p=el.parentElement?el.parentElement.innerText:'';"
-     "    const gp=el.parentElement&&el.parentElement.parentElement?el.parentElement.parentElement.innerText:'';"
-     "    if(p.includes('180g')||p.includes('今天')||p.includes('连签')||p.includes('第')||gp.includes('180g')||gp.includes('今天')||gp.includes('连签')){"
-     "      triggerClick(el.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||el);"
-     "      break;"
-     "    }"
      "  }"
      "}"
      "setTimeout(()=>{"
-     "  const close=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'))"
+     "  const close=Array.from(document.querySelectorAll('button,[role=\"button\"],[class*=\"btn\"],div,span'))"
      "    .find(c=>{"
+     "      if(c.tagName==='A' || (c.closest && c.closest('a[href]'))) return false;"
      "      const ct=(c.innerText||'').trim();"
-     "      return ct==='开心收下'||ct==='我知道了'||ct==='收下饲料';"
+     "      return ct==='开心收下'||ct==='我知道了'||ct==='收下饲料'||ct==='好的';"
      "    });"
      "  if(close)triggerClick(close);"
      "},600);"
@@ -4774,39 +4769,17 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 }
 
 - (void)executeManorTaskProcessScript {
-    // 纯静默领奖兜底：仅扫描并点击“领取”/“一键领取”，严禁模拟点击“去完成”/“去逛逛”，杜绝跳出看视频或离开当前页面
+    // 纯静默弹窗关闭兜底：仅关闭全局奖励弹窗（如“开心收下”、“我知道了”、“确认”），严禁触碰任务列表或任何跳转链接
     [self executeManorScriptOnWebView:@"(()=>{try{"
-     "function triggerClick(el){"
-     "  if(!el)return false;"
-     "  try{"
-     "    const r=el.getBoundingClientRect();"
-     "    if(r.width===0&&r.height===0)return false;"
-     "    const x=r.left+r.width/2,y=r.top+r.height/2;"
-     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
-     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
-     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
-     "    try{"
-     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
-     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
-     "    }catch(e){}"
-     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
-     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
-     "    try{"
-     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y});"
-     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
-     "    }catch(e){}"
-     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
-     "    try{el.click();}catch(e){}"
-     "    return true;"
-     "  }catch(e){try{el.click();return true;}catch(e2){return false;}}"
-     "}"
-     "const allBtns=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'));"
-     "for(const btn of allBtns){"
-     "  const t=(btn.innerText||btn.textContent||'').trim();"
-     "  if(t==='领取'||t==='一键领取'||t==='领奖励'){"
-     "    const r=btn.getBoundingClientRect();"
-     "    if(r.width>0&&r.height>0&&r.top>0&&r.top<window.innerHeight){"
-     "      triggerClick(btn.closest('button,a,[role=\"button\"],[class*=\"btn\"]')||btn);"
+     "function triggerClick(el){if(!el)return;try{el.click();}catch(e){}}"
+     "const modals=Array.from(document.querySelectorAll('[role=\"dialog\"],.ant-modal,[class*=\"modal\"],[class*=\"popup\"],[class*=\"dialog\"],[class*=\"pop-window\"]'));"
+     "for(const m of modals){"
+     "  const btns=Array.from(m.querySelectorAll('button,[role=\"button\"],[class*=\"btn\"],div,span'));"
+     "  for(const b of btns){"
+     "    if(b.tagName==='A'||(b.closest&&b.closest('a[href]'))) continue;"
+     "    const t=(b.innerText||b.textContent||'').trim();"
+     "    if(t==='开心收下'||t==='我知道了'||t==='好的'||t==='确认'||t==='确定'||t==='收下'||t==='明白'){"
+     "      triggerClick(b);break;"
      "    }"
      "  }"
      "}"
@@ -4862,7 +4835,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 - (void)closeManorTaskPanelOnWebView {
     [self executeManorScriptOnWebView:@"(()=>{try{"
      "function triggerClick(el){if(!el)return;try{el.click();}catch(e){}}"
-     "const closeBtns=Array.from(document.querySelectorAll('[aria-label*=\"关闭\"],[class*=\"close\"],[class*=\"mask\"],button'));"
+     "const mask=document.querySelector('.ant-drawer-mask,[class*=\"mask\"],[class*=\"overlay\"]');"
+     "if(mask){triggerClick(mask);}"
+     "const pt=document.elementFromPoint(window.innerWidth*0.5,window.innerHeight*0.12);"
+     "if(pt&&pt!==document.body&&pt!==document.documentElement){triggerClick(pt);}"
+     "const closeBtns=Array.from(document.querySelectorAll('.ant-drawer-close,[aria-label*=\"关闭\"],[class*=\"close\"],button'));"
      "for(const b of closeBtns){"
      "  const cls=(b.className||'').toLowerCase();"
      "  const txt=(b.innerText||'').trim();"
@@ -4870,6 +4847,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "    triggerClick(b);break;"
      "  }"
      "}"
+     "try{window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',code:'Escape',keyCode:27,bubbles:true}));}catch(e){}"
      "}catch(e){}})();"];
 }
 
@@ -5055,8 +5033,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         }
     }
     
-    // 3. 触发 DOM 端内领奖兜底
+    // 3. 触发 DOM 端内弹窗兜底，并延时自动收起抽屉面板
     [self executeManorTaskProcessScript];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self closeManorTaskPanelOnWebView];
+    });
 }
 
 - (void)runManorTasks {
@@ -5074,8 +5055,11 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     static NSTimeInterval lastFeedTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - lastFeedTime < 6.0) return;
+    if (now - lastFeedTime < 4.0) return;
     lastFeedTime = now;
+    
+    // 1. 投喂前，先关闭抽屉面板，确保院子小鸡与饲料袋完全暴露
+    [self closeManorTaskPanelOnWebView];
     
     PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : (self.rewardTaskBridge ?: self.jsBridge);
     if (bridge) {
@@ -5083,77 +5067,92 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         NSString *randNum = [AntForestManager getNumberRandom:15];
         NSString *url = self.manorH5Url ?: @"https://66666674.h5app.alipay.com/www/index.html";
         
-        // 1. 标准 feedAnimal RPC
-        NSString *feedArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
-        [bridge _doFlushMessageQueue:feedArg url:url];
-        
-        // 2. 带 farmId / animalId 的参数补充投喂
+        // A. com.alipay.antfarm.feedAnimal (核心原生 RPC)
         if (self.lastManorFarmId.length) {
-            NSString *feedArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"animalId\":\"%@\",\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorFarmId, self.lastManorAnimalId ?: @"", timeStamp, [AntForestManager getNumberRandom:15]];
-            [bridge _doFlushMessageQueue:feedArg2 url:url];
+            NSString *feedArg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"animalId\":\"%@\",\"farmId\":\"%@\",\"operType\":\"FEED\",\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorAnimalId ?: @"", self.lastManorFarmId, timeStamp, randNum];
+            [bridge _doFlushMessageQueue:feedArg1 url:url];
         }
         
-        // 3. 补充带 operType FEED
-        NSString *feedArg3 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-        [bridge _doFlushMessageQueue:feedArg3 url:url];
+        NSString *feedArg2 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"operType\":\"FEED\",\"requestType\":\"RPC\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:feedArg2 url:url];
+        
+        // B. com.alipay.antfarm.biz.rpc.feedAnimal (兼容旧版 RPC)
+        if (self.lastManorFarmId.length) {
+            NSString *feedArg3 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"animalId\":\"%@\",\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorFarmId, self.lastManorAnimalId ?: @"", timeStamp, [AntForestManager getNumberRandom:15]];
+            [bridge _doFlushMessageQueue:feedArg3 url:url];
+        }
+        
+        NSString *feedArg4 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"operType\":\"FEED\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:feedArg4 url:url];
+        
+        NSString *feedArg5 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.biz.rpc.feedAnimal\",\"showError\":false,\"showLoading\":false,\"requestData\":[{}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
+        [bridge _doFlushMessageQueue:feedArg5 url:url];
+        
+        // C. 同步小鸡进食状态
+        if (self.lastManorFarmId.length) {
+            NSString *syncArg = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antfarm.syncAnimalStatus\",\"showError\":false,\"showLoading\":false,\"requestData\":[{\"farmId\":\"%@\",\"operType\":\"FEEDSYNC\",\"queryFoodStockInfo\":true,\"requestType\":\"NORMAL\",\"sceneCode\":\"ANTFARM\",\"source\":\"H5\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", self.lastManorFarmId, timeStamp, [AntForestManager getNumberRandom:15]];
+            [bridge _doFlushMessageQueue:syncArg url:url];
+        }
     }
     
-    [self executeManorScriptOnWebView:@"(()=>{try{"
-     "function triggerTouch(el,x,y){"
-     "  if(!el)return false;"
-     "  try{"
-     "    const r=el.getBoundingClientRect();"
-     "    if(!x||!y){"
-     "      x=r.left+r.width/2;y=r.top+r.height/2;"
-     "    }"
-     "    const opts={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y};"
-     "    try{el.dispatchEvent(new PointerEvent('pointerdown',opts));}catch(e){}"
-     "    try{el.dispatchEvent(new MouseEvent('mousedown',opts));}catch(e){}"
-     "    try{"
-     "      const t=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y,pageX:x,pageY:y});"
-     "      el.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,cancelable:true,touches:[t],targetTouches:[t],changedTouches:[t]}));"
-     "    }catch(e){}"
-     "    try{el.dispatchEvent(new PointerEvent('pointerup',opts));}catch(e){}"
-     "    try{el.dispatchEvent(new MouseEvent('mouseup',opts));}catch(e){}"
-     "    try{"
-     "      const te=new Touch({identifier:Date.now(),target:el,clientX:x,clientY:y,pageX:x,pageY:y});"
-     "      el.dispatchEvent(new TouchEvent('touchend',{bubbles:true,cancelable:true,touches:[],targetTouches:[],changedTouches:[te]}));"
-     "    }catch(e){}"
-     "    try{el.dispatchEvent(new MouseEvent('click',opts));}catch(e){}"
-     "    try{el.click();}catch(e){}"
-     "    return true;"
-     "  }catch(e){try{el.click();return true;}catch(e2){return false;}}"
-     "}"
-     "let feedEl=null;"
-     "const all=Array.from(document.querySelectorAll('*'));"
-     "for(const el of all){"
-     "  const t=(el.innerText||el.textContent||'').trim();"
-     "  const cls=(el.className||'').toString().toLowerCase();"
-     "  if((t.endsWith('g')&&parseInt(t)>0)||cls.includes('feed')||cls.includes('food')||t==='喂食'||t==='投喂'||t==='喂小鸡'){"
-     "    const r=el.getBoundingClientRect();"
-     "    if(r.width>0&&r.height>0&&r.top>window.innerHeight*0.5&&r.left>window.innerWidth*0.5){"
-     "      feedEl=el.closest('button,a,[role=\"button\"],[class*=\"btn\"],[class*=\"feed\"]')||el;"
-     "      break;"
-     "    }"
-     "  }"
-     "}"
-     "if(feedEl){"
-     "  triggerTouch(feedEl);"
-     "}else{"
-     "  const x=window.innerWidth*0.88,y=window.innerHeight*0.92;"
-     "  const ptEl=document.elementFromPoint(x,y);"
-     "  if(ptEl)triggerTouch(ptEl,x,y);"
-     "}"
-     "setTimeout(()=>{"
-     "  const btns=Array.from(document.querySelectorAll('button,a,[role=\"button\"],[class*=\"btn\"],div,span'));"
-     "  for(const b of btns){"
-     "    const bt=(b.innerText||b.textContent||'').trim();"
-     "    if(bt==='投喂'||bt==='喂食'||bt==='确认'||bt==='开心收下'||bt==='我知道了'){"
-     "      triggerTouch(b);"
-     "    }"
-     "  }"
-     "},600);"
-     "}catch(e){console.error(e);}})();"];
+    // 2. 界面触控模拟：等待 300ms 让抽屉面板完全收起后，针对 Canvas 与饲料袋精准投喂
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self executeManorScriptOnWebView:@"(()=>{try{"
+         "function sendTouch(target, type, x, y){"
+         "  if(!target) return;"
+         "  try{"
+         "    const t = new Touch({identifier:Date.now(), target:target, clientX:x, clientY:y, pageX:x, pageY:y, screenX:x, screenY:y, radiusX:15, radiusY:15});"
+         "    const evt = new TouchEvent(type, {bubbles:true, cancelable:true, view:window, touches:(type==='touchend'?[]:[t]), targetTouches:(type==='touchend'?[]:[t]), changedTouches:[t]});"
+         "    target.dispatchEvent(evt);"
+         "  }catch(e){}"
+         "  try{"
+         "    const opts = {bubbles:true, cancelable:true, view:window, clientX:x, clientY:y};"
+         "    if(type==='touchstart'){target.dispatchEvent(new PointerEvent('pointerdown',opts)); target.dispatchEvent(new MouseEvent('mousedown',opts));}"
+         "    else if(type==='touchend'){target.dispatchEvent(new PointerEvent('pointerup',opts)); target.dispatchEvent(new MouseEvent('mouseup',opts)); target.dispatchEvent(new MouseEvent('click',opts)); try{target.click();}catch(ce){}}"
+         "  }catch(e){}"
+         "}"
+         "const W = window.innerWidth, H = window.innerHeight;"
+         "const bagX = W * 0.86, bagY = H * 0.90;"
+         "const bowlX = W * 0.58, bowlY = H * 0.72;"
+         "const canvas = document.querySelector('canvas') || document.body;"
+         "const elAtBag = document.elementFromPoint(bagX, bagY) || canvas;"
+         "const isInsideDrawer = elAtBag.closest && elAtBag.closest('.ant-drawer, [class*=\"drawer\"], [class*=\"task\"]');"
+         "if(!isInsideDrawer){"
+         "  // A. 模拟点击饲料袋"
+         "  sendTouch(elAtBag, 'touchstart', bagX, bagY);"
+         "  setTimeout(()=>{ sendTouch(elAtBag, 'touchend', bagX, bagY); }, 80);"
+         "  // B. 模拟将饲料袋拖拽至饭盆"
+         "  setTimeout(()=>{"
+         "    sendTouch(canvas, 'touchstart', bagX, bagY);"
+         "    setTimeout(()=>{"
+         "      sendTouch(canvas, 'touchmove', (bagX+bowlX)/2, (bagY+bowlY)/2);"
+         "      setTimeout(()=>{"
+         "        sendTouch(canvas, 'touchmove', bowlX, bowlY);"
+         "        setTimeout(()=>{"
+         "          sendTouch(canvas, 'touchend', bowlX, bowlY);"
+         "        }, 60);"
+         "      }, 60);"
+         "    }, 60);"
+         "  }, 200);"
+         "}"
+         "// C. 查找是否有独立的饲料袋 DOM（严格排除抽屉、弹窗与跳转链接）"
+         "const all = Array.from(document.querySelectorAll('*'));"
+         "for(const el of all){"
+         "  if(el.closest && el.closest('.ant-drawer, [class*=\"drawer\"], [class*=\"modal\"], [class*=\"dialog\"], [class*=\"task\"], [role=\"dialog\"], ul, ol')) continue;"
+         "  if(el.tagName==='A' || (el.closest && el.closest('a[href]'))) continue;"
+         "  const r = el.getBoundingClientRect();"
+         "  if(r.width>0 && r.height>0 && r.top > H*0.75 && r.left > W*0.65){"
+         "    const t = (el.innerText||el.textContent||'').trim();"
+         "    const cls = (el.className||'').toString().toLowerCase();"
+         "    if(t==='投喂' || t==='喂食' || t==='喂小鸡' || cls.includes('feed') || cls.includes('food') || cls.includes('stock')){"
+         "      sendTouch(el, 'touchstart', r.left+r.width/2, r.top+r.height/2);"
+         "      sendTouch(el, 'touchend', r.left+r.width/2, r.top+r.height/2);"
+         "      break;"
+         "    }"
+         "  }"
+         "}"
+         "}catch(e){console.error(e);}})();"];
+    });
 }
 
 - (void)collectManorChickenManure {
@@ -5211,20 +5210,20 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     // 2. 每日签到
     [self signManorDaily];
     
-    // 3. 触发端内任务领奖与签到点击兜底
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-        [self executeManorTaskProcessScript];
+    // 3. 2.5 秒后主动收起抽屉面板，避免遮挡小鸡院子与饭盆
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        [self closeManorTaskPanelOnWebView];
     });
     
     // 4. 智能答题
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3200 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
         [self answerManorClassroomQuestion];
     });
     
     // 5. 收取肥料（仅在今日未收取时尝试）
     NSString *today = getCurrentDateString();
     if (![self.lastManorManureCollectDate isEqualToString:today]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(4000 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             [self collectManorChickenManure];
         });
     }
