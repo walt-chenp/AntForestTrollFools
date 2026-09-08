@@ -2053,7 +2053,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     NSString *urlDynamic = [self effectiveUrlForBridge:bridge];
     NSString *urlVitality = urlDynamic ?: [self effectiveUrlForSceneCode:@"ANTFOREST_VITALITY_TASK"];
     
-    [self recordStage:@"任务中心：正在拉取最新任务列表与阶段奖励..."];
+    NSLog(@"[AntForestPort] 任务中心：正在拉取最新任务列表与阶段奖励...");
     
     BOOL isForestHomeUrl = (urlVitality.length > 0 && ([urlVitality containsString:@"180020010001247580"] || [urlVitality containsString:@"home.html"]) && ![urlVitality containsString:@"180020010001293606"]);
     BOOL isLotteryPage = (urlVitality.length > 0 && ([urlVitality containsString:@"180020010001279274"] || [urlVitality.lowercaseString containsString:@"lotterymachine"] || [urlVitality.lowercaseString containsString:@"draw"]));
@@ -2109,7 +2109,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     NSString *urlDraw1 = self.lotteryH5Url ?: [self urlForSceneCode:@"ANTFOREST_NORMAL_DRAW_TASK" bridge:bridge];
     NSString *urlDraw2 = self.lotteryH5Url ?: [self urlForSceneCode:@"ANTFOREST_ACTIVITY_DRAW_TASK" bridge:bridge];
     
-    [self recordStage:@"森林寻宝：已进入寻宝界面，正在拉取寻宝日常与活动任务列表..."];
+    NSLog(@"[AntForestPort] 森林寻宝：已进入寻宝界面，正在拉取寻宝日常与活动任务列表...");
     
     NSString *argDraw1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFOREST_NORMAL_DRAW_TASK\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
     [bridge _doFlushMessageQueue:argDraw1 url:urlDraw1];
@@ -2140,7 +2140,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     NSString *monopolyScene = @"ANTFOREST_MONOPOLY_TASK_HSDWY";
     NSString *urlMonopoly = self.monopolyH5Url ?: [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:monopolyScene];
     NSString *argMonopoly1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"%@\",\"source\":\"ANTFOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", monopolyScene, timeStamp, [AntForestManager getNumberRandom:15]];
-    [self recordStage:@"新版保护地：已进入保护地界面，读取保护地巡护任务列表"];
+    NSLog(@"[AntForestPort] 新版保护地：已进入保护地界面，读取保护地巡护任务列表");
     [bridge _doFlushMessageQueue:argMonopoly1 url:urlMonopoly];
 }
 
@@ -2167,7 +2167,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     
     // 1. ANTOCEAN_TASK (海洋主任务与拼图)
     NSString *argOcean = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTOCEAN_TASK\",\"source\":\"ANT_FOREST\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
-    [self recordStage:@"神奇海洋：正在拉取最新海洋任务与拼图奖励..."];
+    NSLog(@"[AntForestPort] 神奇海洋：正在拉取最新海洋任务与拼图奖励...");
     [bridge _doFlushMessageQueue:argOcean url:urlOcean];
     
     // 2. ANTAIFISH_RESCUE_AND_RESTORE (海洋救助动物任务，如逛一逛惊喜市集等，属于神奇海洋专属场景)
@@ -2198,7 +2198,7 @@ static NSString *sLastQueriedSceneCode = nil;
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *urlAIFish = self.aiFishH5Url ?: [self effectiveUrlForBridge:bridge] ?: [self effectiveUrlForSceneCode:@"ANTAIFISH"];
     
-    [self recordStage:@"AI摸鱼：正在拉取摸鱼任务与涂鸦机会..."];
+    NSLog(@"[AntForestPort] AI摸鱼：正在拉取摸鱼任务与涂鸦机会...");
     
     // ANTAIFISH (每日赠送摸鱼次数、看15s视频等真实摸鱼任务)
     NSString *argFish1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTAIFISH\",\"source\":\"ANT_OCEAN\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, [AntForestManager getNumberRandom:15]];
@@ -2226,7 +2226,7 @@ static NSString *sLastQueriedSceneCode = nil;
     NSString *urlDynamic = [self effectiveUrlForBridge:bridge];
     NSString *urlFarm = urlDynamic ?: [self effectiveUrlForSceneCode:@"ANTFARM_ORCHARD_TASK_V2"];
     
-    [self recordStage:@"芭芭农场：正在拉取最新肥料任务..."];
+    NSLog(@"[AntForestPort] 芭芭农场：正在拉取最新肥料任务...");
     
     // 查询农场主任务列表 (ANTFARM_ORCHARD_TASK_V2)
     NSString *argFarm1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"com.alipay.antieptask.listTaskopengreen\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"sceneCode\":\"ANTFARM_ORCHARD_TASK_V2\",\"source\":\"BABA_FARM\",\"requestType\":\"RPC\"}],\"getResponse\":true},\"callbackId\":\"rpc_%@.%@\"}]", timeStamp, randNum];
@@ -2541,22 +2541,25 @@ static NSInteger sVitalityAutoRefreshRounds = 0;
                             }
                         }
                     } else {
+                        BOOL didWork = sHasPerformedWorkInCurrentVitalityRound;
                         sHasPerformedWorkInCurrentVitalityRound = NO;
                         sVitalityAutoRefreshRounds = 0;
-                        if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
-                            [self recordStage:@"芭芭农场：当前所有任务奖励已全部领取完毕"];
-                        } else if ([sLastExecutedSceneCode containsString:@"RESCUE"] || [sLastExecutedSceneCode containsString:@"OCEAN"]) {
-                            [self recordStage:@"神奇海洋：当前所有有效海洋任务与拼图已全部领取完毕"];
-                        } else if ([sLastExecutedSceneCode containsString:@"AIFISH"]) {
-                            [self recordStage:@"AI摸鱼：当前所有任务奖励已全部领取完毕"];
-                        } else if ([sLastExecutedSceneCode containsString:@"MONOPOLY"] || [sLastExecutedSceneCode containsString:@"HSDWY"]) {
-                            [self recordStage:@"新版保护地：当前所有任务奖励已全部领取完毕"];
-                        } else if ([sLastExecutedSceneCode containsString:@"DRAW"] || [sLastExecutedSceneCode containsString:@"LOTTERY"]) {
-                            [self recordStage:@"森林寻宝：当前所有任务奖励已全部领取完毕"];
-                        } else {
-                            if (self.enableAutoRewardTasks) {
-                                [self claimVitalityStageAwardsIfNeeded];
-                                [self recordStage:@"领奖励：所有常规任务与阶梯大奖已全部处理完毕"];
+                        if (didWork) {
+                            if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
+                                [self recordStage:@"芭芭农场：当前所有任务奖励已全部领取完毕"];
+                            } else if ([sLastExecutedSceneCode containsString:@"RESCUE"] || [sLastExecutedSceneCode containsString:@"OCEAN"]) {
+                                [self recordStage:@"神奇海洋：当前所有有效海洋任务与拼图已全部领取完毕"];
+                            } else if ([sLastExecutedSceneCode containsString:@"AIFISH"]) {
+                                [self recordStage:@"AI摸鱼：当前所有任务奖励已全部领取完毕"];
+                            } else if ([sLastExecutedSceneCode containsString:@"MONOPOLY"] || [sLastExecutedSceneCode containsString:@"HSDWY"]) {
+                                [self recordStage:@"新版保护地：当前所有任务奖励已全部领取完毕"];
+                            } else if ([sLastExecutedSceneCode containsString:@"DRAW"] || [sLastExecutedSceneCode containsString:@"LOTTERY"]) {
+                                [self recordStage:@"森林寻宝：当前所有任务奖励已全部领取完毕"];
+                            } else {
+                                if (self.enableAutoRewardTasks) {
+                                    [self claimVitalityStageAwardsIfNeeded];
+                                    [self recordStage:@"领奖励：所有常规任务与阶梯大奖已全部处理完毕"];
+                                }
                             }
                         }
                         [self notifyActiveH5PageToRefresh];
@@ -3586,45 +3589,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             [self recordStage:[NSString stringWithFormat:@"%@：规划 %lu 项待完成与领奖操作", planningPrefix, (unsigned long)totalQueuedCount]];
             [self executeNextVitalityTask];
         } else if (totalQueuedCount == 0 && !vitalityTaskRunning && allTaskList.count > 0) {
-            static NSTimeInterval lastFinishedRewardLogTime = 0;
-            static NSTimeInterval lastFinishedAIFishLogTime = 0;
-            static NSTimeInterval lastFinishedFarmLogTime = 0;
-            static NSTimeInterval lastFinishedLotteryLogTime = 0;
-            static NSTimeInterval lastFinishedOceanLogTime = 0;
-            static NSTimeInterval lastFinishedMonopolyLogTime = 0;
-            NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-            
-            if ([respSceneCode containsString:@"RESCUE"] || [respSceneCode containsString:@"OCEAN"]) {
-                if (now - lastFinishedOceanLogTime > 3.0) {
-                    lastFinishedOceanLogTime = now;
-                    [self recordStage:@"神奇海洋：当前所有有效海洋任务与拼图已全部领取完毕"];
-                }
-            } else if ([respSceneCode containsString:@"AIFISH"]) {
-                if (now - lastFinishedAIFishLogTime > 3.0) {
-                    lastFinishedAIFishLogTime = now;
-                    [self recordStage:@"AI摸鱼：当前所有任务奖励已全部领取完毕"];
-                }
-            } else if ([respSceneCode containsString:@"FARM"] || [respSceneCode containsString:@"ORCHARD"]) {
-                if (now - lastFinishedFarmLogTime > 3.0) {
-                    lastFinishedFarmLogTime = now;
-                    [self recordStage:@"芭芭农场：当前所有任务奖励已全部领取完毕"];
-                }
-            } else if ([respSceneCode containsString:@"MONOPOLY"] || [respSceneCode containsString:@"HSDWY"]) {
-                if (now - lastFinishedMonopolyLogTime > 3.0) {
-                    lastFinishedMonopolyLogTime = now;
-                    [self recordStage:@"新版保护地：当前所有任务奖励已全部领取完毕"];
-                }
-            } else if ([respSceneCode containsString:@"DRAW"] || [respSceneCode containsString:@"LOTTERY"]) {
-                if (now - lastFinishedLotteryLogTime > 3.0) {
-                    lastFinishedLotteryLogTime = now;
-                    [self recordStage:@"森林寻宝：当前所有任务奖励已全部领取完毕"];
-                }
-            } else {
-                if (now - lastFinishedRewardLogTime > 5.0) {
-                    lastFinishedRewardLogTime = now;
-                    [self recordStage:@"领奖励：所有常规任务与阶梯大奖已全部处理完毕"];
-                }
-            }
+            NSLog(@"[AntForestPort] %@：当前无待领待做任务", respSceneCode);
         }
     } @catch (NSException *e) {
         NSLog(@"[AntForestPort][VitalityTask] Exception in handleVitalityTaskListResponse: %@", e);
@@ -5857,7 +5822,7 @@ static void extractFarmTasksRecursive(id obj, int depth, NSMutableArray *outTask
                 }
             } else {
                 if (allFoundTasks.count > 0) {
-                    [self recordStage:@"芭芭农场：当前所有任务奖励已全部领取完毕"];
+                    NSLog(@"[AntForestPort] 芭芭农场：当前所有任务奖励已全部领取完毕");
                 }
             }
         }
