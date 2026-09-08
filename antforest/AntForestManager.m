@@ -2330,7 +2330,7 @@ static NSString *sLastQueriedSceneCode = nil;
     BOOL isOpenGreenScene = isLotteryScene || isMonopolyScene || isOceanScene || isAIFishScene;
     PSDJsBridge *bridge = nil;
     if (isManorScene) {
-        bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : (self.rewardTaskBridge ?: self.jsBridge);
+        bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     } else if (isAIFishScene) {
         bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
     } else if (isOceanScene) {
@@ -2385,7 +2385,7 @@ static NSString *sLastQueriedSceneCode = nil;
     BOOL isOpenGreenScene = isLotteryScene || isMonopolyScene || isOceanScene || isAIFishScene;
     PSDJsBridge *bridge = nil;
     if (isManorScene) {
-        bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : (self.rewardTaskBridge ?: self.jsBridge);
+        bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     } else if (isAIFishScene) {
         bridge = self.aiFishBridge ?: self.oceanBridge ?: self.rewardTaskBridge ?: self.jsBridge;
     } else if (isOceanScene) {
@@ -4577,7 +4577,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     [self recordStage:@"蚂蚁庄园：检测到今日未签到，正在自动签到领 180g 饲料..."];
     
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (bridge) {
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
@@ -4891,7 +4891,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 
 - (void)queryManorFarmTasks {
     if (!self.enableAutoManor) return;
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (!bridge) return;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
@@ -4903,7 +4903,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 
 - (void)doManorFarmTaskWithBizKey:(NSString *)bizKey {
     if (!self.enableAutoManor || !bizKey.length) return;
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (!bridge) return;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
@@ -4915,7 +4915,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 
 - (void)receiveManorFarmTaskAwardWithTaskId:(NSString *)taskId title:(NSString *)title {
     if (!self.enableAutoManor || !taskId.length) return;
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (!bridge) return;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
@@ -4935,15 +4935,6 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     lastProcessTime = now;
     
     initDailyTaskCache();
-    
-    static NSArray *s_knownBizKeys = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        s_knownBizKeys = @[@"ADD_GONGGE_NEW", @"USER_STARVE_PUSH", @"HIRE_LOW_ACTIVITY",
-                           @"HEART_DONATION_ADVANCED_FOOD_V2", @"YEB_PURCHASE", @"DIANTAOHUANDUAN",
-                           @"TAO_GOLDEN_V2", @"WIDGET_addzujian", @"SHANGYEHUA_90_1",
-                           @"TAOBAO_tab2gzy", @"YITAO_appgyg"];
-    });
     
     for (NSDictionary *task in taskList) {
         if (![task isKindOfClass:NSDictionary.class]) continue;
@@ -4995,25 +4986,28 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         [self answerManorClassroomQuestion];
                     });
                 }
-            } else if ([mode isEqualToString:@"VIEW"] || (bizKey.length && [s_knownBizKeys containsObject:bizKey])) {
+                continue;
+            }
+            
+            // 过滤捐款、支付、理财等需真实出资的任务，严禁自动化盲目调用
+            NSString *desc = task[@"desc"] ?: task[@"taskDesc"] ?: @"";
+            NSString *cat = task[@"categorizationSecondLevel"] ?: @"";
+            if ([cat isEqualToString:@"Public_Welfare_Behavior"] ||
+                [bizKey containsString:@"DONATE"] || [bizKey containsString:@"DONATION"] ||
+                [bizKey containsString:@"PAY"] || [bizKey containsString:@"PURCHASE"] ||
+                [desc containsString:@"捐"] || [desc containsString:@"付款"] || [desc containsString:@"支付"] || [desc containsString:@"实付"]) {
+                continue;
+            }
+            
+            // 仅对明确为 VIEW 模式且未完成的纯浏览任务做尝试
+            if ([mode isEqualToString:@"VIEW"]) {
                 NSString *taskKey = [NSString stringWithFormat:@"ANTFARM_FOOD_TASK:%@", bizKey];
                 if (![gDailyCompletedTasks containsObject:taskKey]) {
                     [gDailyCompletedTasks addObject:taskKey];
                     saveDailyTaskCache();
                     [self recordStage:[NSString stringWithFormat:@"蚂蚁庄园：正在完成浏览任务“%@”...", title]];
                     [self doManorFarmTaskWithBizKey:bizKey];
-                    if (taskId.length) {
-                        NSInteger stock = self.lastManorFoodStock;
-                        NSInteger limit = self.lastManorFoodStockLimit > 0 ? self.lastManorFoodStockLimit : 1800;
-                        if (stock < limit || limit == 0) {
-                            NSString *claimKey = [NSString stringWithFormat:@"ANTFARM_CLAIM_TASK:%@", taskId];
-                            [gDailyCompletedTasks addObject:claimKey];
-                            saveDailyTaskCache();
-                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                                [self receiveManorFarmTaskAwardWithTaskId:taskId title:title];
-                            });
-                        }
-                    }
+                    // 服务端将任务标记为 FINISHED 后，下次刷新任务列表时将安全自动领取
                 }
             }
         }
@@ -5041,7 +5035,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     // 1. 投喂前，先关闭抽屉面板，确保院子小鸡与饲料袋完全暴露
     [self closeManorTaskPanelOnWebView];
     
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (bridge) {
         [self recordStage:@"蚂蚁庄园：正在投喂小鸡（180g 饲料）..."];
         NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
@@ -5128,7 +5122,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 
 - (void)collectManorChickenManurePot:(NSString *)potNo {
     if (!self.enableAutoManor || !potNo.length) return;
-    PSDJsBridge *bridge = self.manorBridge ?: (self.rewardTaskBridge ?: self.jsBridge);
+    PSDJsBridge *bridge = (self.manorBridge && self.manorBridge != self.jsBridge) ? self.manorBridge : nil;
     if (!bridge) return;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSString *timeStamp = [NSString stringWithFormat:@"%ld", (long)(now * 1000)];
@@ -5169,7 +5163,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     
     static NSTimeInterval lastCheckTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now - lastCheckTime < 5.0) return;
+    if (now - lastCheckTime < 60.0) return;
     lastCheckTime = now;
     
     [self recordStage:@"蚂蚁庄园：正在执行日常自动化体检..."];
@@ -5371,12 +5365,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             }
         }
         
-        // E. 检查并执行日常体检
-        if (subFarm || ownAnimal || taskList.count > 0 || signDict) {
-            [self checkAndRunManorAutomations];
-        }
-        
-        // F. 领饲料奖励回包处理 (receiveFarmTaskAward)
+        // E. 领饲料奖励回包处理 (receiveFarmTaskAward)
         NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: (self.lastRpcOperationType ?: @""))];
         if (resData[@"haveAddFoodStock"] || [opType containsString:@"receiveFarmTaskAward"]) {
             NSInteger addFood = [resData[@"haveAddFoodStock"] integerValue];
@@ -6328,9 +6317,11 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
                 [self recordStage:@"神奇海洋：收到服务端安全风险拦截，已自动熔断暂停本日清理（保护账号安全）"];
             }
-            if (resData && (resData[@"cleanRewardVOS"] || resData[@"canClearFriendSeaToday"] || [dict[@"methodName"] isEqualToString:@"cleanFriendsOcean"] || [dict[@"operationType"] containsString:@"cleanFriendOcean"] || [resultCode isEqualToString:@"HELP_CLEAN_LIMIT"] || [resData[@"resultCode"] isEqualToString:@"HELP_CLEAN_LIMIT"] || [resData[@"resultDesc"] containsString:@"今日清理好友海域的次数已达上限"])) {
+            NSString *resDesc = [NSString stringWithFormat:@"%@", resData[@"resultDesc"] ?: dict[@"resultDesc"] ?: @""];
+            BOOL isOceanLimit = [resultCode containsString:@"LIMIT"] || [resData[@"resultCode"] containsString:@"LIMIT"] || [resDesc containsString:@"上限"] || [resDesc containsString:@"已达20次"];
+            if (resData && (resData[@"cleanRewardVOS"] || resData[@"canClearFriendSeaToday"] || [dict[@"methodName"] isEqualToString:@"cleanFriendsOcean"] || [dict[@"operationType"] containsString:@"cleanFriendOcean"] || isOceanLimit)) {
                 NSNumber *canClearToday = resData[@"canClearFriendSeaToday"];
-                if ((canClearToday && [canClearToday boolValue] == NO) || [resultCode isEqualToString:@"HELP_CLEAN_LIMIT"] || [resData[@"resultCode"] isEqualToString:@"HELP_CLEAN_LIMIT"] || [resData[@"resultDesc"] containsString:@"今日清理好友海域的次数已达上限"]) {
+                if ((canClearToday && [canClearToday boolValue] == NO) || isOceanLimit) {
                     [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"oceanLimitReachedToday"];
                     [self recordStage:@"神奇海洋：服务端确认今日海域清理已达上限（勤劳的你，明天见～）"];
                     [self oceanStopWithReason:nil];
