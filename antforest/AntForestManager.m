@@ -1848,17 +1848,22 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         return NO;
     }
     
-    // 3. 严禁自动执行的非浏览/高风险/社交类/下单类/第三方评价类任务
+    // 3. 严禁自动执行的非浏览/高风险/社交类/下单类/第三方评价类/小游戏关卡/外部App唤醒类任务
+    // （服务端对此类任务明确不支持前端通用 RPC finishTask，必须由端内小游戏业务回调、userGrowth 外部 Scheme 唤醒或手动交互完成）
     if ([lowerType containsString:@"zhifu"] || [lowerType containsString:@"pay"] || [lowerTitle containsString:@"支付"] || [lowerTitle containsString:@"付款"] ||
         [lowerType containsString:@"insure"] || [lowerType containsString:@"baoxian"] || [lowerTitle containsString:@"保险"] ||
         [lowerType containsString:@"loan"] || [lowerTitle containsString:@"借呗"] || [lowerTitle containsString:@"花呗"] ||
-        [lowerType containsString:@"order"] || [lowerType containsString:@"xiadan"] || [lowerTitle containsString:@"下单"] || [lowerTitle containsString:@"购买"] ||
+        [lowerType containsString:@"order"] || [lowerType containsString:@"xiadan"] || [lowerTitle containsString:@"下单"] || [lowerTitle containsString:@"购买"] || [lowerTitle containsString:@"订单"] || [lowerType containsString:@"lmct"] ||
         [lowerType containsString:@"gaode"] || [lowerTitle containsString:@"高德"] || [lowerTitle containsString:@"评价"] ||
         [lowerTitle containsString:@"分享"] || [lowerType containsString:@"sharer"] || [lowerType containsString:@"p2p"] ||
         [lowerTitle containsString:@"组队"] || [lowerTitle containsString:@"合种"] || [lowerTitle containsString:@"帮帮种"] || [lowerType containsString:@"team"] ||
         [lowerTitle containsString:@"下载"] || [lowerType containsString:@"caifu"] || [lowerType containsString:@"download"] ||
-        [lowerTitle containsString:@"砍树"] || [lowerTitle containsString:@"闯关"] || [lowerTitle containsString:@"闯5关"] ||
+        [lowerTitle containsString:@"砍树"] || [lowerTitle containsString:@"关卡"] || [lowerTitle containsString:@"闯关"] || [lowerTitle containsString:@"闯5关"] || [lowerTitle containsString:@"通过"] || [lowerType containsString:@"zh_nlgj"] || [lowerType containsString:@"fkssj"] ||
         [lowerTitle containsString:@"倒水"] || [lowerTitle containsString:@"砸蛋"] || [lowerTitle containsString:@"击杀"] ||
+        [lowerType containsString:@"kuaishou"] || [lowerTitle containsString:@"快手"] ||
+        [lowerType containsString:@"meituan"] || [lowerTitle containsString:@"美团"] ||
+        [lowerType containsString:@"taobaochengjiu"] || [lowerTitle containsString:@"淘宝成就"] || [lowerTitle containsString:@"周边"] ||
+        [lowerType containsString:@"jindouduobao"] || [lowerTitle containsString:@"夺宝"] || [lowerTitle containsString:@"新手引导"] ||
         [lowerType containsString:@"group_1_step"]) {
         // 网商银行 / 网商贷看额度等官方安全浏览任务，予以放行（砍树、砸蛋等端内游戏内部动作严禁放行）
         if (!([lowerTitle containsString:@"网商"] || [lowerType containsString:@"wangshang"] || [lowerType containsString:@"wsyh"])) {
@@ -1871,26 +1876,22 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         return NO;
     }
     
-    // 5. 明确支持的白名单浏览特征
-    if ([lowerType containsString:@"xlight"] || [lowerType containsString:@"taobao"] ||
-        [lowerType containsString:@"kuaishou"] || [lowerType containsString:@"wsyh"] ||
-        [lowerType containsString:@"wangshang"] || [lowerType containsString:@"denghuo"] ||
-        [lowerTitle containsString:@"逛好物"] || [lowerTitle containsString:@"助农好货"] ||
-        [lowerTitle containsString:@"逛"] || [lowerTitle containsString:@"看"] || [lowerTitle containsString:@"精选"] ||
-        [lowerTitle containsString:@"好物"] || [lowerTitle containsString:@"视频"] || [lowerTitle containsString:@"快手"] ||
-        [lowerTitle containsString:@"浏览"] || [lowerTitle containsString:@"访问"] || [lowerTitle containsString:@"金豆"] ||
-        [lowerTitle containsString:@"小程序"] || [lowerTitle containsString:@"淘金币"] ||
-        [lowerTitle containsString:@"金条"] || [lowerTitle containsString:@"小组件"] ||
-        [lowerTitle containsString:@"红包"] || [lowerTitle containsString:@"助农"] || [lowerTitle containsString:@"即得"] ||
-        [lowerTitle containsString:@"网商"] || [lowerTitle containsString:@"周边"] ||
-        [lowerTitle containsString:@"成就"] || [lowerTitle containsString:@"福利金"] ||
-        [lowerTitle containsString:@"额度"] || [lowerTitle containsString:@"提醒"] || [lowerTitle containsString:@"消息"] ||
-        [lowerTitle containsString:@"订阅"] || [lowerTitle containsString:@"会员"] ||
-        [lowerTitle containsString:@"寻道"] || [lowerTitle containsString:@"花园"] ||
-        [lowerTitle containsString:@"消除"] || [lowerTitle containsString:@"游戏"] ||
-        [lowerTitle containsString:@"玩一玩"] ||
-        [lowerType containsString:@"visit"] || [lowerType containsString:@"subscribe"] ||
-        [lowerType containsString:@"tab2"] || [lowerType containsString:@"ncly"]) {
+    // 5. 明确支持的白名单浏览特征（探针验证 100% 可通过 RPC 浏览完成并领奖）
+    if ([lowerType containsString:@"floatball"] || [lowerType containsString:@"star30s"] ||
+        [lowerType containsString:@"denghuo"] || [lowerType containsString:@"chouchoule"] ||
+        [lowerType containsString:@"jdly"] || [lowerType containsString:@"qutoutiao"] ||
+        [lowerType isEqualToString:@"58298"] || [lowerType containsString:@"defoliation"] ||
+        [lowerType containsString:@"huiyuan"] ||
+        [lowerType containsString:@"wsyh"] || [lowerType containsString:@"wangshang"] ||
+        [lowerTitle containsString:@"网商"] || [lowerTitle containsString:@"会员"] ||
+        [lowerTitle containsString:@"金豆乐园"] || [lowerTitle containsString:@"抽抽乐"] ||
+        [lowerTitle containsString:@"精选商品"] || [lowerTitle containsString:@"试玩"]) {
+        return YES;
+    }
+    
+    // 6. 其他常规纯浏览任务（排除上述黑名单后，标题带浏览/看等特征）
+    if ([lowerTitle containsString:@"看精选"] || [lowerTitle containsString:@"浏览"] ||
+        ([lowerTitle containsString:@"玩一玩"] && [lowerType containsString:@"floatball"])) {
         return YES;
     }
     
@@ -3147,14 +3148,18 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
             }
         } else if ([resCode isEqualToString:@"400000040"] || [resDesc containsString:@"不支持rpc调用"] || [resCode isEqualToString:@"400000001"] || [resDesc containsString:@"任务全局配置不存在"]) {
             NSString *moduleTag = ([resolvedKey containsString:@"FARM"] || [resolvedKey containsString:@"ORCHARD"]) ? @"芭芭农场" : (([resolvedKey containsString:@"DRAW"] || [resolvedKey containsString:@"LOTTERY"]) ? @"森林寻宝" : (([resolvedKey containsString:@"MONOPOLY"] || [resolvedKey containsString:@"HSDWY"]) ? @"新版保护地" : (([resolvedKey containsString:@"RESCUE"] || [resolvedKey containsString:@"OCEAN"]) ? @"神奇海洋" : ([resolvedKey containsString:@"AIFISH"] ? @"AI摸鱼" : @"任务中心"))));
-            [self recordStage:[NSString stringWithFormat:@"%@ · 当前任务需在对应界面手动操作完成（服务端不支持直接调用）", moduleTag]];
+            BOOL alreadyFailed = NO;
             if (resolvedKey.length) {
                 @synchronized(self) {
+                    alreadyFailed = [gDailyFailedTasks containsObject:resolvedKey];
                     [gDailyFailedTasks addObject:resolvedKey];
                     [gVitalityTaskRetryCounts removeObjectForKey:resolvedKey];
                     [gFarmTaskRetryCounts removeObjectForKey:resolvedKey];
                     saveDailyTaskCache();
                 }
+            }
+            if (!alreadyFailed) {
+                [self recordStage:[NSString stringWithFormat:@"%@ · 当前任务需在对应界面手动操作完成（服务端不支持直接调用）", moduleTag]];
             }
         }
         
