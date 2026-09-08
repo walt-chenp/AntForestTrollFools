@@ -164,6 +164,16 @@ dispatch_queue_t globalSerialQueueTest;
     return name.length == 1 ? [name stringByAppendingString:@"***"] : [[name substringToIndex:MIN((NSUInteger)2, name.length)] stringByAppendingString:@"***"];
 }
 
+- (NSString *)friendDisplayNameForUser:(NSString *)uid {
+    if (!uid.length) return @"好友";
+    if ([uid isEqualToString:self.myUserId]) return @"自己";
+    NSDictionary *contact = [self.friendsName[uid] isKindOfClass:NSDictionary.class] ? self.friendsName[uid] : nil;
+    NSString *name = [contact[@"displayName"] isKindOfClass:NSString.class] ? contact[@"displayName"] : nil;
+    if (!name.length) name = [contact[@"name"] isKindOfClass:NSString.class] ? contact[@"name"] : nil;
+    if (!name.length) name = [AntForestManager extractNameFromDictionary:contact];
+    return name.length ? name : @"好友";
+}
+
 static NSString *waterTodayKey(void) {
     return getCurrentDateString();
 }
@@ -3154,7 +3164,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
                 if (now - lastErrLogTime > 4.0) {
                     lastErrLogTime = now;
-                    [self recordStage:@"任务中心：服务端提示开小差/繁忙（3000/999），已自动暂停当前重试"];
+                    NSLog(@"[AntForestPort] 任务中心：服务端提示开小差/繁忙（3000/999），已自动暂停当前重试防风控");
                 }
             }
         } else if ([resCode isEqualToString:@"400000040"] || [resDesc containsString:@"不支持rpc调用"] || [resCode isEqualToString:@"400000001"] || [resDesc containsString:@"任务全局配置不存在"]) {
@@ -6227,8 +6237,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     long long currentTime = (long long)([[NSDate date] timeIntervalSince1970] * 1000);
                     if(overTimeValue < currentTime){
                         //可以执行领取
-                        NSString *log = [NSString stringWithFormat:@"%@\n能量球等待结束 拾取: %@|%@",[[AntForestManager sharedInstance] getUserName:uid],bid,convertTimestampToDateString(overTimeValue)];
-                        [[AntForestManager sharedInstance] addLog:log];
+                        NSString *friendName = [self friendDisplayNameForUser:uid];
+                        NSString *targetDesc = [uid isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
+                        [self recordStage:[NSString stringWithFormat:@"拾取%@定时成熟的能量球", targetDesc]];
                         [[AntForestManager sharedInstance] collectBubbles:uid bubblesId:bid];
                         [dict removeObjectForKey:bid]; //从字典树中移除
                     } else {
@@ -6251,20 +6262,10 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 -(NSString*)getUserName:(NSString*)uid {
     @try {
-        NSDate *currentDate = [NSDate date];
-        NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-        [dateFormatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
-        NSString *formattedDateString = [dateFormatter stringFromDate:currentDate];
-        
-        NSDictionary *dict = [[AntForestManager sharedInstance] friendsName];
-        NSString *displayName =[[dict objectForKey:uid] objectForKey:@"displayName"];
-        NSString *name =[[dict objectForKey:uid] objectForKey:@"name"];
-        NSString *label = [NSString stringWithFormat:@"[%@]\n[%@,%@,%@]",formattedDateString,displayName,name,uid];
-        return label;
+        NSString *name = [self friendDisplayNameForUser:uid];
+        return name ?: (uid ?: @"");
     } @catch (NSException *exception) {
-        // 捕获异常的代码
-        FileLog(@"Exception caught: %@", exception);
-        [Tool Alert:[exception description]];
+        return uid ?: @"";
     }
 }
 
@@ -6645,8 +6646,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         NSString *isSigned = [NSString stringWithFormat:@"%@", [record objectForKey:@"signed"]];
                         if([signKey isEqualToString:getCurrentDateString()] && [isSigned isEqualToString:@"0"]){
                             if(signId){
-                                NSString *log = [NSString stringWithFormat:@"%@\n找到复活能量球:%@ 复活",[[AntForestManager sharedInstance] getUserName:userId],signId];
-                                [[AntForestManager sharedInstance] addLog:log];
+                                [self recordStage:@"正在复活自己的过期能量球..."];
                                 [[AntForestManager sharedInstance] reviveEnergy:userId signId:signId];
                             }
                         }
@@ -6887,8 +6887,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     //可收取直接收取
                     if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"]){
                         [bidArr addObject:bid];
-                        NSString *log = [NSString stringWithFormat:@"%@\n找到可领能量球(%@g) 收取, %@",[[AntForestManager sharedInstance] getUserName:bUserId],remainEnergy,bid];
-                        [[AntForestManager sharedInstance] addLog:log];
+                        NSString *friendName = [self friendDisplayNameForUser:bUserId];
+                        NSString *targetDesc = [bUserId isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
+                        [self recordStage:[NSString stringWithFormat:@"收取%@的能量球（%@g）", targetDesc, remainEnergy]];
                         dispatch_async(globalSerialQueueCollect, ^{
                             [[AntForestManager sharedInstance] collectBubbles:bUserId bubblesId:bid];
                         });
@@ -6896,7 +6897,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     }
                     if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"INSUFFICIENT"]){
                         // 能量不足只记录调试日志，避免在主日志面板中刷屏
-                        NSLog(@"[AntForestPort] 能量不足: %@, 剩%@g, %@", [[AntForestManager sharedInstance] getUserName:bUserId], remainEnergy, bid);
+                        NSLog(@"[AntForestPort] 能量不足: %@, 剩%@g, %@", [self friendDisplayNameForUser:bUserId], remainEnergy, bid);
                     }
                     //等待中放入字典树中
                     if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"WAITING"] && overTime){
@@ -6908,12 +6909,13 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsBubbles"];
                         [[NSUserDefaults standardUserDefaults] synchronize];
                         // 等待能量球入库只进系统日志，避免每颗气泡挤爆用户面板
-                        NSLog(@"[AntForestPort] 等待能量球入库: %@, %@g, %@", [[AntForestManager sharedInstance] getUserName:bUserId], remainEnergy, bid);
+                        NSLog(@"[AntForestPort] 等待能量球入库: %@, %@g, %@", [self friendDisplayNameForUser:bUserId], remainEnergy, bid);
                     }
                     //可帮助直接帮助
                     if([[bubble objectForKey:@"canHelpCollect"] isEqualToNumber:@1]){
-                        NSString *log = [NSString stringWithFormat:@"%@\n找到帮助能量球(%@g) 帮助, %@",[[AntForestManager sharedInstance] getUserName:bUserId],remainEnergy,bid];
-                        [[AntForestManager sharedInstance] addLog:log];
+                        NSString *friendName = [self friendDisplayNameForUser:bUserId];
+                        NSString *targetDesc = [bUserId isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
+                        [self recordStage:[NSString stringWithFormat:@"帮助%@收取能量球（%@g）", targetDesc, remainEnergy]];
                     }
                 }
                 
