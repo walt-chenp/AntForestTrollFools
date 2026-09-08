@@ -1533,6 +1533,15 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
+    // 明确不做“逛惊喜市集领红包”、“逛一逛惊喜市集”与各类外部市集任务
+    if ([lowerType containsString:@"shiji"] || [lowerTitle containsString:@"市集"] || [lowerTitle containsString:@"惊喜市集"] || [lowerTitle containsString:@"逛惊喜市集"]) {
+        return NO;
+    }
+    // 明确不做“进入新版保护地”与保护地跳转任务
+    if ([lowerTitle containsString:@"新版保护地"] || [lowerTitle containsString:@"进入新版保护地"] || [lowerTitle containsString:@"保护地"] || [lowerType containsString:@"monopoly"]) {
+        return NO;
+    }
+    
     // 阶梯大奖类型安全可领
     if ([lowerType hasPrefix:@"acc_"] || [lowerType containsString:@"_acc_"] || [lowerType containsString:@"acc_"] || [lowerType containsString:@"stage_"] || [lowerType containsString:@"ladder"]) {
         return YES;
