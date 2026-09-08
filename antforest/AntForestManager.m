@@ -1533,12 +1533,12 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
-    // 明确不做“逛惊喜市集领红包”、“逛一逛惊喜市集”与各类外部市集任务
-    if ([lowerType containsString:@"shiji"] || [lowerTitle containsString:@"市集"] || [lowerTitle containsString:@"惊喜市集"] || [lowerTitle containsString:@"逛惊喜市集"]) {
+    // 明确不做“逛惊喜市集领红包”与神奇海洋“逛一逛惊喜市集”（精准匹配“惊喜市集”，避免误伤森林寻宝的“森林市集/集市”）
+    if ([lowerTitle containsString:@"惊喜市集"] || [lowerType containsString:@"jingxi"]) {
         return NO;
     }
-    // 明确不做“进入新版保护地”与保护地跳转任务
-    if ([lowerTitle containsString:@"新版保护地"] || [lowerTitle containsString:@"进入新版保护地"] || [lowerTitle containsString:@"保护地"] || [lowerType containsString:@"monopoly"]) {
+    // 明确不做领奖励中的“进入新版保护地”跳转任务
+    if ([lowerTitle containsString:@"新版保护地"] || [lowerTitle containsString:@"进入新版保护地"]) {
         return NO;
     }
     
@@ -1620,11 +1620,8 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [cleanTitle containsString:@"源星战域"] ||
         [cleanTitle containsString:@"我的花园"] ||
         [cleanTitle containsString:@"花园小镇"] ||
-        [cleanTitle containsString:@"市集"] ||
         [cleanTitle containsString:@"惊喜市集"] ||
-        [cleanTitle containsString:@"新版保护地"] ||
         [cleanTitle containsString:@"进入新版保护地"] ||
-        [cleanTitle containsString:@"保护地"] ||
         [cleanTitle containsString:@"连续"] ||
         [cleanTitle containsString:@"垃圾"] ||
         [cleanTitle containsString:@"帮好友清理"] ||
@@ -1639,12 +1636,12 @@ static BOOL isSafeOceanTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
-    // 明确不做神奇海洋“逛一逛惊喜市集”与外部市集
-    if ([lowerType containsString:@"shiji"] || [lowerTitle containsString:@"市集"] || [lowerTitle containsString:@"惊喜市集"]) {
+    // 明确不做神奇海洋“逛一逛惊喜市集”
+    if ([lowerTitle containsString:@"惊喜市集"] || [lowerType containsString:@"jingxi"]) {
         return NO;
     }
     // 明确不做“进入新版保护地”与保护地跳转任务
-    if ([lowerTitle containsString:@"新版保护地"] || [lowerTitle containsString:@"进入新版保护地"] || [lowerTitle containsString:@"保护地"] || [lowerType containsString:@"monopoly"]) {
+    if ([lowerTitle containsString:@"进入新版保护地"]) {
         return NO;
     }
     // 明确不支持 finishTask RPC 的答题、捡垃圾、连续签到与外部小程序小游戏
