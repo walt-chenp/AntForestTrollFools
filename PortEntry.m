@@ -2392,7 +2392,9 @@ static inline BOOL isRelevantPluginURL(NSString *urlStr) {
            [u containsString:@"2021003115672468"];
 }
 
-#define ENABLE_PROBE_LOGS 1
+#ifndef ENABLE_PROBE_LOGS
+#define ENABLE_PROBE_LOGS 0
+#endif
 #define AFProbeLog(...) do { if (ENABLE_PROBE_LOGS) NSLog(__VA_ARGS__); } while(0)
 
 static const void *PortRPCOriginalIMPKey = &PortRPCOriginalIMPKey;

@@ -72,6 +72,9 @@ dispatch_queue_t globalSerialQueueTest;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         afm=[[self alloc]init];
+#if !ENABLE_PROBE_LOGS
+        [afm clearProbeLogs];
+#endif
         
         // 创建一个串行队列
         globalSerialQueueQuery = dispatch_queue_create("antforest_query", DISPATCH_QUEUE_SERIAL);
@@ -859,6 +862,9 @@ static BOOL isNoiseProbeLog(NSString *log) {
 }
 
 - (void)recordProbeLog:(NSString *)log {
+#if !ENABLE_PROBE_LOGS
+    return;
+#else
     if (!log.length) return;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -886,6 +892,7 @@ static BOOL isNoiseProbeLog(NSString *log) {
             [handle closeFile];
         } @catch (NSException *e) {}
     });
+#endif
 }
 
 - (void)clearProbeLogs {
@@ -902,6 +909,9 @@ static BOOL isNoiseProbeLog(NSString *log) {
 }
 
 - (NSArray<NSString *> *)probeRecords {
+#if !ENABLE_PROBE_LOGS
+    return @[];
+#else
     @synchronized (patrolProbeLogs) {
         if (patrolProbeLogs.count > 0) {
             return [patrolProbeLogs copy];
@@ -924,6 +934,7 @@ static BOOL isNoiseProbeLog(NSString *log) {
         }
     } @catch (NSException *e) {}
     return @[];
+#endif
 }
 
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
