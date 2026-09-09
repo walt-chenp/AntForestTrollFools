@@ -1592,10 +1592,6 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
     NSString *lowerType = taskType.lowercaseString;
     NSString *lowerTitle = title ? title.lowercaseString : @"";
     
-    // 明确不做“逛惊喜市集领红包”与神奇海洋“逛一逛惊喜市集”（精准匹配“惊喜市集”，避免误伤森林寻宝的“森林市集/集市”）
-    if ([lowerTitle containsString:@"惊喜市集"] || [lowerType containsString:@"jingxi"]) {
-        return NO;
-    }
     // 明确不做领奖励中的“进入新版保护地”跳转任务
     if ([lowerTitle containsString:@"新版保护地"] || [lowerTitle containsString:@"进入新版保护地"]) {
         return NO;
@@ -1679,7 +1675,6 @@ static BOOL isSafeRewardTask(NSString *taskType, NSString *title) {
         [cleanTitle containsString:@"源星战域"] ||
         [cleanTitle containsString:@"我的花园"] ||
         [cleanTitle containsString:@"花园小镇"] ||
-        [cleanTitle containsString:@"惊喜市集"] ||
         [cleanTitle containsString:@"进入新版保护地"] ||
         [cleanTitle containsString:@"连续"] ||
         [cleanTitle containsString:@"垃圾"] ||
@@ -1881,6 +1876,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         [lowerTitle containsString:@"下载"] || [lowerType containsString:@"caifu"] || [lowerType containsString:@"download"] ||
         [lowerTitle containsString:@"砍树"] || [lowerTitle containsString:@"关卡"] || [lowerTitle containsString:@"闯关"] || [lowerTitle containsString:@"闯5关"] || [lowerTitle containsString:@"通过"] || [lowerType containsString:@"zh_nlgj"] || [lowerType containsString:@"fkssj"] ||
         [lowerTitle containsString:@"倒水"] || [lowerTitle containsString:@"砸蛋"] || [lowerTitle containsString:@"击杀"] ||
+        [lowerTitle containsString:@"玩一玩"] || [lowerType containsString:@"floatball_app"] || [lowerTitle containsString:@"消除战"] || [lowerTitle containsString:@"花园世界"] || [lowerTitle containsString:@"寻道大千"] || [lowerTitle containsString:@"消消消"] || [lowerTitle containsString:@"小游戏"] ||
         [lowerType containsString:@"kuaishou"] || [lowerTitle containsString:@"快手"] ||
         [lowerType containsString:@"meituan"] || [lowerTitle containsString:@"美团"] ||
         [lowerType containsString:@"taobaochengjiu"] || [lowerTitle containsString:@"淘宝成就"] || [lowerTitle containsString:@"周边"] ||
@@ -1898,21 +1894,23 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     }
     
     // 5. 明确支持的白名单浏览特征（探针验证 100% 可通过 RPC 浏览完成并领奖）
-    if ([lowerType containsString:@"floatball"] || [lowerType containsString:@"star30s"] ||
-        [lowerType containsString:@"denghuo"] || [lowerType containsString:@"chouchoule"] ||
-        [lowerType containsString:@"jdly"] || [lowerType containsString:@"qutoutiao"] ||
+    if (([lowerType containsString:@"floatball"] && ![lowerType containsString:@"floatball_app"] && ![lowerTitle containsString:@"玩一玩"]) ||
+        [lowerType containsString:@"star30s"] ||
+        [lowerType containsString:@"denghuo"] ||
+        [lowerType containsString:@"chouchoule"] ||
+        [lowerType containsString:@"jdly"] ||
+        [lowerType containsString:@"qutoutiao"] ||
         [lowerType isEqualToString:@"58298"] || [lowerType containsString:@"defoliation"] ||
         [lowerType containsString:@"huiyuan"] ||
         [lowerType containsString:@"wsyh"] || [lowerType containsString:@"wangshang"] ||
         [lowerTitle containsString:@"网商"] || [lowerTitle containsString:@"会员"] ||
         [lowerTitle containsString:@"金豆乐园"] || [lowerTitle containsString:@"抽抽乐"] ||
-        [lowerTitle containsString:@"精选商品"] || [lowerTitle containsString:@"试玩"]) {
+        [lowerTitle containsString:@"精选商品"]) {
         return YES;
     }
     
     // 6. 其他常规纯浏览任务（排除上述黑名单后，标题带浏览/看等特征）
-    if ([lowerTitle containsString:@"看精选"] || [lowerTitle containsString:@"浏览"] ||
-        ([lowerTitle containsString:@"玩一玩"] && [lowerType containsString:@"floatball"])) {
+    if ([lowerTitle containsString:@"看精选"] || [lowerTitle containsString:@"浏览"]) {
         return YES;
     }
     
@@ -2512,6 +2510,7 @@ static NSInteger sVitalityAutoRefreshRounds = 0;
                 return;
             }
             
+            static NSMutableSet<NSString *> *sExecutedScenesInCurrentRound = nil;
             static NSString *sLastExecutedSceneCode = nil;
             NSDictionary *item = nil;
             @synchronized(self) {
@@ -2519,40 +2518,49 @@ static NSInteger sVitalityAutoRefreshRounds = 0;
                     vitalityTaskRunning = NO;
                     gCurrentExecutingTaskKey = nil;
                     gCurrentExecutingTaskIsMultiStage = NO;
-                    if (sHasPerformedWorkInCurrentVitalityRound && sVitalityAutoRefreshRounds < 1) {
+                    NSSet<NSString *> *executedScenes = [sExecutedScenesInCurrentRound copy];
+                    [sExecutedScenesInCurrentRound removeAllObjects];
+                    
+                    if (sHasPerformedWorkInCurrentVitalityRound && sVitalityAutoRefreshRounds < 2) {
                         sHasPerformedWorkInCurrentVitalityRound = NO;
                         sVitalityAutoRefreshRounds++;
-                        if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
+                        
+                        if ([executedScenes containsObject:@"FARM"]) {
                             [self recordStage:@"芭芭农场：本批次任务已执行完毕，2.5秒后刷新拉取农场任务最新进度..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                 [self queryFarmTaskListWithForce:YES];
                                 [self notifyActiveH5PageToRefresh];
                             });
-                        } else if ([sLastExecutedSceneCode containsString:@"MONOPOLY"] || [sLastExecutedSceneCode containsString:@"HSDWY"]) {
+                        }
+                        if ([executedScenes containsObject:@"MONOPOLY"]) {
                             [self recordStage:@"新版保护地：本批次任务已执行完毕，2.5秒后刷新保护地任务列表..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                 [self queryMonopolyTaskListWithForce:YES];
                                 [self notifyActiveH5PageToRefresh];
                             });
-                        } else if ([sLastExecutedSceneCode containsString:@"RESCUE"] || [sLastExecutedSceneCode containsString:@"OCEAN"]) {
+                        }
+                        if ([executedScenes containsObject:@"OCEAN"] || [sLastExecutedSceneCode containsString:@"OCEAN"]) {
                             [self recordStage:@"神奇海洋：本批次任务已执行完毕，2.5秒后刷新拉取海洋任务最新进度..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                 [self queryOceanTaskListWithForce:YES];
                                 [self notifyActiveH5PageToRefresh];
                             });
-                        } else if ([sLastExecutedSceneCode containsString:@"AIFISH"]) {
+                        }
+                        if ([executedScenes containsObject:@"AIFISH"]) {
                             [self recordStage:@"AI摸鱼：本批次任务已执行完毕，2.5秒后刷新拉取摸鱼任务最新进度..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                 [self queryAIFishTaskListWithForce:YES];
                                 [self notifyActiveH5PageToRefresh];
                             });
-                        } else if ([sLastExecutedSceneCode containsString:@"DRAW"]) {
+                        }
+                        if ([executedScenes containsObject:@"DRAW"]) {
                             [self recordStage:@"森林寻宝：本批次任务已执行完毕，2.5秒后自动刷新寻宝与大奖..."];
                             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                                 [self queryLotteryTaskListWithForce:YES];
                                 [self notifyActiveH5PageToRefresh];
                             });
-                        } else {
+                        }
+                        if ([executedScenes containsObject:@"VITALITY"] || !executedScenes.count) {
                             if (self.enableAutoRewardTasks) {
                                 [self claimVitalityStageAwardsIfNeeded];
                                 [self recordStage:@"领奖励：本批次任务已执行完毕，2.5秒后自动刷新拉取新解锁任务与阶梯大奖..."];
@@ -2567,17 +2575,22 @@ static NSInteger sVitalityAutoRefreshRounds = 0;
                         sHasPerformedWorkInCurrentVitalityRound = NO;
                         sVitalityAutoRefreshRounds = 0;
                         if (didWork) {
-                            if ([sLastExecutedSceneCode containsString:@"FARM"] || [sLastExecutedSceneCode containsString:@"ORCHARD"]) {
+                            if ([executedScenes containsObject:@"FARM"]) {
                                 [self recordStage:@"芭芭农场：当前所有任务奖励已全部领取完毕"];
-                            } else if ([sLastExecutedSceneCode containsString:@"RESCUE"] || [sLastExecutedSceneCode containsString:@"OCEAN"]) {
+                            }
+                            if ([executedScenes containsObject:@"OCEAN"]) {
                                 [self recordStage:@"神奇海洋：当前所有有效海洋任务与拼图已全部领取完毕"];
-                            } else if ([sLastExecutedSceneCode containsString:@"AIFISH"]) {
+                            }
+                            if ([executedScenes containsObject:@"AIFISH"]) {
                                 [self recordStage:@"AI摸鱼：当前所有任务奖励已全部领取完毕"];
-                            } else if ([sLastExecutedSceneCode containsString:@"MONOPOLY"] || [sLastExecutedSceneCode containsString:@"HSDWY"]) {
+                            }
+                            if ([executedScenes containsObject:@"MONOPOLY"]) {
                                 [self recordStage:@"新版保护地：当前所有任务奖励已全部领取完毕"];
-                            } else if ([sLastExecutedSceneCode containsString:@"DRAW"] || [sLastExecutedSceneCode containsString:@"LOTTERY"]) {
+                            }
+                            if ([executedScenes containsObject:@"DRAW"]) {
                                 [self recordStage:@"森林寻宝：当前所有任务奖励已全部领取完毕"];
-                            } else {
+                            }
+                            if ([executedScenes containsObject:@"VITALITY"] || !executedScenes.count) {
                                 if (self.enableAutoRewardTasks) {
                                     [self claimVitalityStageAwardsIfNeeded];
                                     [self recordStage:@"领奖励：所有常规任务与阶梯大奖已全部处理完毕"];
@@ -2633,7 +2646,18 @@ static NSInteger sVitalityAutoRefreshRounds = 0;
             NSString *title = [item[@"title"] isKindOfClass:NSString.class] ? [item[@"title"] copy] : @"任务";
             NSString *awardName = [item[@"awardName"] isKindOfClass:NSString.class] ? [item[@"awardName"] copy] : @"奖励";
             NSString *taskType = [item[@"taskType"] isKindOfClass:NSString.class] ? [item[@"taskType"] copy] : @"";
+            NSString *sceneTag = isFarmScene ? @"FARM" :
+                                (isMonopolyScene ? @"MONOPOLY" :
+                                (isOceanScene ? @"OCEAN" :
+                                ([sceneCode containsString:@"AIFISH"] ? @"AIFISH" :
+                                (isLotteryScene ? @"DRAW" : @"VITALITY"))));
             sLastExecutedSceneCode = isFarmScene ? @"ANTFARM_ORCHARD_TASK_V2" : [sceneCode copy];
+            @synchronized(self) {
+                if (!sExecutedScenesInCurrentRound) {
+                    sExecutedScenesInCurrentRound = [NSMutableSet set];
+                }
+                [sExecutedScenesInCurrentRound addObject:sceneTag];
+            }
             BOOL isAcc = [item[@"isAcc"] respondsToSelector:@selector(boolValue)] ? [item[@"isAcc"] boolValue] : NO;
             
             NSString *taskKey = taskType.length ? [NSString stringWithFormat:@"%@:%@", sceneCode, taskType] : nil;
@@ -4423,11 +4447,14 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "  const all=Array.from(document.querySelectorAll('*'));"
      "  let claimCnt=0;"
      "  const clickedSet=new Set();"
+     "  const validWords=['领取','点击领取','立即领取','领奖','点击领奖','立即领奖','收下','开心收下','领能量','领取能量','领摸鱼能量','领步数'];"
      "  for(const el of all){"
      "    if(el.children.length===0&&el.innerText){"
      "      const txt=el.innerText.trim().replace(/\\s+/g,'');"
-     "      if(txt==='领取'||txt==='点击领取'||txt==='立即领取'||txt==='领奖'||txt==='点击领奖'||txt==='立即领奖'||txt==='收下'||txt==='开心收下'||txt==='领能量'||txt==='领取能量'||txt==='领摸鱼能量'||txt==='领步数'||txt.includes('领取')||txt.includes('领奖')){"
+     "      if(validWords.indexOf(txt)!==-1){"
      "        const target=el.closest('button,[role=button],div[class*=btn],div[class*=button]')||el;"
+     "        const targetTxt=(target.innerText||'').trim().replace(/\\s+/g,'');"
+     "        if(targetTxt.startsWith('去')||targetTxt.includes('前往')||targetTxt.includes('逛')||targetTxt.includes('看')||targetTxt.includes('玩')||targetTxt.includes('农场')||targetTxt.includes('市集')||targetTxt.includes('保护地')||targetTxt.includes('庄园')||targetTxt.includes('肥料'))continue;"
      "        if(!clickedSet.has(target)){"
      "          clickedSet.add(target);"
      "          triggerClick(target);"
