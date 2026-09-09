@@ -2461,8 +2461,8 @@ static NSString *sLastQueriedSceneCode = nil;
 - (void)notifyActiveH5PageToRefresh {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSMutableSet *targets = [NSMutableSet set];
-        for (PSDJsBridge *b in @[self.farmBridge ?: (id)[NSNull null], self.oceanBridge ?: (id)[NSNull null], self.aiFishBridge ?: (id)[NSNull null], self.rewardTaskBridge ?: (id)[NSNull null], self.lotteryBridge ?: (id)[NSNull null], self.monopolyBridge ?: (id)[NSNull null], self.jsBridge ?: (id)[NSNull null]]) {
-            if (b != (id)[NSNull null] && [b respondsToSelector:@selector(contentView)]) {
+        for (PSDJsBridge *b in @[self.farmBridge ?: (id)[NSNull null], self.oceanBridge ?: (id)[NSNull null], self.aiFishBridge ?: (id)[NSNull null], self.rewardTaskBridge ?: (id)[NSNull null], self.lotteryBridge ?: (id)[NSNull null], self.monopolyBridge ?: (id)[NSNull null]]) {
+            if (b != (id)[NSNull null] && b != self.jsBridge && [b respondsToSelector:@selector(contentView)]) {
                 id cv = [b contentView];
                 if (cv) [targets addObject:cv];
                 if ([cv respondsToSelector:@selector(webView)]) {
@@ -4369,7 +4369,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
     dispatch_async(dispatch_get_main_queue(), ^{
         NSMutableSet *targets = [NSMutableSet set];
         SEL evalSel = @selector(evaluateJavaScript:completionHandler:);
-        id bridge = self.rewardTaskBridge ?: self.jsBridge;
+        id bridge = (self.rewardTaskBridge && self.rewardTaskBridge != self.jsBridge) ? self.rewardTaskBridge : nil;
         if (bridge) {
             if ([bridge respondsToSelector:@selector(contentView)]) {
                 id cv = [bridge contentView];
@@ -4398,7 +4398,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                                 NSURL *u = ((id (*)(id, SEL))objc_msgSend)(v, @selector(URL));
                                 if (u) {
                                     NSString *us = u.absoluteString.lowercaseString;
-                                    if ([us containsString:@"180020010001247580"] || [us containsString:@"vitality"] || [us containsString:@"home.html"] || [us containsString:@"60000002"]) {
+                                    if (([us containsString:@"180020010001247580"] || [us containsString:@"vitality"]) && ![us containsString:@"home.html"] && ![us containsString:@"60000002"]) {
                                         [targets addObject:v];
                                     }
                                 }
@@ -4421,6 +4421,8 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
 
 - (void)claimAllVisibleRewardTaskRewardsOnWebView {
     [self executeRewardTaskScriptOnWebView:@"(()=>{try{"
+     "const curUrl=(window.location.href||'').toLowerCase();"
+     "if(curUrl.includes('home.html')||curUrl.includes('60000002'))return;"
      "function triggerClick(el){"
      "  if(!el)return;"
      "  try{"
@@ -4469,9 +4471,10 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
      "scanAndClick();"
      "if(!window.__afRewardTaskObserverInstalled){"
      "  window.__afRewardTaskObserverInstalled=true;"
-     "  const obs=new MutationObserver(()=>{scanAndClick();});"
+     "  let debounceTimer=null;"
+     "  const obs=new MutationObserver(()=>{if(debounceTimer)clearTimeout(debounceTimer);debounceTimer=setTimeout(()=>{scanAndClick();},300);});"
      "  obs.observe(document.body||document.documentElement,{childList:true,subtree:true});"
-     "  setTimeout(()=>{try{obs.disconnect();window.__afRewardTaskObserverInstalled=false;}catch(e){}},30000);"
+     "  setTimeout(()=>{try{obs.disconnect();if(debounceTimer)clearTimeout(debounceTimer);window.__afRewardTaskObserverInstalled=false;}catch(e){}},30000);"
      "}"
      "}catch(e){console.error('[AntForestPort] claimAllVisibleRewardTaskRewards error: ',e);}})();"];
 }
@@ -7058,21 +7061,23 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 NSUInteger collectable = 0;
                 for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
-                for(NSDictionary *dictRank in rankArr) {
-                    NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
-                    if (!userId.length) continue;
-                    BOOL isCollectable = [[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1];
-                    BOOL isReviveable = canReviveFriendBubble(dictRank);
-                    if (isReviveable) {
-                        [self queueAutoReviveForUser:userId];
-                    }
-                    if (isCollectable || isReviveable){
-                        if (selfPriorityPending) {
-                            [deferredFriendRankIds addObject:userId];
-                        } else {
-                            dispatch_async(globalSerialQueueQuery, ^{
-                                [[AntForestManager sharedInstance] queryFriendsBubbles:userId];
-                            });
+                if (self.isScanRunning) {
+                    for(NSDictionary *dictRank in rankArr) {
+                        NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
+                        if (!userId.length) continue;
+                        BOOL isCollectable = [[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1];
+                        BOOL isReviveable = canReviveFriendBubble(dictRank);
+                        if (isReviveable) {
+                            [self queueAutoReviveForUser:userId];
+                        }
+                        if (isCollectable || isReviveable){
+                            if (selfPriorityPending) {
+                                [deferredFriendRankIds addObject:userId];
+                            } else {
+                                dispatch_async(globalSerialQueueQuery, ^{
+                                    [[AntForestManager sharedInstance] queryFriendsBubbles:userId];
+                                });
+                            }
                         }
                     }
                 }
@@ -7086,7 +7091,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 for(NSDictionary *dictTotalRank in rankTotalArr) {
                     NSString *userId = [AntForestManager extractUserIdFromDictionary:dictTotalRank] ?: [dictTotalRank objectForKey:@"userId"];
                     if (!userId.length) continue;
-                    if (canReviveFriendBubble(dictTotalRank)) {
+                    if (self.isScanRunning && canReviveFriendBubble(dictTotalRank)) {
                         [self queueAutoReviveForUser:userId];
                     }
                     NSString *rank = [dictTotalRank objectForKey:@"rank"];
@@ -7114,26 +7119,28 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         [[NSUserDefaults standardUserDefaults] synchronize];
                     }
                 }
-                if (rankScanPending) {
-                    rankScanPending = NO;
-                    if (selfPriorityPending) {
-                        deferredRankedFriendIds = fr.allKeys;
-                    } else {
-                        [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
+                if (self.isScanRunning) {
+                    if (rankScanPending) {
+                        rankScanPending = NO;
+                        if (selfPriorityPending) {
+                            deferredRankedFriendIds = fr.allKeys;
+                        } else {
+                            [self scanRankedFriends:fr.allKeys cycle:collectionCycle];
+                        }
                     }
-                }
-                if (self.enableCleanOcean && fr.allKeys.count > 0) {
-                    [self scanOceanForFriends:fr.allKeys];
-                }
-                BOOL hasMore = [resData[@"hasMore"] boolValue] || [resData[@"hasNext"] boolValue];
-                NSInteger nextIndex = [resData[@"nextStartIndex"] integerValue] ?: [resData[@"startIndex"] integerValue] + rankTotalArr.count;
-                if ((hasMore || rankTotalArr.count >= 200) && nextIndex > 0 && nextIndex < 1000) {
-                    static NSInteger lastFetchedIndex = 0;
-                    if (nextIndex > lastFetchedIndex) {
-                        lastFetchedIndex = nextIndex;
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                            [self queryRankPage:nextIndex];
-                        });
+                    if (self.enableCleanOcean && fr.allKeys.count > 0) {
+                        [self scanOceanForFriends:fr.allKeys];
+                    }
+                    BOOL hasMore = [resData[@"hasMore"] boolValue] || [resData[@"hasNext"] boolValue];
+                    NSInteger nextIndex = [resData[@"nextStartIndex"] integerValue] ?: [resData[@"startIndex"] integerValue] + rankTotalArr.count;
+                    if ((hasMore || rankTotalArr.count >= 200) && nextIndex > 0 && nextIndex < 1000) {
+                        static NSInteger lastFetchedIndex = 0;
+                        if (nextIndex > lastFetchedIndex) {
+                            lastFetchedIndex = nextIndex;
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                                [self queryRankPage:nextIndex];
+                            });
+                        }
                     }
                 }
             }
