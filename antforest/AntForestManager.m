@@ -7045,15 +7045,17 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
                 NSNumber *canCollectEnergy = [myDict objectForKey:@"canCollectEnergy"];
                 [self recordStage:[NSString stringWithFormat:@"诊断 · 本人能量状态：%@", [canCollectEnergy isEqualToNumber:@1] ? @"可收" : @"暂无成熟能量"]];
-                if(self.enableSelfCollect) {
-                    dispatch_async(globalSerialQueueQuery, ^{
-                        [[AntForestManager sharedInstance] queryMyBubbles];
-                    });
-                }
-                if (self.enableAutoRewardTasks) {
-                    dispatch_async(globalSerialQueueQuery, ^{
-                        [[AntForestManager sharedInstance] queryVitalityTaskList];
-                    });
+                if (self.isScanRunning) {
+                    if(self.enableSelfCollect) {
+                        dispatch_async(globalSerialQueueQuery, ^{
+                            [[AntForestManager sharedInstance] queryMyBubbles];
+                        });
+                    }
+                    if (self.enableAutoRewardTasks) {
+                        dispatch_async(globalSerialQueueQuery, ^{
+                            [[AntForestManager sharedInstance] queryVitalityTaskList];
+                        });
+                    }
                 }
             }
             if(resData && (resData[@"friendRanking"] || resData[@"totalDatas"])) {

@@ -1590,7 +1590,7 @@ static void installEarnEnergyCollector(id controller) {
 
     [self.view addSubview:grabber];
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"当前版本：v3.0 正式版";
+    versionLabel.text = @"当前版本：v3.1 正式版";
     versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     versionLabel.textColor = [UIColor systemGray2Color];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -2431,94 +2431,6 @@ static BOOL hookRPCProbeMethod(Class cls) {
 
 
 static NSString *gLastRpcOperationType = nil;
-static void (*originalCallJsApi)(id, SEL, id, id, id, id);
-static void portCallJsApi(id self, SEL _cmd, id name, id url, id data, id cb) {
-    @try {
-        NSString *urlStr = [url isKindOfClass:NSString.class] ? url : ([url respondsToSelector:@selector(absoluteString)] ? [url absoluteString] : @"");
-        NSString *opType = nil;
-        if ([name isEqualToString:@"rpc"]) {
-            if ([data isKindOfClass:NSDictionary.class]) {
-                opType = data[@"operationType"];
-            } else if ([data isKindOfClass:NSArray.class]) {
-                NSDictionary *first = [((NSArray *)data).firstObject isKindOfClass:NSDictionary.class] ? ((NSArray *)data).firstObject : nil;
-                opType = first[@"operationType"] ?: first[@"data"][@"operationType"];
-            }
-        }
-        if (opType.length) {
-            gLastRpcOperationType = [opType copy];
-            [AntForestManager sharedInstance].lastRpcOperationType = [opType copy];
-        }
-        
-        BOOL isRelevant = isRelevantPluginURL(urlStr) ||
-                          (opType.length && ([opType containsString:@"forest"] || [opType containsString:@"orchard"] || [opType containsString:@"farm"] || [opType containsString:@"antiep"] || [opType containsString:@"ocean"] || [opType containsString:@"patrol"] || [opType containsString:@"manure"] || [opType containsString:@"draw"] || [opType containsString:@"lottery"] || [opType containsString:@"vitality"] || [opType containsString:@"monopoly"] || [opType containsString:@"antisle"] || [opType containsString:@"hsdwy"] || [opType containsString:@"antfarm"] || [opType containsString:@"manor"]));
-        
-        AntForestManager *manager = [AntForestManager sharedInstance];
-        BOOL isMonopolyRpc = (opType.length && ([opType containsString:@"monopoly"] || [opType containsString:@"antisle"] || [opType containsString:@"hsdwy"])) ||
-                             ([urlStr.lowercaseString containsString:@"180020010001293606"] || [urlStr.lowercaseString containsString:@"2060090000398301"] || [urlStr.lowercaseString containsString:@"monopoly"] || [urlStr.lowercaseString containsString:@"hsdwy"]);
-        if (isMonopolyRpc && manager.enableAutoPatrolNew && self != manager.jsBridge) {
-            BOOL isFirstBind = (manager.monopolyBridge != self);
-            if (isFirstBind) {
-                manager.monopolyBridge = self;
-                if (urlStr.length) manager.monopolyH5Url = urlStr;
-                [manager recordStage:@"新版保护地 · 已捕获大富翁 RPC 并绑定 Bridge"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                    [manager queryMonopolyTaskListWithForce:YES];
-                    if (!manager.monopolyDrawerOpened) {
-                        [manager openMonopolyTaskPanelOnWebView];
-                    }
-                });
-            }
-        }
-        
-        NSURL *callUrl = [url isKindOfClass:NSURL.class] ? (NSURL *)url : ([urlStr length] ? [NSURL URLWithString:urlStr] : nil);
-        BOOL isForestUrl = [urlStr containsString:@"180020010001247580"] || [urlStr containsString:@"60000002"];
-        BOOL isFarmUrl = [urlStr containsString:@"alipayfarm"] || [urlStr containsString:@"babafarm"] || [urlStr containsString:@"orchard"] || [urlStr containsString:@"180020010001263018"] || [urlStr containsString:@"68687599"];
-        
-        BOOL isManorRpc = [AntForestManager isManorURL:callUrl] || 
-                          (!isForestUrl && !isFarmUrl &&
-                           (opType.length && ([opType containsString:@"com.alipay.antfarm"] || [opType containsString:@"antfarm."])));
-        if (isManorRpc && manager.enableAutoManor) {
-            if (manager.jsBridge == self) {
-                manager.jsBridge = nil;
-            }
-            BOOL isFirstBind = (manager.manorBridge != self);
-            if (isFirstBind) {
-                manager.manorBridge = self;
-                if (urlStr.length) manager.manorH5Url = urlStr;
-                [manager recordStage:@"蚂蚁庄园 · 已捕获庄园 RPC 并绑定 Bridge"];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                    [manager checkAndRunManorAutomations];
-                });
-            }
-        }
-        
-        if (isRelevant) {
-            NSString *dataStr = nil;
-            if ([data isKindOfClass:NSString.class]) dataStr = data;
-            else if ([NSJSONSerialization isValidJSONObject:data]) {
-                NSData *d = [NSJSONSerialization dataWithJSONObject:data options:0 error:nil];
-                if (d) dataStr = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-            }
-            if (!dataStr) dataStr = [data description];
-            
-            BOOL isFarm = [urlStr containsString:@"farm"] || [urlStr containsString:@"orchard"] || [opType containsString:@"farm"] || [opType containsString:@"orchard"] || [opType containsString:@"manure"];
-            BOOL isManor = [urlStr containsString:@"manor"] || [urlStr containsString:@"antfarm"] || [urlStr containsString:@"66666674"] || [opType containsString:@"antfarm"] || [opType containsString:@"manor"];
-            if (isManor) {
-                AFProbeLog(@"\n🐔 [ManorProbe-RPC-REQ]\n📍 RPC: %@ | URL: %@\n📦 Request: %@\n", opType ?: name, urlStr, dataStr);
-                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[蚂蚁庄园RPC-REQ: %@] %@", opType ?: name, dataStr]];
-            } else if (isFarm) {
-                AFProbeLog(@"\n🌾 [FarmProbe-RPC-REQ]\n📍 RPC: %@ | URL: %@\n📦 Request: %@\n", opType ?: name, urlStr, dataStr);
-                AFProbeLog(@"\n📥 [PatrolProbe-RES] 📍 芭芭农场发起RPC: %@\n", opType ?: name);
-                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[芭芭农场RPC-REQ: %@] %@", opType ?: name, dataStr]];
-            } else {
-                AFProbeLog(@"\n🔍 [PatrolProbe-JSAPI]\n📍 API: %@ | URL: %@\n📦 Data: %@\n", name, urlStr, dataStr);
-                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[JSAPI: %@] URL: %@\nData: %@", name, urlStr, dataStr]];
-            }
-        }
-    } @catch (NSException *e) {}
-    
-    if (originalCallJsApi) originalCallJsApi(self, _cmd, name, url, data, cb);
-}
 
 static id portTransformResponseData(id self, SEL _cmd, id value) {
     id controller = forestControllerForBridge(self);
@@ -2570,33 +2482,12 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
         if (manager.jsBridge == self) manager.jsBridge = nil;
     }
 
-    BOOL isOceanResp = resData[@"antOceanTaskVOList"] || [dict[@"antOceanTaskVOList"] isKindOfClass:NSArray.class];
-    BOOL isTargetPluginResp = isForest || isFarmResp || isOceanResp || isManor ||
-                              (gLastRpcOperationType.length && ([gLastRpcOperationType containsString:@"forest"] || [gLastRpcOperationType containsString:@"orchard"] || [gLastRpcOperationType containsString:@"antiep"] || [gLastRpcOperationType containsString:@"ocean"] || [gLastRpcOperationType containsString:@"patrol"] || [gLastRpcOperationType containsString:@"manure"] || [gLastRpcOperationType containsString:@"draw"] || [gLastRpcOperationType containsString:@"lottery"] || [gLastRpcOperationType containsString:@"vitality"] || [gLastRpcOperationType containsString:@"antfarm"] || [gLastRpcOperationType containsString:@"manor"]));
-
-    if (isTargetPluginResp) {
-        @try {
-            NSString *resStr = nil;
-            if ([NSJSONSerialization isValidJSONObject:value]) {
-                NSData *data = [NSJSONSerialization dataWithJSONObject:value options:0 error:nil];
-                if (data) resStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            }
-            if (!resStr) resStr = [value description];
-            
-            if (resStr.length && !isNoiseProbeLog(resStr)) {
-                if (gLastRpcOperationType.length) {
-                    AFProbeLog(@"\n📥 [PatrolProbe-RES] 📍 对应RPC: %@\n📦 Response: %@\n", gLastRpcOperationType, resStr);
-                } else {
-                    AFProbeLog(@"\n📥 [PatrolProbe-RES]\n📦 Response: %@\n", resStr);
-                }
-                [[AntForestManager sharedInstance] recordProbeLog:[NSString stringWithFormat:@"[RES] %@", resStr]];
-            }
-        } @catch (NSException *e) {}
-    }
     if (isForest) {
-        if (manager.jsBridge != self) {
-            manager.jsBridge = self;
-            [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
+        if (ctrlUrl && isForestHomeURL(ctrlUrl)) {
+            if (manager.jsBridge != self) {
+                manager.jsBridge = self;
+                [manager recordStage:@"诊断 · 已绑定森林响应 H5 Bridge"];
+            }
         }
     }
     if ([self respondsToSelector:@selector(_doFlushMessageQueue:url:)]) {
@@ -2616,6 +2507,7 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
             [manager handleFarmResponse:dict ?: resData];
         }
         if (isManor && manager.enableAutoManor) {
+            // ManorProbe-RPC-REQ: 庄园自动化由 handleManorResponse 与静默 RPC 驱动
             if (manager.jsBridge == self) {
                 manager.jsBridge = nil;
             }
@@ -2799,13 +2691,10 @@ static void installHooks(void) {
         
         Class psdClass = NSClassFromString(@"PSDJsBridge");
         Class rvkClass = NSClassFromString(@"RVKJsBridge");
-        NSArray *bridgeClasses = @[psdClass ?: [NSObject class], rvkClass ?: [NSObject class]];
-        for (Class targetBridgeClass in bridgeClasses) {
-            if (targetBridgeClass != [NSObject class]) {
-                hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
-                hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
-                hookMethod(targetBridgeClass, @selector(callJsApi:url:data:responseCallback:), (IMP)portCallJsApi, (IMP *)&originalCallJsApi);
-            }
+        Class targetBridgeClass = psdClass ?: rvkClass;
+        if (targetBridgeClass) {
+            hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
+            hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
         }
         
         int classCount = objc_getClassList(NULL, 0);
