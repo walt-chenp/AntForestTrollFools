@@ -64,11 +64,33 @@ static NSMutableDictionary<NSString *, NSNumber *> *lastAnimalCollectAttemptTime
 static NSMutableSet<NSString *> *shieldReportedFriendsInRound = nil;
 static NSMutableSet<NSString *> *sDoubleCollectCheckedUsers = nil;
 
-// 活跃时间窗口：00:00 ~ 06:59:59 凌晨静默期（任务做任务、好友过期复活、海洋垃圾清理等静默等待早7点，保护阶梯奖励与风控安全）；07:00 ~ 23:59:59 活跃期
+static NSString *getTaskActiveStartTimeString(void) {
+    NSString *t = AntForestManager.sharedInstance.rewardTaskStartTime;
+    if (!t.length) {
+        t = [NSUserDefaults.standardUserDefaults stringForKey:@"rewardTaskStartTime"];
+    }
+    return t.length ? t : @"07:00";
+}
+
+// 活跃时间窗口：根据用户设置的时间（默认 07:00）动态判定。未到时间前处于静默期，仅允许能量签到，常规做任务挂起等待指定时刻；达到指定时刻后进入活跃期
 static BOOL isWithinTaskActiveHours(void) {
+    NSString *startTime = getTaskActiveStartTimeString();
+    NSArray *parts = [startTime componentsSeparatedByString:@":"];
+    NSInteger targetHour = 7;
+    NSInteger targetMinute = 0;
+    if (parts.count >= 2) {
+        targetHour = [parts[0] integerValue];
+        targetMinute = [parts[1] integerValue];
+    } else if (parts.count == 1) {
+        targetHour = [parts[0] integerValue];
+    }
+    
     NSCalendar *calendar = [NSCalendar currentCalendar];
-    NSInteger hour = [calendar component:NSCalendarUnitHour fromDate:[NSDate date]];
-    return (hour >= 7);
+    NSDateComponents *nowComp = [calendar components:(NSCalendarUnitHour | NSCalendarUnitMinute) fromDate:[NSDate date]];
+    NSInteger currentMinutes = nowComp.hour * 60 + nowComp.minute;
+    NSInteger targetMinutes = targetHour * 60 + targetMinute;
+    
+    return (currentMinutes >= targetMinutes);
 }
 
 // 定义一个全局串行队列
@@ -98,6 +120,7 @@ dispatch_queue_t globalSerialQueueTest;
         lastAnimalCollectAttemptTimes = [NSMutableDictionary dictionary];
         shieldReportedFriendsInRound = [NSMutableSet set];
         sDoubleCollectCheckedUsers = [NSMutableSet set];
+        afm.rewardTaskStartTime = [[NSUserDefaults standardUserDefaults] stringForKey:@"rewardTaskStartTime"] ?: @"07:00";
         
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
@@ -1087,7 +1110,7 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
     
     if([self jsBridge]) {
         [self recordStage:[NSString stringWithFormat:@"诊断 · 请求找能量续查：已跳过 %lu 位", (unsigned long)visitedFriends.count]];
-        [[self jsBridge] _doFlushMessageQueue:arg1 url:arg2];
+        [self safeFlushBridge:[self jsBridge] message:arg1 url:arg2];
         //FileLog(@"anthook takeLook");
     }
 }
@@ -1110,13 +1133,6 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
 }
 
 -(void)requestNextTakeLook {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (self.lastPkInteractionTime > 0 && now - self.lastPkInteractionTime < kPkInteractionAvoidanceDuration) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [self requestNextTakeLook];
-        });
-        return;
-    }
     __block NSUInteger requestToken = 0;
     @synchronized (self) {
         if (!takeLookRunning || !self.enableAutoCollect || !self.jsBridge || takeLookTotalRounds >= kTakeLookMaxRounds) {
@@ -1410,11 +1426,6 @@ static NSTimeInterval lastMyBubblesQueryTime = 0;
 
 //查询能量球
 -(void)queryFriendsBubbles:(NSString*)friendId {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (self.lastPkInteractionTime > 0 && now - self.lastPkInteractionTime < kPkInteractionAvoidanceDuration) {
-        [self recordStage:@"诊断 · 气泡查询跳过：用户正在浏览PK榜"];
-        return;
-    }
     [[AntForestManager sharedLock] lock];
     
     NSString *version = @"20241025";
@@ -1552,7 +1563,7 @@ static NSMutableDictionary *friendOceanCleanCounts = nil;
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         if (now - sLastSilentOceanLog > 1800.0) {
             sLastSilentOceanLog = now;
-            [self recordStage:@"神奇海洋：当前处于凌晨静默期（00:00~07:00），海域垃圾拾取与清理等待早7点刷新后执行"];
+            [self recordStage:[NSString stringWithFormat:@"神奇海洋：当前处于静默期，海域垃圾拾取与清理等待 %@ 刷新后执行", getTaskActiveStartTimeString()]];
         }
         return;
     }
@@ -2255,7 +2266,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         NSTimeInterval nowTime = [[NSDate date] timeIntervalSince1970];
         if (nowTime - sLastSilentLogTime > 1800.0) {
             sLastSilentLogTime = nowTime;
-            [self recordStage:@"领奖励：今日签到已完成，常规做任务处于凌晨静默期（00:00~07:00），早7点后自动唤醒执行"];
+            [self recordStage:[NSString stringWithFormat:@"领奖励：今日签到已完成，常规做任务处于静默期，%@ 后自动唤醒执行", getTaskActiveStartTimeString()]];
         }
         return;
     }
@@ -3053,7 +3064,7 @@ static void silentlyPrefetchTaskUrl(NSString *jumpUrl) {
                                         [self notifyActiveH5PageToRefresh];
                                     });
                                 } else {
-                                    [self recordStage:@"领奖励：今日能量签到已完成，常规做任务已挂起等待早7点后执行"];
+                                    [self recordStage:[NSString stringWithFormat:@"领奖励：今日能量签到已完成，常规做任务已挂起等待 %@ 后执行", getTaskActiveStartTimeString()]];
                                 }
                             }
                         }
@@ -3084,7 +3095,7 @@ static void silentlyPrefetchTaskUrl(NSString *jumpUrl) {
                                         [self claimVitalityStageAwardsIfNeeded];
                                         [self recordStage:@"领奖励：本轮常规任务与阶梯大奖已全部调度执行完毕"];
                                     } else {
-                                        [self recordStage:@"领奖励：今日能量签到已完成，常规做任务已挂起等待早7点后执行"];
+                                        [self recordStage:[NSString stringWithFormat:@"领奖励：今日能量签到已完成，常规做任务已挂起等待 %@ 后执行", getTaskActiveStartTimeString()]];
                                     }
                                 }
                             }
@@ -6528,11 +6539,6 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 //查询总排行 可以获取所有人的ID
 -(void)queryTotalRank{
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (self.lastPkInteractionTime > 0 && now - self.lastPkInteractionTime < kPkInteractionAvoidanceDuration) {
-        [self recordStage:@"诊断 · 好友榜查询延后：用户正在浏览PK榜"];
-        return;
-    }
     NSString *version = @"20230501";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
@@ -6666,7 +6672,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
             static NSString *sLastDayOceanActiveHoursTriggered = nil;
             if (![sLastDayOceanActiveHoursTriggered isEqualToString:today]) {
                 sLastDayOceanActiveHoursTriggered = today;
-                [self recordStage:@"神奇海洋：早间7点海域垃圾已刷新，正在拉取海洋好友列表与清理海域..."];
+                [self recordStage:[NSString stringWithFormat:@"神奇海洋：%@海域垃圾已刷新，正在拉取海洋好友列表与清理海域...", getTaskActiveStartTimeString()]];
             }
             [self cleanMyOceanThoroughly];
             [self queryOceanFriendList];
@@ -6679,7 +6685,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
             if (isWithinTaskActiveHours()) {
                 if (![sLastDayActiveHoursTriggered isEqualToString:today]) {
                     sLastDayActiveHoursTriggered = today;
-                    [self recordStage:@"领奖励：早间7点活跃期开启，正在刷新拉取今日全新任务与能量签到..."];
+                    [self recordStage:[NSString stringWithFormat:@"领奖励：%@活跃期开启，正在刷新拉取今日全新任务与能量签到...", getTaskActiveStartTimeString()]];
                     [self notifyActiveH5PageToRefresh];
                     [self queryVitalityTaskListWithForce:YES];
                 } else {
@@ -7030,6 +7036,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 -(void)matchFriendIdAndBubbles:(id)args {
     @try {
+        BOOL isTotalRankResponse = NO;
         if ([args isKindOfClass:NSDictionary.class]) {
             NSDictionary *dict = args;
             NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
@@ -7215,6 +7222,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
             NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: (self.lastRpcOperationType ?: @""))];
             NSString *respId = [NSString stringWithFormat:@"%@", dict[@"responseId"] ?: (dict[@"callbackId"] ?: @"")];
             BOOL isOurSilentRpc = [respId containsString:@"af_silent_"];
+            BOOL isOurSilentRank = [respId containsString:@"af_silent_rank_"];
             
             BOOL isHomePagePayload = (resData[@"userEnergy"] != nil || dict[@"userEnergy"] != nil ||
                                       resData[@"combineHandlerVOMap"][@"userInfo"] != nil || dict[@"combineHandlerVOMap"][@"userInfo"] != nil ||
@@ -7222,44 +7230,34 @@ static BOOL oceanPlanLoggedThisRound = NO;
                                       resData[@"bubbles"] != nil || dict[@"bubbles"] != nil ||
                                       resData[@"wateringBubbles"] != nil || dict[@"wateringBubbles"] != nil);
 
-            BOOL isFillUserRobFlag = NO;
-            NSArray *friendRankingList = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : ([dict[@"friendRanking"] isKindOfClass:NSArray.class] ? dict[@"friendRanking"] : nil);
-            if (friendRankingList.count > 0 && !resData[@"totalDatas"] && !dict[@"totalDatas"]) {
-                NSDictionary *firstItem = [friendRankingList.firstObject isKindOfClass:NSDictionary.class] ? friendRankingList.firstObject : nil;
-                if (firstItem) {
-                    if (firstItem[@"challengeExpectedSettlementResult"] != nil ||
-                        firstItem[@"canProtectBubble"] != nil ||
-                        firstItem[@"userRobFlagList"] != nil ||
-                        firstItem[@"userRobFlags"] != nil ||
-                        firstItem[@"robFlags"] != nil ||
-                        firstItem[@"canGrabPacket"] != nil ||
-                        firstItem[@"robFlag"] != nil ||
-                        firstItem[@"challengeRankLevel"] != nil) {
-                        isFillUserRobFlag = YES;
-                    }
-                }
-                NSTimeInterval nowSec = [[NSDate date] timeIntervalSince1970];
-                if (self.lastPkInteractionTime > 0 && (nowSec - self.lastPkInteractionTime < kPkInteractionAvoidanceDuration)) {
-                    if (!isHomePagePayload) {
-                        isFillUserRobFlag = YES;
-                    }
-                }
-            }
-
             BOOL isTaskListPayload = (resData[@"taskInfoList"] != nil || dict[@"taskInfoList"] != nil ||
                                       resData[@"taskList"] != nil || dict[@"taskList"] != nil ||
                                       resData[@"antOceanTaskVOList"] != nil || dict[@"antOceanTaskVOList"] != nil);
 
-            BOOL isPkOrPvp = !isHomePagePayload && !isTaskListPayload && (
-                              isFillUserRobFlag ||
-                              resData[@"rankDisplayParamsVO"] != nil || dict[@"rankDisplayParamsVO"] != nil ||
-                              resData[@"dynamicPromoteVO"] != nil || dict[@"dynamicPromoteVO"] != nil ||
-                              resData[@"promoteLineEnergy"] != nil || dict[@"promoteLineEnergy"] != nil ||
-                              resData[@"nextRankLevelName"] != nil || dict[@"nextRankLevelName"] != nil ||
-                              resData[@"promoteCount"] != nil || dict[@"promoteCount"] != nil ||
-                              resData[@"extendInfo"][@"rankHeadPortraitVOS"] != nil ||
-                              dict[@"extendInfo"][@"rankHeadPortraitVOS"] != nil ||
-                              resData[@"rankHeadPortraitVOS"] != nil || dict[@"rankHeadPortraitVOS"] != nil ||
+            NSString *periodType = resData[@"periodType"] ?: dict[@"periodType"];
+            NSString *rankType = resData[@"rankType"] ?: dict[@"rankType"];
+            BOOL isEnergyRankingOp = [opType containsString:@"queryEnergyRanking"] &&
+                                     ![opType containsString:@"Challenge"] &&
+                                     ![opType.lowercaseString containsString:@"pk"];
+
+            // 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或后台静默 rank 查询）：
+            // 绝不包含任何 PK/排位/挑战/周榜 结构，杜绝被非总榜覆盖
+            isTotalRankResponse = NO;
+            if (isOurSilentRank || (isEnergyRankingOp && (!periodType.length || [periodType isEqualToString:@"total"]) && (!rankType.length || [rankType isEqualToString:@"energyRank"]))) {
+                if (!isStrictPkOperationName(opType) &&
+                    !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] &&
+                    !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] &&
+                    !resData[@"userPkInfo"] && !dict[@"userPkInfo"] &&
+                    !resData[@"pkRanking"] && !dict[@"pkRanking"] &&
+                    !resData[@"challengeRank"] && !dict[@"challengeRank"]) {
+                    isTotalRankResponse = YES;
+                }
+            }
+
+            BOOL isPkOrPvp = !isOurSilentRpc && !isHomePagePayload && !isTaskListPayload && !isTotalRankResponse && (
+                              isStrictPkOperationName(opType) ||
+                              resData[@"energyChallengeRank"] != nil || dict[@"energyChallengeRank"] != nil ||
+                              resData[@"energyPvpInfo"] != nil || dict[@"energyPvpInfo"] != nil ||
                               resData[@"userPkInfo"] != nil || dict[@"userPkInfo"] != nil ||
                               resData[@"pkRanking"] != nil || dict[@"pkRanking"] != nil ||
                               resData[@"pkRankList"] != nil || dict[@"pkRankList"] != nil ||
@@ -7268,15 +7266,12 @@ static BOOL oceanPlanLoggedThisRound = NO;
                               resData[@"seasonInfo"] != nil || dict[@"seasonInfo"] != nil ||
                               resData[@"challengeRank"] != nil || dict[@"challengeRank"] != nil ||
                               resData[@"pkTaskList"] != nil || dict[@"pkTaskList"] != nil ||
-                              resData[@"pkTasks"] != nil || dict[@"pkTasks"] != nil ||
-                              resData[@"totalData"] != nil || dict[@"totalData"] != nil ||
-                              (resData[@"myself"] && [resData[@"myself"][@"rank"] integerValue] > 0 && !resData[@"userBaseInfo"] && !resData[@"totalDatas"] && !dict[@"totalDatas"] && (resData[@"rankDisplayParamsVO"] || resData[@"extendInfo"][@"rankHeadPortraitVOS"] || resData[@"totalData"])) ||
-                              isStrictPkOperationName(opType));
+                              resData[@"pkTasks"] != nil || dict[@"pkTasks"] != nil);
 
             if (isPkOrPvp) {
                 self.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
-                // 用户在前端 H5 手动交互 PK 榜/黄金PK赛/排位赛/挑战赛（含下滑分页与 fillUserRobFlag）：
-                // 保持前端视图完全独立，绝不触发后台气泡匹配、任务刷新、签到、巡护等一切侧链逻辑，彻底杜绝死锁、卡顿与分页卡加载！
+                // 用户在前端 H5 手动交互 PK 榜/黄金PK赛/排位赛/挑战赛：
+                // 保持前端视图完全独立，绝不触发后台气泡匹配、任务刷新、签到、巡护等一切侧链逻辑，彻底杜绝死锁与卡顿！
                 [self recordStage:@"诊断 · 捕获PK/排位赛交互回包，保持前端视图独立，跳过自动化逻辑"];
                 return;
             }
@@ -7461,8 +7456,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
             
             // 匹配 takelook 返回的 friendID（仅当插件正在执行后台找能量扫描时才由插件接管并查气泡，避免干扰用户手动找能量跳转）
-            if(takeLookRunning && resData && resData[@"friendId"]) {
-                NSString *friendId = resData[@"friendId"];
+            NSString *takeLookFriendId = [resData[@"friendId"] isKindOfClass:NSString.class] ? resData[@"friendId"] : ([dict[@"friendId"] isKindOfClass:NSString.class] ? dict[@"friendId"] : nil);
+            if(takeLookRunning && takeLookFriendId.length) {
+                NSString *friendId = takeLookFriendId;
                 if (![self consumeTakeLookFriend:friendId]) return;
                 NSMutableDictionary* fb = [[AntForestManager sharedInstance] friendsBubbles];
                 //如果字典树中没有
@@ -7827,20 +7823,6 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
             // 严格隔离榜单类型：仅允许真正的“总榜”（queryEnergyRanking + periodType=total）进入好友总榜缓存与自动收取扫描
             // 彻底杜绝 PK榜/排位赛/挑战榜/周榜 污染总榜并引发循环分页与卡死
-            NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: (self.lastRpcOperationType ?: @""))];
-            NSString *respId = [NSString stringWithFormat:@"%@", dict[@"responseId"] ?: (dict[@"callbackId"] ?: @"")];
-            NSString *periodType = resData[@"periodType"] ?: dict[@"periodType"];
-            NSString *rankType = resData[@"rankType"] ?: dict[@"rankType"];
-            BOOL isOurSilentRank = [respId containsString:@"af_silent_rank_"];
-            BOOL isEnergyRankingOp = [opType containsString:@"queryEnergyRanking"] &&
-                                     ![opType containsString:@"Challenge"] &&
-                                     ![opType.lowercaseString containsString:@"pk"];
-            BOOL isTotalRankResponse = NO;
-            if (isOurSilentRank || (isEnergyRankingOp && (!periodType.length || [periodType isEqualToString:@"total"]) && (!rankType.length || [rankType isEqualToString:@"energyRank"]))) {
-                if (!isStrictPkOperationName(opType) && !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] && !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] && !resData[@"rankDisplayParamsVO"] && !dict[@"rankDisplayParamsVO"]) {
-                    isTotalRankResponse = YES;
-                }
-            }
             if(isTotalRankResponse && resData && (resData[@"friendRanking"] || resData[@"totalDatas"])) {
                 NSArray *rankArr = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : resData[@"totalDatas"];
                 NSUInteger collectable = 0;

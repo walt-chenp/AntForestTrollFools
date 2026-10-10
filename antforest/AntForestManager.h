@@ -70,6 +70,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (assign, nonatomic) BOOL enableAutoPatrol; // 旧版保护地自动巡护与物种合成派遣
 @property (assign, nonatomic) BOOL enableAutoPatrolNew; // 新版保护地大富翁自动掷骰子与任务
 @property (assign, nonatomic) BOOL enableAutoRewardTasks; // 任务中心自动签到、做任务与领奖励
+@property (nonatomic, copy) NSString *rewardTaskStartTime; // 领奖励等日常任务每日开始时间，格式 HH:mm，默认 @"07:00"
 @property (assign, nonatomic) BOOL enableAutoAIFish; // AI摸鱼自动任务与摸鱼次数
 @property (assign, nonatomic) BOOL enableAutoFarmTasks; // 芭芭农场做任务集肥料与小鸡肥料自动领取
 @property (assign, nonatomic) BOOL enableAutoManor; // 蚂蚁庄园全自动日常（签到、小课堂答题、领饲料、喂小鸡与收肥料）

@@ -840,6 +840,7 @@ static void installEarnEnergyCollector(id controller) {
 @end
 
 @interface AntForestSettingsPanel : UIViewController
+@property (nonatomic, strong) UIButton *rewardButton;
 @end
 
 @interface AntForestWaterPanel : UIViewController <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
@@ -1485,7 +1486,10 @@ static void installEarnEnergyCollector(id controller) {
     UISwitch *oceanSwitch = [[UISwitch alloc] init]; oceanSwitch.on = AntForestManager.sharedInstance.enableCleanOcean; oceanSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanSwitch addTarget:self action:@selector(toggleCleanOcean:) forControlEvents:UIControlEventValueChanged]; [ocean addSubview:oceanSwitch];
     UIButton *oceanTasks = [self settingsButtonWithTitle:@"神奇海洋（自动任务）" detail:@"自动完成海洋日常任务与拼图领奖" icon:@"sparkles.rectangle.stack.fill" action:nil];
     UISwitch *oceanTasksSwitch = [[UISwitch alloc] init]; oceanTasksSwitch.on = AntForestManager.sharedInstance.enableAutoOceanTasks; oceanTasksSwitch.translatesAutoresizingMaskIntoConstraints = NO; [oceanTasksSwitch addTarget:self action:@selector(toggleAutoOceanTasks:) forControlEvents:UIControlEventValueChanged]; [oceanTasks addSubview:oceanTasksSwitch];
-    UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:@"自动浏览任务、奖励领取、森林寻宝需手动进入才能触发自动浏览任务。" icon:@"gift.fill" action:nil];
+    NSString *currentRewardStartTime = AntForestManager.sharedInstance.rewardTaskStartTime ?: @"07:00";
+    NSString *rewardDetail = [NSString stringWithFormat:@"每日 %@ 开启任务（点击修改时刻）；自动浏览任务与奖励领取。", currentRewardStartTime];
+    UIButton *reward = [self settingsButtonWithTitle:@"领奖励 & 森林寻宝" detail:rewardDetail icon:@"gift.fill" action:@selector(showRewardTimePicker)];
+    self.rewardButton = reward;
     UISwitch *rewardSwitch = [[UISwitch alloc] init]; rewardSwitch.on = AntForestManager.sharedInstance.enableAutoRewardTasks; rewardSwitch.translatesAutoresizingMaskIntoConstraints = NO; [rewardSwitch addTarget:self action:@selector(toggleAutoRewardTasks:) forControlEvents:UIControlEventValueChanged]; [reward addSubview:rewardSwitch];
     
     UIButton *aiFish = [self settingsButtonWithTitle:@"AI摸鱼（任务与机会）" detail:@"手动进入AI摸鱼自动完成奖励任务并领取" icon:@"fish.fill" action:nil];
@@ -1539,6 +1543,7 @@ static void installEarnEnergyCollector(id controller) {
     UIImageView *image = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:icon]]; image.tintColor = [UIColor colorWithRed:0.07 green:0.31 blue:0.18 alpha:1.0]; image.translatesAutoresizingMaskIntoConstraints = NO;
     UILabel *titleLabel = [[UILabel alloc] init]; titleLabel.text = title; titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]; titleLabel.textColor = UIColor.labelColor; titleLabel.translatesAutoresizingMaskIntoConstraints = NO;
     UILabel *detailLabel = [[UILabel alloc] init]; detailLabel.text = detail; detailLabel.font = [UIFont systemFontOfSize:11]; detailLabel.textColor = UIColor.secondaryLabelColor; detailLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    detailLabel.tag = 1002;
     detailLabel.numberOfLines = 2;
     detailLabel.adjustsFontSizeToFitWidth = YES;
     detailLabel.minimumScaleFactor = 0.75;
@@ -1558,6 +1563,45 @@ static void installEarnEnergyCollector(id controller) {
 - (void)showSchedule { [self.navigationController pushViewController:[[AntForestSchedulePanel alloc] init] animated:YES]; }
 - (void)showStepSimulator { [self.navigationController pushViewController:[[AntForestStepSimulatorPanel alloc] init] animated:YES]; }
 - (void)showWater { [self.navigationController pushViewController:[[AntForestWaterPanel alloc] init] animated:YES]; }
+- (void)updateRewardButtonDetail {
+    if (!self.rewardButton) return;
+    UILabel *detailLabel = (UILabel *)[self.rewardButton viewWithTag:1002];
+    if (detailLabel) {
+        NSString *currentRewardStartTime = AntForestManager.sharedInstance.rewardTaskStartTime ?: @"07:00";
+        detailLabel.text = [NSString stringWithFormat:@"每日 %@ 开启任务（点击修改时刻）；自动浏览任务与奖励领取。", currentRewardStartTime];
+    }
+}
+- (void)showRewardTimePicker {
+    NSString *currentTime = AntForestManager.sharedInstance.rewardTaskStartTime ?: @"07:00";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.dateFormat = @"HH:mm";
+    NSDate *currentDate = [formatter dateFromString:currentTime] ?: [formatter dateFromString:@"07:00"] ?: [NSDate date];
+    
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"设置任务开始时间"
+                                                                   message:@"请选择每日开始执行领奖励等日常任务的时间（默认 07:00）"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIViewController *vc = [[UIViewController alloc] init];
+    vc.preferredContentSize = CGSizeMake(270, 160);
+    UIDatePicker *picker = [[UIDatePicker alloc] initWithFrame:CGRectMake(0, 0, 270, 160)];
+    picker.datePickerMode = UIDatePickerModeTime;
+    if (@available(iOS 13.4, *)) {
+        picker.preferredDatePickerStyle = UIDatePickerStyleWheels;
+    }
+    picker.date = currentDate;
+    [vc.view addSubview:picker];
+    [alert setValue:vc forKey:@"contentViewController"];
+    
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"保存设置" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+        NSString *newTime = [formatter stringFromDate:picker.date];
+        AntForestManager.sharedInstance.rewardTaskStartTime = newTime;
+        [NSUserDefaults.standardUserDefaults setObject:newTime forKey:@"rewardTaskStartTime"];
+        [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"领奖励 · 任务每日开始时间已设置为 %@", newTime]];
+        [weakSelf updateRewardButtonDetail];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
 - (void)toggleAutoRevive:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoRevive = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoRevive"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"复活能量 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleAutoEarn:(UISwitch *)sender { AntForestManager.sharedInstance.enableAutoEarn = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableAutoEarn"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"打地鼠 · 功能已%@", sender.on ? @"开启" : @"关闭"]]; }
 - (void)toggleCleanOcean:(UISwitch *)sender { AntForestManager.sharedInstance.enableCleanOcean = sender.on; [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableCleanOcean"]; [AntForestManager.sharedInstance recordStage:[NSString stringWithFormat:@"神奇海洋 · 自动清理已%@", sender.on ? @"开启" : @"关闭"]]; }
@@ -1747,7 +1791,7 @@ static void installEarnEnergyCollector(id controller) {
 
     [self.view addSubview:grabber];
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"当前版本：v3.2.3 正式版";
+    versionLabel.text = @"当前版本：v3.2.4 正式版";
     versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     versionLabel.textColor = [UIColor systemGray2Color];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -2007,8 +2051,9 @@ static void installEarnEnergyCollector(id controller) {
         return log.length > 0 && ![log containsString:@"[Diag]"] && ![log containsString:@"诊断 ·"];
     }];
     NSArray *records = [logs filteredArrayUsingPredicate:predicate];
+    NSString *rewardDesc = manager.enableAutoRewardTasks ? [NSString stringWithFormat:@"开（每日 %@）", manager.rewardTaskStartTime ?: @"07:00"] : @"关";
     NSString *header = [NSString stringWithFormat:@"AntForestPort-Ocean 收取日志\n导出时间：%@\n配置：自动收取=%@，收取自己=%@，自动能量雨=%@，赚能量（打地鼠玩法）=%@，神奇海洋清理=%@，神奇海洋任务=%@，领奖励与森林寻宝=%@，AI摸鱼=%@，芭芭农场做任务集肥料=%@，蚂蚁庄园=%@，新版保护地（大富翁）=%@，自动复活好友过期能量=%@，后台循环=%@，循环间隔=%ld 秒，定时收取=%@，打开蚂蚁森林自动浇水=%@，定时自动浇水=%@（%ld g，%lu 位好友），步数模拟=%@\n统计：今日=%ld g，累计=%ld g，日志条目=%lu\n\n",
-                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoOceanTasks ? @"开" : @"关", manager.enableAutoRewardTasks ? @"开" : @"关", manager.enableAutoAIFish ? @"开" : @"关", manager.enableAutoFarmTasks ? @"开" : @"关", manager.enableAutoManor ? @"开" : @"关", manager.enableAutoPatrolNew ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
+                      getCurrentDateTimeString(), manager.enableAutoCollect ? @"开" : @"关", manager.enableSelfCollect ? @"开" : @"关", manager.enableAutoRain ? @"开" : @"关", manager.enableAutoEarn ? @"开" : @"关", manager.enableCleanOcean ? @"开" : @"关", manager.enableAutoOceanTasks ? @"开" : @"关", rewardDesc, manager.enableAutoAIFish ? @"开" : @"关", manager.enableAutoFarmTasks ? @"开" : @"关", manager.enableAutoManor ? @"开" : @"关", manager.enableAutoPatrolNew ? @"开" : @"关", manager.enableAutoRevive ? @"开" : @"关", manager.enableBackgroundLoop ? @"开" : @"关", (long)manager.collectInterval, manager.enableScheduledCollect ? @"开" : @"关", manager.enableWaterOnLaunch ? @"开" : @"关", manager.enableAutoWater ? @"开" : @"关", (long)manager.waterGrams, (unsigned long)manager.waterFriendIds.count, AFStepSimulator.shared.enabled ? @"开" : @"关", (long)manager.todayCollectedEnergy, (long)manager.totalCollectedEnergy, (unsigned long)records.count];
     NSMutableString *fullOutput = [NSMutableString stringWithString:header];
     if (records.count) {
         [fullOutput appendString:[records componentsJoinedByString:@"\n\n"]];
@@ -2306,6 +2351,7 @@ static void initializeManager(void) {
     manager.enableCleanOcean = [defaults objectForKey:@"enableCleanOcean"] ? [defaults boolForKey:@"enableCleanOcean"] : YES;
     manager.enableAutoOceanTasks = [defaults objectForKey:@"enableAutoOceanTasks"] ? [defaults boolForKey:@"enableAutoOceanTasks"] : YES;
     manager.enableAutoRewardTasks = [defaults objectForKey:@"enableAutoRewardTasks"] ? [defaults boolForKey:@"enableAutoRewardTasks"] : YES;
+    manager.rewardTaskStartTime = [defaults stringForKey:@"rewardTaskStartTime"] ?: @"07:00";
     manager.enableAutoAIFish = [defaults objectForKey:@"enableAutoAIFish"] ? [defaults boolForKey:@"enableAutoAIFish"] : YES;
     manager.enableAutoFarmTasks = [defaults objectForKey:@"enableAutoFarmTasks"] ? [defaults boolForKey:@"enableAutoFarmTasks"] : YES;
     manager.enableAutoManor = [defaults objectForKey:@"enableAutoManor"] ? [defaults boolForKey:@"enableAutoManor"] : YES;
