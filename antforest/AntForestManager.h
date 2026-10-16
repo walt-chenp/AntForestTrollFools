@@ -20,9 +20,9 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)extractNameFromDictionary:(NSDictionary *)dict;
 + (NSString *)extractUserIdFromDictionary:(NSDictionary *)dict;
 
-@property(nonatomic,strong) PSDJsBridge* jsBridge;
+@property(nonatomic,strong,nullable) PSDJsBridge* jsBridge;
 // 领奖励/寻宝页专用桥接；若未独立打开则兜底复用森林首页桥接。
-@property(nonatomic,strong) PSDJsBridge* rewardTaskBridge;
+@property(nonatomic,strong,nullable) PSDJsBridge* rewardTaskBridge;
 @property(nonatomic,copy) NSString* rewardTaskH5Url;
 @property(nonatomic,copy,nullable) void (^bridgeProbeHandler)(void);
 -(void)probeAndRestoreBridges;
@@ -84,6 +84,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *lastManorManureCollectDate; // 最近一次收取小鸡肥料的日期
 @property (nonatomic) BOOL manorTaskPanelOpened; // 是否已打开领饲料面板
 @property (atomic, assign) BOOL isScanRunning; // 扫描进行中独占锁
+@property (atomic, assign) NSTimeInterval lastScanStartTime; // 本轮扫描启动时间戳（用于超时熔断）
 @property (assign, nonatomic) int failedTimes; //未成功收取能量的次数
 @property(atomic) NSTimeInterval collectInterval; //takeLook时间间隔
 
@@ -157,6 +158,7 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)collectBubbles:(NSString*)uid bubblesId:(NSString*)bids;
 -(void)reviveEnergy:(NSString*)uid signId:(NSString*)signId; //貌似查询
 -(void)autoCollectBubbles;
+-(void)autoCollectBubblesWithRush:(BOOL)isRush;
 -(void)matchFriendIdAndBubbles:(id)args;
 -(void)recordCollectedEnergyFromResponse:(id)args;
 -(NSString*)getUserName:(NSString*)uid;

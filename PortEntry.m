@@ -151,12 +151,42 @@ static id rewardBridgeFromController(id controller) {
     return nil;
 }
 
+static BOOL isForestBridgeAlive(id bridge) {
+    if (!bridge) return NO;
+    @try {
+        if ([bridge respondsToSelector:@selector(contentView)]) {
+            id cv = ((id (*)(id, SEL))objc_msgSend)(bridge, @selector(contentView));
+            if (!cv) return NO;
+            if ([cv respondsToSelector:@selector(webView)]) {
+                id wv = ((id (*)(id, SEL))objc_msgSend)(cv, @selector(webView));
+                if (!wv) return NO;
+            }
+        }
+        return YES;
+    } @catch (__unused NSException *e) {
+        return NO;
+    }
+}
+
 static id forestBridgeFromController(id controller) {
-    for (NSString *name in @[@"jsBridge", @"bridge"]) {
+    if (!controller) return nil;
+    NSMutableArray *objects = [NSMutableArray arrayWithObject:controller];
+    for (NSString *name in @[ @"contentView", @"rvkContentView" ]) {
         SEL selector = NSSelectorFromString(name);
-        if (![controller respondsToSelector:selector]) continue;
-        id bridge = ((id (*)(id, SEL))objc_msgSend)(controller, selector);
-        if ([bridge isKindOfClass:NSClassFromString(@"PSDJsBridge")]) return bridge;
+        if ([controller respondsToSelector:selector]) {
+            id contentView = ((id (*)(id, SEL))objc_msgSend)(controller, selector);
+            if (contentView) [objects addObject:contentView];
+        }
+    }
+    for (id object in objects) {
+        for (NSString *name in @[@"jsBridge", @"bridge"]) {
+            SEL selector = NSSelectorFromString(name);
+            if (![object respondsToSelector:selector]) continue;
+            id bridge = ((id (*)(id, SEL))objc_msgSend)(object, selector);
+            if ([bridge isKindOfClass:NSClassFromString(@"PSDJsBridge")]) {
+                if (isForestBridgeAlive(bridge)) return bridge;
+            }
+        }
     }
     return nil;
 }
@@ -221,19 +251,20 @@ static void probeAndRestoreForestBridge(void) {
     sIsProbingForestBridge = YES;
     @try {
         AntForestManager *manager = AntForestManager.sharedInstance;
+        // 检查当前绑定的森林首页 bridge 是否仍然存活（真后台下 WebProcess 崩溃或释放后自动重构）
+        if (manager.jsBridge && !isForestBridgeAlive(manager.jsBridge)) {
+            manager.jsBridge = nil;
+            [manager recordStage:@"诊断 · 检测到森林首页 Bridge 已失效/脱落，正在自动重新探针绑定"];
+        }
         id controller = findAnyForestController();
         if (controller) {
-            if (!manager.jsBridge) {
-                id bridge = forestBridgeFromController(controller) ?: rewardBridgeFromController(controller);
-                if (bridge) {
-                    manager.jsBridge = bridge;
-                    [manager recordStage:@"诊断 · 后台探针绑定森林首页 H5 Bridge"];
-                }
+            id bridge = forestBridgeFromController(controller) ?: rewardBridgeFromController(controller);
+            if (bridge && (manager.jsBridge != bridge || !manager.jsBridge)) {
+                manager.jsBridge = bridge;
+                [manager recordStage:@"诊断 · 后台探针绑定森林首页 H5 Bridge"];
             }
             if (manager.rewardTaskBridge && manager.rewardTaskBridge != manager.jsBridge) {
-                id rcv = [manager.rewardTaskBridge respondsToSelector:@selector(contentView)] ? ((id (*)(id, SEL))objc_msgSend)(manager.rewardTaskBridge, @selector(contentView)) : nil;
-                BOOL isRcvAlive = [rcv isKindOfClass:[UIView class]] ? ([(UIView *)rcv window] != nil) : (rcv != nil);
-                if (!isRcvAlive) {
+                if (!isForestBridgeAlive(manager.rewardTaskBridge)) {
                     manager.rewardTaskBridge = manager.jsBridge;
                 }
             }
@@ -1791,7 +1822,7 @@ static void installEarnEnergyCollector(id controller) {
 
     [self.view addSubview:grabber];
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"当前版本：v3.2.4 正式版";
+    versionLabel.text = @"当前版本：v3.2.5 正式版";
     versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     versionLabel.textColor = [UIColor systemGray2Color];
     versionLabel.textAlignment = NSTextAlignmentCenter;

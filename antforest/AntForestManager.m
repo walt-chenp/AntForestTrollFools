@@ -735,7 +735,8 @@ static NSInteger reviveDailyCount(void) {
 
 - (void)startScheduledWaterTimer {
     [self.scheduledWaterTimer invalidate];
-    self.scheduledWaterTimer = [NSTimer scheduledTimerWithTimeInterval:15 target:self selector:@selector(checkScheduledWater) userInfo:nil repeats:YES];
+    self.scheduledWaterTimer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(checkScheduledWater) userInfo:nil repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.scheduledWaterTimer forMode:NSRunLoopCommonModes];
     [self checkScheduledWater];
 }
 
@@ -984,7 +985,44 @@ static BOOL isNoiseProbeLog(NSString *log) {
 #endif
 }
 
+static dispatch_source_t sBackgroundPulseTimer = nil;
+
+-(void)ensureBackgroundPulseTimer {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_t queue = dispatch_queue_create("com.antforest.backgroundPulse", DISPATCH_QUEUE_SERIAL);
+        sBackgroundPulseTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+        // 每 5 秒脉冲一次，在真后台与 RunLoop 挂起时也能精准守候整秒翻转与超时看门狗
+        dispatch_source_set_timer(sBackgroundPulseTimer, dispatch_time(DISPATCH_TIME_NOW, 0), 5 * NSEC_PER_SEC, 100 * NSEC_PER_MSEC);
+        __weak typeof(self) weakSelf = self;
+        dispatch_source_set_event_handler(sBackgroundPulseTimer, ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf checkScheduledCollect];
+                [weakSelf checkScanDeadlockWatchdog];
+            });
+        });
+        dispatch_resume(sBackgroundPulseTimer);
+    });
+}
+
+-(void)checkScanDeadlockWatchdog {
+    if (self.isScanRunning) {
+        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if (self.lastScanStartTime > 0 && now - self.lastScanStartTime > 35.0) {
+            [self recordStage:@"诊断 · 后台看门狗发现扫描超时（>35s），强制解除锁死"];
+            self.isScanRunning = NO;
+            takeLookRunning = NO;
+            takeLookWaitingForFriend = NO;
+            takeLookCurrentFriendId = nil;
+            selfPriorityPending = NO;
+        }
+    }
+}
+
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval{
+    if (interval <= 0) {
+        interval = 300;
+    }
     if (self.autoCollectTimer.isValid && self.collectInterval == interval) {
         return;
     }
@@ -994,12 +1032,14 @@ static BOOL isNoiseProbeLog(NSString *log) {
     self.failedTimes = 0; //每次重新启动定时器时 失败次数均要置 0
     [self recordStage:[NSString stringWithFormat:@"后台循环已启动（%ld 分钟）", (long)MAX(1, interval / 60)]];
     
-    // 创建新的定时器
-    self.autoCollectTimer = [NSTimer scheduledTimerWithTimeInterval:interval
-                                                             target:self
-                                                           selector:@selector(autoCollectBubbles)
-                                                           userInfo:nil
-                                                            repeats:YES];
+    // 使用 NSRunLoopCommonModes 防止界面交互或真后台模式切换时定时器冻结
+    self.autoCollectTimer = [NSTimer timerWithTimeInterval:interval
+                                                    target:self
+                                                  selector:@selector(autoCollectBubbles)
+                                                  userInfo:nil
+                                                   repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.autoCollectTimer forMode:NSRunLoopCommonModes];
+    [self ensureBackgroundPulseTimer];
     [self.autoCollectTimer fire];
 }
 
@@ -1010,26 +1050,42 @@ static BOOL isNoiseProbeLog(NSString *log) {
 
 -(void)startScheduledCollectTimer {
     [self.scheduledCollectTimer invalidate];
-    self.scheduledCollectTimer = [NSTimer scheduledTimerWithTimeInterval:15
-                                                                    target:self
-                                                                  selector:@selector(checkScheduledCollect)
-                                                                  userInfo:nil
-                                                                   repeats:YES];
+    // 提升为 1.0 秒高频轮询，精准命中整点 00 秒（无缝秒级抢跑）
+    self.scheduledCollectTimer = [NSTimer timerWithTimeInterval:1.0
+                                                         target:self
+                                                       selector:@selector(checkScheduledCollect)
+                                                       userInfo:nil
+                                                        repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.scheduledCollectTimer forMode:NSRunLoopCommonModes];
+    [self ensureBackgroundPulseTimer];
     [self checkScheduledCollect];
 }
 
 -(void)checkScheduledCollect {
-    if (!self.enableAutoCollect || !self.enableScheduledCollect) return;
+    if (!self.enableAutoCollect) return;
+    
+    NSDate *nowDate = [NSDate date];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateFormat = @"HH:mm";
-    NSString *time = [formatter stringFromDate:NSDate.date];
-    if (![self.scheduledTimes containsObject:time]) return;
+    NSString *time = [formatter stringFromDate:nowDate];
     formatter.dateFormat = @"yyyy-MM-dd HH:mm";
-    NSString *minute = [formatter stringFromDate:NSDate.date];
+    NSString *minute = [formatter stringFromDate:nowDate];
+    
+    BOOL isScheduledTime = self.enableScheduledCollect && [self.scheduledTimes containsObject:time];
+    // 特别强化：早 07:00 作为蚂蚁森林全局能量成熟爆发期，无论用户是否在列表中添加，均在 07:00:00 准点全力触发极速冲刺
+    BOOL is7AmRush = [time isEqualToString:@"07:00"];
+    
+    if (!isScheduledTime && !is7AmRush) return;
     if ([lastScheduledMinute isEqualToString:minute]) return;
     lastScheduledMinute = minute;
-    [self recordStage:@"定时收取开始"];
-    [self autoCollectBubbles];
+    
+    if (is7AmRush) {
+        [self recordStage:@"⚡️ 早间 07:00:00 黄金时段：启动全速秒级无延迟能量冲刺！"];
+        [self autoCollectBubblesWithRush:YES];
+    } else {
+        [self recordStage:[NSString stringWithFormat:@"定时收取开始（%@）", time]];
+        [self autoCollectBubblesWithRush:YES];
+    }
 }
 
 NSString* getCurrentDateString() {
@@ -1141,6 +1197,7 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
             takeLookWaitingForFriend = NO;
             takeLookCurrentFriendId = nil;
             self.isScanRunning = NO;
+            selfPriorityPending = NO;
             [self recordStage:[NSString stringWithFormat:@"本轮扫描结束：%@", reason]];
             return;
         }
@@ -1156,7 +1213,9 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
             if (!takeLookRunning || !takeLookWaitingForFriend || requestToken != takeLookRequestToken) return;
             takeLookRunning = NO;
             takeLookWaitingForFriend = NO;
+            takeLookCurrentFriendId = nil;
             self.isScanRunning = NO;
+            selfPriorityPending = NO;
             [self recordStage:@"本轮扫描完成"];
         }
     });
@@ -1180,25 +1239,43 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
                 return NO;
             }
             takeLookRunning = NO;
+            takeLookWaitingForFriend = NO;
+            takeLookCurrentFriendId = nil;
             self.isScanRunning = NO;
+            selfPriorityPending = NO;
             [self recordStage:@"本轮扫描完成"];
             return NO;
         }
         [takeLookVisitedFriends addObject:friendId];
         takeLookCurrentFriendId = friendId;
         [self recordStage:[NSString stringWithFormat:@"诊断 · 找能量候选：第 %lu 轮第 %lu 位（累计 %lu 位）", (unsigned long)takeLookPass, (unsigned long)takeLookRounds, (unsigned long)takeLookTotalRounds]];
+        
+        // 关键保护：为每位找能量候选设置 3.5 秒看门狗！
+        // 若该好友主页无气泡、回包丢失或挂起，自动推进至下一位，绝不陷入死锁！
+        NSUInteger token = takeLookRequestToken;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            @synchronized (self) {
+                if (takeLookRunning && [takeLookCurrentFriendId isEqualToString:friendId] && token == takeLookRequestToken) {
+                    [self recordStage:@"诊断 · 候选好友气泡查询超时或无气泡，自动推进下一位"];
+                    [self advanceTakeLookForFriend:friendId];
+                }
+            }
+        });
+        
         return YES;
     }
 }
 
 -(void)advanceTakeLookForFriend:(NSString *)friendId {
     @synchronized (self) {
-        if (!takeLookRunning || ![takeLookCurrentFriendId isEqualToString:friendId]) return;
+        if (!takeLookRunning) return;
+        if (friendId.length && takeLookCurrentFriendId.length && ![takeLookCurrentFriendId isEqualToString:friendId]) return;
         takeLookCurrentFriendId = nil;
+        takeLookWaitingForFriend = NO;
     }
     // 收取请求在全局串行队列中发送；以该队列的栅栏作为下一位候选的起点，避免与前一位的多颗气泡请求重叠。
     dispatch_async(globalSerialQueueCollect, ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(350 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             [self recordStage:@"诊断 · 当前候选收取队列已完成，继续下一位"];
             [self requestNextTakeLook];
         });
@@ -6607,27 +6684,47 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 // 每隔300秒一次
 -(void)autoCollectBubbles {
+    [self autoCollectBubblesWithRush:NO];
+}
+
+-(void)autoCollectBubblesWithRush:(BOOL)isRush {
     @try {
         [self probeAndRestoreBridges];
         if (!self.enableAutoCollect || (!self.jsBridge && !self.oceanBridge)) {
             [self recordStage:[NSString stringWithFormat:@"诊断 · 收取未启动：自动收取=%d，森林桥接=%d，海洋桥接=%d", self.enableAutoCollect, self.jsBridge != nil, self.oceanBridge != nil]];
             return;
         }
-        if (self.isScanRunning) {
-            [self recordStage:@"诊断 · 收取跳过：本轮扫描正在执行中"];
-            return;
-        }
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+        if (self.isScanRunning) {
+            if (self.lastScanStartTime > 0 && now - self.lastScanStartTime > 30.0) {
+                [self recordStage:@"诊断 · 检测到前一轮扫描超时挂起（>30s），自动解除死锁并重置状态"];
+                self.isScanRunning = NO;
+                takeLookRunning = NO;
+                takeLookWaitingForFriend = NO;
+                takeLookCurrentFriendId = nil;
+                selfPriorityPending = NO;
+            } else {
+                [self recordStage:@"诊断 · 收取跳过：本轮扫描正在执行中"];
+                return;
+            }
+        }
         if (self.lastPkInteractionTime > 0 && now - self.lastPkInteractionTime < kPkInteractionAvoidanceDuration) {
             [self recordStage:@"诊断 · 收取延后：用户正在浏览PK榜，5秒后自动重试"];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 if (self.enableAutoCollect && !self.isScanRunning && self.jsBridge) {
-                    [self autoCollectBubbles];
+                    [self autoCollectBubblesWithRush:isRush];
                 }
             });
             return;
         }
+        self.lastScanStartTime = now;
         self.isScanRunning = YES;
+        
+        NSDateFormatter *hourFmt = [[NSDateFormatter alloc] init];
+        hourFmt.dateFormat = @"HH:mm";
+        NSString *currentHHmm = [hourFmt stringFromDate:[NSDate date]];
+        BOOL isMorningRush = isRush || [currentHHmm isEqualToString:@"07:00"];
+
         oceanCleanedInCurrentRound = 0;
         oceanPlanLoggedThisRound = NO;
         oceanRunning = NO;
@@ -6661,95 +6758,135 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
         }
         [shieldReportedFriendsInRound removeAllObjects];
-        [self recordStage:@"本轮扫描开始"];
+        [self recordStage:isMorningRush ? @"⚡️ 早间 07:00 黄金时段：全速全量扫描好友能量" : @"本轮扫描开始"];
+
+        // 1. 发起全量好友排行榜查询（早间 07:00 黄金时段绝对 0 延迟秒级触发！）
+        static NSDate *lastRankFetchedDate = nil;
+        BOOL isAppInBackground = ([UIApplication sharedApplication].applicationState != UIApplicationStateActive);
+        BOOL needsRankFetch = isMorningRush || (self.friendsRank.count == 0) ||
+                              (self.enableAutoRevive && isWithinTaskActiveHours() && reviveDailyCount() < 6 && isAppInBackground) ||
+                              (!lastRankFetchedDate || [[NSDate date] timeIntervalSinceDate:lastRankFetchedDate] > 120);
+        if (self.enableAutoCollect && needsRankFetch && self.jsBridge) {
+            lastRankFetchedDate = [NSDate date];
+            if (isMorningRush) {
+                // 0ms 延迟，首位直接入队发出！
+                [self queryTotalRank];
+            } else {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(150 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                    if (self.enableAutoCollect && cycle == collectionCycle && self.isScanRunning) {
+                        [self queryTotalRank];
+                    }
+                });
+            }
+        }
+
+        // 2. 发起本人首页能量查询
         if (self.enableSelfCollect && self.jsBridge) {
             dispatch_async(globalSerialQueueQuery, ^{
                 [[AntForestManager sharedInstance] queryMyBubbles];
             });
         }
-        NSString *today = getCurrentDateString();
-        if (self.enableCleanOcean && isWithinTaskActiveHours()) {
-            static NSString *sLastDayOceanActiveHoursTriggered = nil;
-            if (![sLastDayOceanActiveHoursTriggered isEqualToString:today]) {
-                sLastDayOceanActiveHoursTriggered = today;
-                [self recordStage:[NSString stringWithFormat:@"神奇海洋：%@海域垃圾已刷新，正在拉取海洋好友列表与清理海域...", getTaskActiveStartTimeString()]];
-            }
-            [self cleanMyOceanThoroughly];
-            [self queryOceanFriendList];
-        }
-        if (self.enableAutoOceanTasks && self.oceanBridge) {
-            [self queryOceanTaskListWithForce:NO];
-        }
-        if (self.enableAutoRewardTasks) {
-            static NSString *sLastDayActiveHoursTriggered = nil;
-            if (isWithinTaskActiveHours()) {
-                if (![sLastDayActiveHoursTriggered isEqualToString:today]) {
-                    sLastDayActiveHoursTriggered = today;
-                    [self recordStage:[NSString stringWithFormat:@"领奖励：%@活跃期开启，正在刷新拉取今日全新任务与能量签到...", getTaskActiveStartTimeString()]];
-                    [self notifyActiveH5PageToRefresh];
-                    [self queryVitalityTaskListWithForce:YES];
-                } else {
-                    [self queryVitalityTaskListWithForce:YES];
-                }
-            } else {
-                BOOL isSignedToday = NO;
-                @synchronized(self) {
-                    isSignedToday = [gDailyCompletedTasks containsObject:@"SIGN_TODAY"];
-                }
-                if (!isSignedToday) {
-                    static NSTimeInterval sLastMidnightLogTime = 0;
-                    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                    if (now - sLastMidnightLogTime > 60.0) {
-                        sLastMidnightLogTime = now;
-                        [self recordStage:@"领奖励：零点跨天检测到今日尚未签到，正在刷新拉取并执行能量签到..."];
-                    }
-                    [self notifyActiveH5PageToRefresh];
-                    [self queryVitalityTaskListWithForce:YES];
-                } else {
-                    [self queryVitalityTaskList];
-                }
-            }
-        }
-        
-        static NSDate *lastRankFetchedDate = nil;
-        BOOL isAppInBackground = ([UIApplication sharedApplication].applicationState != UIApplicationStateActive);
-        BOOL needsRankFetch = (self.friendsRank.count == 0) ||
-                              (self.enableAutoRevive && isWithinTaskActiveHours() && reviveDailyCount() < 6 && isAppInBackground) ||
-                              (!lastRankFetchedDate || [[NSDate date] timeIntervalSinceDate:lastRankFetchedDate] > 120);
-        if (self.enableAutoCollect && needsRankFetch && self.jsBridge) {
-            lastRankFetchedDate = [NSDate date];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
-                if (self.enableAutoCollect && cycle == collectionCycle && self.isScanRunning) {
-                    [self queryTotalRank];
-                }
-            });
-        }
+
+        // 3. 找能量续查调度
         if (self.jsBridge) {
             if (selfPriorityPending) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                     [self releaseSelfPriorityForCycle:cycle reason:@"本人首页回包超时"];
                 });
             } else {
-                // 未开启本人收取时，延迟 800ms 直接转入找能量巡检
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(350 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
                     if (self.enableAutoCollect && cycle == collectionCycle && self.isScanRunning) {
                         [self startTakeLookContinuation];
                     }
                 });
             }
         } else {
-            // 当前停留在非森林页面（如神奇海洋页面），无森林首页桥接，完成海洋轮次后自动释放
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 if (self.isScanRunning && cycle == collectionCycle) {
                     self.isScanRunning = NO;
+                    takeLookRunning = NO;
                     [self recordStage:@"本轮海洋扫描完成"];
                 }
             });
         }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+
+        // 4. 日常非能量繁重任务调度（早间高峰期推迟 25 秒，确保能量抢收拥有 100% 独占网络带宽）
+        void (^runRoutineTasksBlock)(void) = ^{
+            if (!self.enableAutoCollect) return;
+            NSString *today = getCurrentDateString();
+            if (self.enableCleanOcean && isWithinTaskActiveHours()) {
+                static NSString *sLastDayOceanActiveHoursTriggered = nil;
+                if (![sLastDayOceanActiveHoursTriggered isEqualToString:today]) {
+                    sLastDayOceanActiveHoursTriggered = today;
+                    [self recordStage:[NSString stringWithFormat:@"神奇海洋：%@海域垃圾已刷新，正在拉取海洋好友列表与清理海域...", getTaskActiveStartTimeString()]];
+                }
+                [self cleanMyOceanThoroughly];
+                [self queryOceanFriendList];
+            }
+            if (self.enableAutoOceanTasks && self.oceanBridge) {
+                [self queryOceanTaskListWithForce:NO];
+            }
+            if (self.enableAutoRewardTasks) {
+                static NSString *sLastDayActiveHoursTriggered = nil;
+                if (isWithinTaskActiveHours()) {
+                    if (![sLastDayActiveHoursTriggered isEqualToString:today]) {
+                        sLastDayActiveHoursTriggered = today;
+                        [self recordStage:[NSString stringWithFormat:@"领奖励：%@活跃期开启，正在刷新拉取今日全新任务与能量签到...", getTaskActiveStartTimeString()]];
+                        [self notifyActiveH5PageToRefresh];
+                        [self queryVitalityTaskListWithForce:YES];
+                    } else {
+                        [self queryVitalityTaskListWithForce:YES];
+                    }
+                } else {
+                    BOOL isSignedToday = NO;
+                    @synchronized(self) {
+                        isSignedToday = [gDailyCompletedTasks containsObject:@"SIGN_TODAY"];
+                    }
+                    if (!isSignedToday) {
+                        static NSTimeInterval sLastMidnightLogTime = 0;
+                        NSTimeInterval nowTime = [[NSDate date] timeIntervalSince1970];
+                        if (nowTime - sLastMidnightLogTime > 60.0) {
+                            sLastMidnightLogTime = nowTime;
+                            [self recordStage:@"领奖励：零点跨天检测到今日尚未签到，正在刷新拉取并执行能量签到..."];
+                        }
+                        [self notifyActiveH5PageToRefresh];
+                        [self queryVitalityTaskListWithForce:YES];
+                    } else {
+                        [self queryVitalityTaskList];
+                    }
+                }
+            }
+            if (self.enableAutoAIFish) {
+                [self queryAIFishTaskList];
+            }
+            if (self.enableAutoFarmTasks) {
+                [self queryFarmTaskList];
+            }
+            if (self.enableAutoManor) {
+                [self queryManorTaskList];
+            }
+        };
+
+        if (isMorningRush) {
+            [self recordStage:@"⚡️ 早间 07:00 黄金时段：优先极速抢收好友能量，日常繁重任务推迟 25 秒执行"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                runRoutineTasksBlock();
+            });
+        } else {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                runRoutineTasksBlock();
+            });
+        }
+
+        // 5. 本轮扫描安全看门狗（超时重置所有锁）
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (self.isScanRunning && cycle == collectionCycle) {
                 self.isScanRunning = NO;
-                [self recordStage:@"诊断 · 本轮扫描达到 45 秒安全超时释放锁"];
+                takeLookRunning = NO;
+                takeLookWaitingForFriend = NO;
+                takeLookCurrentFriendId = nil;
+                selfPriorityPending = NO;
+                [self recordStage:@"诊断 · 本轮扫描达到 35 秒安全超时释放锁"];
             }
         });
         self.failedTimes++;
@@ -7384,6 +7521,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
         if (args != nil && [args isKindOfClass:[NSDictionary class]]) {
             NSDictionary *dict = args;
             NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
+            NSString *respId = [NSString stringWithFormat:@"%@", dict[@"responseId"] ?: (dict[@"callbackId"] ?: @"")];
             // 匹配 每日能量签到 (forestSignVOList 或 forestSignVO 或 signModel)
             NSArray *signList = [resData[@"forestSignVOList"] isKindOfClass:NSArray.class] ? resData[@"forestSignVOList"] : ([dict[@"forestSignVOList"] isKindOfClass:NSArray.class] ? dict[@"forestSignVOList"] : nil);
             if (!signList.count && [resData[@"forestSignVO"] isKindOfClass:NSDictionary.class]) {
@@ -7776,6 +7914,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 //                    [[AntForestManager sharedInstance] addLog:log];
                 //                    [[AntForestManager sharedInstance] collectBubbles:userId bubblesId:bidStr];
                 //                }
+            } else if (takeLookRunning && [respId containsString:@"af_silent_friend_"]) {
+                [self advanceTakeLookForFriend:takeLookCurrentFriendId];
             }
             // 匹配用户名
             if([dict objectForKey:@"contactsDicArray"]) {
