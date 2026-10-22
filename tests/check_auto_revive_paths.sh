@@ -13,15 +13,17 @@ echo "[2/4] Checking revive active hours isolation..."
 sed -n '/- (void)queueAutoReviveForUser:/,/^}/p' antforest/AntForestManager.m | grep -q "isWithinTaskActiveHours" && { echo "❌ queueAutoReviveForUser still gated by isWithinTaskActiveHours"; exit 1; }
 sed -n '/- (void)reviveSendNext/,/^}/p' antforest/AntForestManager.m | grep -q "isWithinTaskActiveHours" && { echo "❌ reviveSendNext still gated by isWithinTaskActiveHours"; exit 1; }
 
-echo "[3/4] Checking total ranking response recognition & full 200 items priority..."
-grep -q "hasRankData" antforest/AntForestManager.m || { echo "❌ Missing hasRankData in isTotalRankResponse"; exit 1; }
+echo "[3/4] Checking PK board isolation & total ranking response recognition..."
+grep -q "isPkOrPvp" antforest/AntForestManager.m || { echo "❌ Missing isPkOrPvp in matchFriendIdAndBubbles"; exit 1; }
+grep -q "isTotalRankResponse" antforest/AntForestManager.m || { echo "❌ Missing isTotalRankResponse in matchFriendIdAndBubbles"; exit 1; }
 grep -q "排行榜扫描发现.*待复活过期能量" antforest/AntForestManager.m || { echo "❌ Missing revive stage record log"; exit 1; }
 
 echo "[4/4] Checking queueAutoReviveForUser invocation on ranking discovery..."
 sed -n '/\/\/ 严格隔离榜单类型/,/匹配排行/p' antforest/AntForestManager.m | grep -q "queueAutoReviveForUser" || { echo "❌ queueAutoReviveForUser not called in rankArr scan"; exit 1; }
 
-echo "[5/5] Checking queryTotalRank modern RPC payload and self-healing daily count..."
-grep -q "relationLocal" antforest/AntForestManager.m || { echo "❌ Missing relationLocal in queryTotalRank"; exit 1; }
+echo "[5/5] Checking queryTotalRank modern RPC payload, no relationLocal pollution and self-healing daily count..."
+sed -n '/-(void)queryTotalRank/,/^}/p' antforest/AntForestManager.m | grep -q 'version = @"20241025"' || { echo "❌ Missing version 20241025 in queryTotalRank"; exit 1; }
+sed -n '/-(void)queryTotalRank/,/^}/p' antforest/AntForestManager.m | grep -q "relationLocal" && { echo "❌ queryTotalRank should NOT contain relationLocal (causes H5 PK board freeze)"; exit 1; }
 grep -q "autoReviveLimitReachedToday" antforest/AntForestManager.m || { echo "❌ Missing autoReviveLimitReachedToday check"; exit 1; }
 sed -n '/static NSInteger reviveDailyCount/,/^}/p' antforest/AntForestManager.m | grep -q 'return \[defaults integerForKey:@"autoReviveCount"\]' && { echo "❌ reviveDailyCount still falls back to dirty autoReviveCount cache"; exit 1; }
 

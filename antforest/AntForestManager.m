@@ -6800,7 +6800,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
     NSString *randNum = [AntForestManager getNumberRandom:16];
     NSString *callbackId = [NSString stringWithFormat:@"rpc_af_silent_rank_%@.%@_p%ld", timeStamp, randNum, (long)startIndex];
     self.lastSilentRankCallbackId = callbackId;
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"%@\"}]", version, (long)startIndex, callbackId];
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"%@\"}]", version, (long)startIndex, callbackId];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html";
     [self recordStage:[NSString stringWithFormat:@"请求好友排行榜自动翻页（第 %ld-%ld 位）", (long)startIndex + 1, (long)startIndex + 200]];
     [self safeFlushBridge:[self jsBridge] message:arg1 url:arg2];
@@ -6808,12 +6808,17 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 //查询总排行 可以获取所有人的ID
 -(void)queryTotalRank{
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (self.lastPkInteractionTime > 0 && now - self.lastPkInteractionTime < 25.0) {
+        [self recordStage:@"诊断 · 好友榜查询延后：用户正在浏览PK榜"];
+        return;
+    }
     NSString *version = @"20241025";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
     NSString *callbackId = [NSString stringWithFormat:@"rpc_af_silent_rank_%@.%@", timeStamp, randNum];
     self.lastSilentRankCallbackId = callbackId;
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"%@\"}]",version,callbackId];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"%@\"}]",version,callbackId];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html";
     if([self jsBridge]) {
         [self recordStage:@"请求全量好友排行榜（200位/页）"];
@@ -6954,9 +6959,13 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
         // 1. 发起全量好友排行榜查询（早间 07:00 黄金时段绝对 0 延迟秒级触发！）
         static NSDate *lastRankFetchedDate = nil;
-        BOOL needsRankFetch = isMorningRush || (self.friendsRank.count == 0) ||
-                              (self.enableAutoRevive && isWithinReviveHours() && reviveDailyCount() < 6) ||
-                              (!lastRankFetchedDate || [[NSDate date] timeIntervalSinceDate:lastRankFetchedDate] > 120);
+        BOOL isAppInBackground = ([UIApplication sharedApplication].applicationState != UIApplicationStateActive);
+        BOOL hasCooldownPassed = (!lastRankFetchedDate || [[NSDate date] timeIntervalSinceDate:lastRankFetchedDate] > 120);
+        BOOL isInteractingWithPk = (self.lastPkInteractionTime > 0 && (now - self.lastPkInteractionTime < 25.0));
+
+        BOOL needsRankFetch = !isInteractingWithPk && (
+                              isMorningRush || (self.friendsRank.count == 0) ||
+                              (hasCooldownPassed && (isAppInBackground || (self.enableAutoRevive && isWithinReviveHours() && reviveDailyCount() < 6))));
         if (self.enableAutoCollect && needsRankFetch && self.jsBridge) {
             lastRankFetchedDate = [NSDate date];
             if (isMorningRush) {
@@ -7568,37 +7577,33 @@ static BOOL oceanPlanLoggedThisRound = NO;
                                      ![opType containsString:@"Challenge"] &&
                                      ![opType.lowercaseString containsString:@"pk"];
 
-            BOOL hasRankData = (resData[@"totalDatas"] != nil || dict[@"totalDatas"] != nil ||
-                                resData[@"friendRanking"] != nil || dict[@"friendRanking"] != nil);
-            BOOL hasPeriodTotal = (!periodType.length || [periodType isEqualToString:@"total"]);
-            BOOL hasEnergyRankType = (!rankType.length || [rankType isEqualToString:@"energyRank"]);
-            BOOL hasNoPkData = (!isStrictPkOperationName(opType) &&
-                                !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] &&
-                                !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] &&
-                                !resData[@"userPkInfo"] && !dict[@"userPkInfo"] &&
-                                !resData[@"pkRanking"] && !dict[@"pkRanking"] &&
-                                !resData[@"challengeRank"] && !dict[@"challengeRank"]);
-
-            // 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或后台静默 rank 查询，或客户端进入好友排行榜）：
-            // 绝不包含任何 PK/排位/挑战/周榜 结构，杜绝被非总榜覆盖
-            isTotalRankResponse = NO;
-            if (isOurSilentRank || ((isEnergyRankingOp || hasRankData) && hasPeriodTotal && hasEnergyRankType && hasNoPkData)) {
-                isTotalRankResponse = YES;
-            }
-
-            BOOL isPkOrPvp = !isOurSilentRpc && !isHomePagePayload && !isTaskListPayload && !isTotalRankResponse && (
+            // 1. 最高优先级保护：用户手动交互 PK 榜/黄金PK赛/排位赛/挑战赛，必须优先识别并直接拦截返回！
+            NSString *opTypeLower = [opType lowercaseString];
+            BOOL isPkOrPvp = !isOurSilentRpc && !isHomePagePayload && !isTaskListPayload && (
                               isStrictPkOperationName(opType) ||
+                              [opTypeLower containsString:@"pk"] ||
+                              [opTypeLower containsString:@"pvp"] ||
+                              [opTypeLower containsString:@"challenge"] ||
+                              [opTypeLower containsString:@"arena"] ||
                               resData[@"energyChallengeRank"] != nil || dict[@"energyChallengeRank"] != nil ||
                               resData[@"energyPvpInfo"] != nil || dict[@"energyPvpInfo"] != nil ||
                               resData[@"userPkInfo"] != nil || dict[@"userPkInfo"] != nil ||
                               resData[@"pkRanking"] != nil || dict[@"pkRanking"] != nil ||
                               resData[@"pkRankList"] != nil || dict[@"pkRankList"] != nil ||
                               resData[@"pkDatas"] != nil || dict[@"pkDatas"] != nil ||
+                              resData[@"rankDisplayParamsVO"] != nil || dict[@"rankDisplayParamsVO"] != nil ||
+                              resData[@"dynamicPromoteVO"] != nil || dict[@"dynamicPromoteVO"] != nil ||
+                              resData[@"promoteLineEnergy"] != nil || dict[@"promoteLineEnergy"] != nil ||
+                              resData[@"nextRankLevelName"] != nil || dict[@"nextRankLevelName"] != nil ||
+                              resData[@"promoteCount"] != nil || dict[@"promoteCount"] != nil ||
+                              resData[@"extendInfo"][@"rankHeadPortraitVOS"] != nil || dict[@"extendInfo"][@"rankHeadPortraitVOS"] != nil ||
+                              resData[@"rankHeadPortraitVOS"] != nil || dict[@"rankHeadPortraitVOS"] != nil ||
                               resData[@"currentSeasonInfo"] != nil || dict[@"currentSeasonInfo"] != nil ||
                               resData[@"seasonInfo"] != nil || dict[@"seasonInfo"] != nil ||
                               resData[@"challengeRank"] != nil || dict[@"challengeRank"] != nil ||
                               resData[@"pkTaskList"] != nil || dict[@"pkTaskList"] != nil ||
-                              resData[@"pkTasks"] != nil || dict[@"pkTasks"] != nil);
+                              resData[@"pkTasks"] != nil || dict[@"pkTasks"] != nil ||
+                              (resData[@"myself"] && [resData[@"myself"][@"rank"] integerValue] > 0 && !resData[@"bubbles"] && !resData[@"wateringBubbles"] && !resData[@"userBaseInfo"]));
 
             if (isPkOrPvp) {
                 self.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
@@ -7606,6 +7611,20 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 // 保持前端视图完全独立，绝不触发后台气泡匹配、任务刷新、签到、巡护等一切侧链逻辑，彻底杜绝死锁与卡顿！
                 [self recordStage:@"诊断 · 捕获PK/排位赛交互回包，保持前端视图独立，跳过自动化逻辑"];
                 return;
+            }
+
+            // 2. 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或后台静默 rank 查询）：
+            // 绝不包含任何 PK/排位/挑战/周榜 结构，杜绝被非总榜覆盖
+            isTotalRankResponse = NO;
+            if (isOurSilentRank || (isEnergyRankingOp && (!periodType.length || [periodType isEqualToString:@"total"]) && (!rankType.length || [rankType isEqualToString:@"energyRank"]))) {
+                if (!isStrictPkOperationName(opType) &&
+                    !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] &&
+                    !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] &&
+                    !resData[@"userPkInfo"] && !dict[@"userPkInfo"] &&
+                    !resData[@"pkRanking"] && !dict[@"pkRanking"] &&
+                    !resData[@"challengeRank"] && !dict[@"challengeRank"]) {
+                    isTotalRankResponse = YES;
+                }
             }
 
             if ([respId containsString:@"revive_"] || [opType containsString:@"protectBubble"] || [dict[@"handlerName"] isEqualToString:@"protectBubble"] || resData[@"protectBubble"] || resData[@"userProtectResult"]) {
