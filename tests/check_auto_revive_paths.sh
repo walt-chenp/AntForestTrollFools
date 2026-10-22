@@ -1,0 +1,28 @@
+#!/bin/sh
+set -e
+
+echo "[1/4] Checking canReviveFriendBubble detection coverage..."
+grep -q "isWithinReviveHours" antforest/AntForestManager.m || { echo "❌ Missing isWithinReviveHours helper"; exit 1; }
+grep -q "+5g" antforest/AntForestManager.m || { echo "❌ Missing +5g badge detection in canReviveFriendBubble"; exit 1; }
+grep -q "canReborn" antforest/AntForestManager.m || { echo "❌ Missing reborn keys in canReviveFriendBubble"; exit 1; }
+grep -q "protectRewardEnergy" antforest/AntForestManager.m || { echo "❌ Missing protectRewardEnergy check"; exit 1; }
+grep -q "protectFlag" antforest/AntForestManager.m || { echo "❌ Missing protectFlag check"; exit 1; }
+
+echo "[2/4] Checking revive active hours isolation..."
+# queueAutoReviveForUser and reviveSendNext should NOT be gated by vitality task hours (isWithinTaskActiveHours)
+sed -n '/- (void)queueAutoReviveForUser:/,/^}/p' antforest/AntForestManager.m | grep -q "isWithinTaskActiveHours" && { echo "❌ queueAutoReviveForUser still gated by isWithinTaskActiveHours"; exit 1; }
+sed -n '/- (void)reviveSendNext/,/^}/p' antforest/AntForestManager.m | grep -q "isWithinTaskActiveHours" && { echo "❌ reviveSendNext still gated by isWithinTaskActiveHours"; exit 1; }
+
+echo "[3/4] Checking total ranking response recognition & full 200 items priority..."
+grep -q "hasRankData" antforest/AntForestManager.m || { echo "❌ Missing hasRankData in isTotalRankResponse"; exit 1; }
+grep -q "排行榜扫描发现.*待复活过期能量" antforest/AntForestManager.m || { echo "❌ Missing revive stage record log"; exit 1; }
+
+echo "[4/4] Checking queueAutoReviveForUser invocation on ranking discovery..."
+sed -n '/\/\/ 严格隔离榜单类型/,/匹配排行/p' antforest/AntForestManager.m | grep -q "queueAutoReviveForUser" || { echo "❌ queueAutoReviveForUser not called in rankArr scan"; exit 1; }
+
+echo "[5/5] Checking queryTotalRank modern RPC payload and self-healing daily count..."
+grep -q "relationLocal" antforest/AntForestManager.m || { echo "❌ Missing relationLocal in queryTotalRank"; exit 1; }
+grep -q "autoReviveLimitReachedToday" antforest/AntForestManager.m || { echo "❌ Missing autoReviveLimitReachedToday check"; exit 1; }
+sed -n '/static NSInteger reviveDailyCount/,/^}/p' antforest/AntForestManager.m | grep -q 'return \[defaults integerForKey:@"autoReviveCount"\]' && { echo "❌ reviveDailyCount still falls back to dirty autoReviveCount cache"; exit 1; }
+
+echo "✅ All Auto-Revive expired energy path checks passed successfully!"

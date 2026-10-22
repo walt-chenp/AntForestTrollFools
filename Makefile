@@ -1,7 +1,7 @@
 SDK := $(shell xcrun --sdk iphoneos --show-sdk-path)
 CLANG := $(shell xcrun --sdk iphoneos --find clang)
 LIPO := $(shell xcrun --sdk iphoneos --find lipo)
-VERSION := v3.2.5
+VERSION := v3.2.6
 TARGET := build/AntForestPort-$(VERSION).dylib
 IOS14_TARGET := build/AntForestPort-$(VERSION)-iOS14.dylib
 SOURCES := PortEntry.m antforest/AntForestManager.m antforest/StepSimulator.m antforest/DebugTool/Tool.m antforest/DebugTool/UIView+Toast.m
@@ -16,6 +16,7 @@ test:
 	sh tests/check_ocean_task_paths.sh
 	sh tests/check_manor_automation_paths.sh
 	sh tests/check_farm_task_paths.sh
+	sh tests/check_auto_revive_paths.sh
 
 $(TARGET): $(SOURCES)
 	@mkdir -p build

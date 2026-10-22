@@ -287,68 +287,189 @@ static NSString *waterResponseSummary(id value) {
     return parts.count ? [parts componentsJoinedByString:@"，"] : @"未发现状态字段";
 }
 
+static BOOL isWithinReviveHours(void) {
+    NSCalendar *calendar = [NSCalendar currentCalendar];
+    NSDateComponents *comp = [calendar components:NSCalendarUnitHour fromDate:[NSDate date]];
+    return (comp.hour >= 6 && comp.hour <= 23);
+}
+
 static BOOL canReviveFriendBubble(NSDictionary *dictRank) {
     if (![dictRank isKindOfClass:NSDictionary.class]) return NO;
     
-    // 1. 检查 wateringBubbles 列表中的 fuhuo 气泡或 canProtect 气泡
-    NSArray *wBubbles = dictRank[@"wateringBubbles"];
+    NSDictionary *resData = [dictRank[@"resData"] isKindOfClass:NSDictionary.class] ? dictRank[@"resData"] : nil;
+    
+    // 1. 检查 wateringBubbles 列表中的 fuhuo/protect/reborn 气泡（好友首页特征）
+    NSArray *wBubbles = dictRank[@"wateringBubbles"] ?: resData[@"wateringBubbles"];
     if ([wBubbles isKindOfClass:NSArray.class]) {
         for (id b in wBubbles) {
             if ([b isKindOfClass:NSDictionary.class]) {
                 NSDictionary *ext = [b[@"extInfo"] isKindOfClass:NSDictionary.class] ? b[@"extInfo"] : nil;
-                if (ext && (ext[@"notProtectReason"] || (ext[@"restTimes"] && [ext[@"restTimes"] integerValue] <= 0))) {
-                    return NO;
+                // 若该气泡有明确不可复活原因（如已被他人复活或超期），跳过该气泡，继续遍历其他气泡
+                if (ext && ext[@"notProtectReason"]) {
+                    continue;
                 }
                 if (b[@"canProtect"] != nil && ![b[@"canProtect"] boolValue]) {
-                    return NO;
+                    continue;
                 }
-                if ([b[@"canProtect"] boolValue] || [b[@"canRevive"] boolValue] || [b[@"bizType"] isEqualToString:@"fuhuo"]) {
+                NSString *bizType = [NSString stringWithFormat:@"%@", b[@"bizType"] ?: @""];
+                NSString *subBiz = [NSString stringWithFormat:@"%@", b[@"subBizType"] ?: @""];
+                if ([b[@"canProtect"] boolValue] || [b[@"canRevive"] boolValue] || [b[@"canReborn"] boolValue] ||
+                    [ext[@"canProtect"] boolValue] || [ext[@"canRevive"] boolValue] || [ext[@"canReborn"] boolValue] ||
+                    [bizType isEqualToString:@"fuhuo"] || [bizType containsString:@"protect"] || [bizType containsString:@"reborn"] ||
+                    [subBiz isEqualToString:@"fuhuo"] || [subBiz containsString:@"protect"] || [subBiz containsString:@"reborn"]) {
                     return YES;
                 }
             }
         }
     }
     
-    // 2. 检查 userEnergy 中的 canProtectBubble
-    NSDictionary *ue = [dictRank[@"userEnergy"] isKindOfClass:NSDictionary.class] ? dictRank[@"userEnergy"] : nil;
-    if (ue && ([ue[@"canProtectBubble"] boolValue] || [ue[@"canReviveBubble"] boolValue])) return YES;
-    
-    // 3. 检查常规字段
-    for (NSString *key in @[ @"canProtectBubble", @"canProtect", @"protectBubble", @"canProtectEnergy", @"canRevive", @"canReviveBubble", @"giftingEnergy", @"giftEnergy", @"energyRevive", @"reviveBubble", @"hasProtectBubble" ]) {
-        id val = dictRank[key];
-        if (val && val != NSNull.null) {
-            if ([val respondsToSelector:@selector(boolValue)] && [val boolValue]) return YES;
-            if ([val isKindOfClass:NSString.class] && ([(NSString *)val length] > 0 && ![(NSString *)val isEqualToString:@"0"] && ([(NSString *)val caseInsensitiveCompare:@"false"] != NSOrderedSame))) return YES;
-        }
-    }
-    id pStatus = dictRank[@"protectStatus"] ?: dictRank[@"reviveStatus"];
-    if (pStatus && pStatus != NSNull.null) {
-        if ([pStatus respondsToSelector:@selector(integerValue)] && [pStatus integerValue] == 1) return YES;
-        if ([pStatus isKindOfClass:NSString.class] && ([(NSString *)pStatus containsString:@"PROTECT"] || [(NSString *)pStatus containsString:@"REVIVE"] || [(NSString *)pStatus containsString:@"CAN"])) return YES;
-    }
-    return NO;
-}
-
-static NSInteger extractRestTimesFromDict(NSDictionary *dict) {
-    if (![dict isKindOfClass:NSDictionary.class]) return -1;
-    NSArray *wBubbles = dict[@"wateringBubbles"];
-    if ([wBubbles isKindOfClass:NSArray.class]) {
-        for (id b in wBubbles) {
+    // 2. 检查 bubbles 列表（部分页面返回的通用气泡列表）
+    NSArray *bubbles = dictRank[@"bubbles"] ?: resData[@"bubbles"];
+    if ([bubbles isKindOfClass:NSArray.class]) {
+        for (id b in bubbles) {
             if ([b isKindOfClass:NSDictionary.class]) {
                 NSDictionary *ext = [b[@"extInfo"] isKindOfClass:NSDictionary.class] ? b[@"extInfo"] : nil;
-                if (ext && ext[@"notProtectReason"]) {
-                    return 0;
-                }
-                if (ext && ext[@"restTimes"] != nil) {
-                    return [ext[@"restTimes"] integerValue];
-                }
-                if (b[@"canProtect"] != nil && ![b[@"canProtect"] boolValue]) {
-                    return 0;
+                if (ext && ext[@"notProtectReason"]) continue;
+                NSString *bizType = [NSString stringWithFormat:@"%@", b[@"bizType"] ?: @""];
+                NSString *subBiz = [NSString stringWithFormat:@"%@", b[@"subBizType"] ?: @""];
+                if ([b[@"canProtect"] boolValue] || [b[@"canRevive"] boolValue] || [b[@"canReborn"] boolValue] ||
+                    [bizType isEqualToString:@"fuhuo"] || [bizType containsString:@"protect"] || [bizType containsString:@"reborn"] ||
+                    [subBiz isEqualToString:@"fuhuo"] || [subBiz containsString:@"protect"] || [subBiz containsString:@"reborn"]) {
+                    return YES;
                 }
             }
         }
     }
-    return -1;
+    
+    // 3. 检查 userEnergy / userForest 结构
+    NSDictionary *ue = [dictRank[@"userEnergy"] isKindOfClass:NSDictionary.class] ? dictRank[@"userEnergy"] : (resData[@"userEnergy"] ?: nil);
+    if (ue) {
+        if ([ue[@"canProtectBubble"] boolValue] || [ue[@"canReviveBubble"] boolValue] || [ue[@"canProtect"] boolValue] ||
+            [ue[@"canRebornBubble"] boolValue] || [ue[@"canReborn"] boolValue] || [ue[@"hasProtectBubble"] boolValue] || [ue[@"hasRebornBubble"] boolValue]) {
+            return YES;
+        }
+    }
+    
+    // 4. 检查全量常规字段与标识（涵盖 protect/reborn/revive/fuhuo 各种命名变体）
+    static NSArray<NSString *> *reviveKeys = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        reviveKeys = @[
+            @"canProtectBubble", @"canProtect", @"protectBubble", @"canProtectEnergy",
+            @"canRevive", @"canReviveBubble", @"energyRevive", @"reviveBubble",
+            @"hasProtectBubble", @"hasReviveBubble", @"hasRebornBubble",
+            @"canHelpRevive", @"canHelpProtect", @"canHelpReborn",
+            @"canReborn", @"canRebornBubble", @"rebornBubble",
+            @"protectFlag", @"rebornFlag", @"reviveFlag", @"fuhuoFlag",
+            @"canProtectReborn", @"hasProtectReborn"
+        ];
+    });
+    for (NSString *key in reviveKeys) {
+        id val = dictRank[key] ?: (resData ? resData[key] : nil);
+        if (val && val != NSNull.null) {
+            if ([val respondsToSelector:@selector(boolValue)] && [val boolValue]) return YES;
+            if ([val isKindOfClass:NSString.class]) {
+                NSString *str = (NSString *)val;
+                if ([str isEqualToString:@"Y"] || [str isEqualToString:@"1"] || [str caseInsensitiveCompare:@"true"] == NSOrderedSame) return YES;
+            }
+        }
+    }
+    
+    // 5. 检查状态枚举值（protectStatus / rebornStatus / reviveStatus）
+    for (NSString *key in @[ @"protectStatus", @"rebornStatus", @"reviveStatus" ]) {
+        id pStatus = dictRank[key] ?: (resData ? resData[key] : nil);
+        if (pStatus && pStatus != NSNull.null) {
+            if ([pStatus respondsToSelector:@selector(integerValue)] && [pStatus integerValue] == 1) return YES;
+            if ([pStatus isKindOfClass:NSString.class]) {
+                NSString *str = (NSString *)pStatus;
+                if ([str containsString:@"PROTECT"] || [str containsString:@"REVIVE"] || [str containsString:@"REBORN"] || [str containsString:@"CAN"]) return YES;
+            }
+        }
+    }
+    
+    // 6. 检查待复活奖励能量字段（如 protectRewardEnergy: 5, rebornEnergy: "5g" 等）
+    for (NSString *key in @[ @"protectRewardEnergy", @"rebornRewardEnergy", @"protectEnergy", @"rebornEnergy", @"reviveEnergy" ]) {
+        id val = dictRank[key] ?: (resData ? resData[key] : nil);
+        if (val && val != NSNull.null) {
+            if ([val respondsToSelector:@selector(integerValue)] && [val integerValue] > 0) return YES;
+            if ([val isKindOfClass:NSString.class]) {
+                NSString *str = (NSString *)val;
+                if ([str containsString:@"5"]) return YES;
+            }
+        }
+    }
+    
+    // 7. 检查 UI 气泡徽章与标签（即用户排行榜截图右侧醒目的橙色“+5g”待复活气泡）
+    for (NSString *key in @[ @"actionText", @"rightDesc", @"tag", @"tagText", @"tagDesc", @"badge", @"badgeText", @"bubbleText", @"subTitle", @"operateType", @"buttonText", @"robFlag", @"userRobFlag" ]) {
+        id val = dictRank[key] ?: (resData ? resData[key] : nil);
+        if (val && val != NSNull.null) {
+            if ([val isKindOfClass:NSString.class]) {
+                NSString *text = (NSString *)val;
+                if ([text containsString:@"+5g"] || [text containsString:@"+5G"] || [text containsString:@"5g"] ||
+                    [text containsString:@"复活"] || [text containsString:@"reborn"] || [text containsString:@"protect"]) {
+                    return YES;
+                }
+            } else if ([val isKindOfClass:NSDictionary.class]) {
+                NSDictionary *d = (NSDictionary *)val;
+                for (id subVal in d.allValues) {
+                    if ([subVal isKindOfClass:NSString.class]) {
+                        NSString *text = (NSString *)subVal;
+                        if ([text containsString:@"+5g"] || [text containsString:@"+5G"] || [text containsString:@"5g"] ||
+                            [text containsString:@"复活"] || [text containsString:@"reborn"] || [text containsString:@"protect"]) {
+                            return YES;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 8. 检查 robFlags 列表（部分接口将标记放在数组内）
+    for (NSString *key in @[ @"robFlags", @"userRobFlags", @"userRobFlagList", @"tags" ]) {
+        id list = dictRank[key] ?: (resData ? resData[key] : nil);
+        if ([list isKindOfClass:NSArray.class]) {
+            for (id item in (NSArray *)list) {
+                NSString *text = [NSString stringWithFormat:@"%@", item];
+                if ([text containsString:@"protect"] || [text containsString:@"reborn"] ||
+                    [text containsString:@"revive"] || [text containsString:@"fuhuo"] ||
+                    [text containsString:@"5g"] || [text containsString:@"5G"]) {
+                    return YES;
+                }
+            }
+        }
+    }
+    
+    // 9. 智能兜底扫描：遍历排行榜条目中的非常规字段，精准识别任何含有 +5g 或 protect/reborn 特征的属性
+    static NSSet<NSString *> *excludedNameKeys = nil;
+    static dispatch_once_t onceExclude;
+    dispatch_once(&onceExclude, ^{
+        excludedNameKeys = [NSSet setWithObjects:@"userId", @"userName", @"displayName", @"loginId", @"realName",
+                            @"avatar", @"icon", @"headImg", @"photo", @"mediumIcon", @"tinyIcon", @"largeIcon",
+                            @"rank", @"ranking", @"energy", @"certificateCount", @"canCollectEnergy", nil];
+    });
+    for (NSString *key in dictRank) {
+        if ([excludedNameKeys containsObject:key]) continue;
+        id val = dictRank[key];
+        if ([val isKindOfClass:NSString.class]) {
+            NSString *str = (NSString *)val;
+            if ([str containsString:@"+5g"] || [str containsString:@"+5G"]) {
+                return YES;
+            }
+            NSString *lowKey = key.lowercaseString;
+            if (([lowKey containsString:@"reborn"] || [lowKey containsString:@"fuhuo"] || ([lowKey containsString:@"protect"] && ![lowKey containsString:@"shield"])) &&
+                ([str isEqualToString:@"Y"] || [str isEqualToString:@"1"] || [str caseInsensitiveCompare:@"true"] == NSOrderedSame || [str containsString:@"CAN"])) {
+                return YES;
+            }
+        } else if ([val isKindOfClass:NSNumber.class]) {
+            NSString *lowKey = key.lowercaseString;
+            if (([lowKey containsString:@"reborn"] || [lowKey containsString:@"fuhuo"] || ([lowKey containsString:@"protect"] && ![lowKey containsString:@"shield"])) &&
+                [val boolValue]) {
+                return YES;
+            }
+        }
+    }
+    
+    return NO;
 }
 
 static NSInteger reviveDailyCount(void) {
@@ -356,11 +477,26 @@ static NSInteger reviveDailyCount(void) {
     NSString *today = getCurrentDateString();
     if (![[defaults stringForKey:@"autoReviveDate"] isEqualToString:today]) {
         [defaults setObject:today forKey:@"autoReviveDate"];
+        [defaults setObject:@[] forKey:@"autoReviveSuccessFriendsToday"];
+        [defaults setBool:NO forKey:@"autoReviveLimitReachedToday"];
         [defaults setInteger:0 forKey:@"autoReviveCount"];
+        [defaults synchronize];
         [reviveQueue removeAllObjects];
         [reviveQueuedIds removeAllObjects];
     }
-    return [defaults integerForKey:@"autoReviveCount"];
+    if ([defaults boolForKey:@"autoReviveLimitReachedToday"]) {
+        return 6;
+    }
+    NSArray *successList = [defaults arrayForKey:@"autoReviveSuccessFriendsToday"];
+    if ([successList isKindOfClass:NSArray.class]) {
+        return successList.count;
+    }
+    // 首次运行或兼容旧版本：清空旧版本残留的脏数据 autoReviveCount，重置为 0
+    [defaults setObject:@[] forKey:@"autoReviveSuccessFriendsToday"];
+    [defaults setBool:NO forKey:@"autoReviveLimitReachedToday"];
+    [defaults setInteger:0 forKey:@"autoReviveCount"];
+    [defaults synchronize];
+    return 0;
 }
 
 - (void)reviveRefreshRewardIfNeeded {
@@ -384,15 +520,22 @@ static NSInteger reviveDailyCount(void) {
 }
 
 - (void)reviveSendNext {
-    if (!isWithinTaskActiveHours()) {
+    if (!isWithinReviveHours()) {
         reviveRunning = NO;
         reviveCurrentUserId = nil;
-        [reviveQueue removeAllObjects];
         return;
     }
-    if (!self.enableAutoRevive || !self.jsBridge) {
-        if (reviveRunning) [self reviveStopWithReason:@"任务已停止或桥接不可用"];
+    if (!self.enableAutoRevive) {
+        if (reviveRunning) [self reviveStopWithReason:@"任务已停止"];
         return;
+    }
+    if (!self.jsBridge) {
+        [self probeAndRestoreBridges];
+        if (!self.jsBridge) {
+            reviveRunning = NO;
+            reviveCurrentUserId = nil;
+            return;
+        }
     }
     if (reviveDailyCount() >= 6) {
         [NSUserDefaults.standardUserDefaults setInteger:6 forKey:@"autoReviveCount"];
@@ -402,7 +545,12 @@ static NSInteger reviveDailyCount(void) {
         [reviveQueue removeAllObjects];
         return;
     }
-    if (!reviveQueue.count) { reviveRunning = NO; reviveCurrentUserId = nil; [self reviveRefreshRewardIfNeeded]; return; }
+    if (!reviveQueue.count) {
+        reviveRunning = NO;
+        reviveCurrentUserId = nil;
+        [self reviveRefreshRewardIfNeeded];
+        return;
+    }
     reviveRunning = YES;
     reviveCurrentUserId = reviveQueue.firstObject;
     [reviveQueue removeObjectAtIndex:0];
@@ -412,24 +560,50 @@ static NSInteger reviveDailyCount(void) {
     NSDictionary *body = @{ @"targetUserId": reviveCurrentUserId, @"version": @"20241025", @"source": @"chInfo_ch_appcenter__chsub_9patch" };
     NSDictionary *data = @{ @"handlerName": @"rpc", @"data": @{ @"operationType": @"alipay.antforest.forest.h5.protectBubble", @"headers": @{ @"source": @"chInfo_ch_appcenter__chsub_9patch", @"ags-source": @"chInfo_ch_appcenter__chsub_9patch" }, @"requestData": @[body], @"getResponse": @YES }, @"callbackId": [NSString stringWithFormat:@"revive_%@.%@", timestamp, [AntForestManager getNumberRandom:12]] };
     NSString *queue1 = waterJSONString(@[data]);
-    if (!queue1.length) { [self reviveStopWithReason:@"请求编码失败"]; return; }
+    if (!queue1.length) {
+        if (reviveCurrentUserId.length) [reviveQueuedIds addObject:reviveCurrentUserId];
+        reviveRunning = NO;
+        reviveCurrentUserId = nil;
+        if (reviveQueue.count > 0) [self reviveSendNext];
+        return;
+    }
     NSString *url = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html";
     [self recordStage:[NSString stringWithFormat:@"复活 · 请求帮助好友“%@”复活能量", name]];
-    [self.jsBridge _doFlushMessageQueue:queue1 url:url];
+    [self safeFlushBridge:self.jsBridge message:queue1 url:url];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (reviveRunning && token == reviveRequestToken) [self reviveStopWithReason:@"回包超时，已停止"];
+        if (reviveRunning && token == reviveRequestToken) {
+            NSString *timeoutUser = reviveCurrentUserId;
+            if (timeoutUser.length) [reviveQueuedIds addObject:timeoutUser];
+            [self recordStage:[NSString stringWithFormat:@"复活 · 帮助好友“%@”复活回包超时，尝试下一位", name]];
+            reviveRunning = NO;
+            reviveCurrentUserId = nil;
+            reviveRequestToken++;
+            if (self.enableAutoRevive && reviveQueue.count > 0) {
+                [self reviveSendNext];
+            } else {
+                [self reviveRefreshRewardIfNeeded];
+            }
+        }
     });
 }
 
 - (void)queueAutoReviveForUser:(NSString *)userId {
-    if (!isWithinTaskActiveHours()) return;
+    if (!isWithinReviveHours()) return;
     if (!self.enableAutoRevive || !userId.length || [userId isEqualToString:self.myUserId]) return;
-    if (reviveDailyCount() >= 6) return;
+    NSInteger count = reviveDailyCount();
+    if (count >= 6) {
+        static NSDate *lastLimitLoggedDate = nil;
+        if (!lastLimitLoggedDate || [[NSDate date] timeIntervalSinceDate:lastLimitLoggedDate] > 180) {
+            lastLimitLoggedDate = [NSDate date];
+            [self recordStage:[NSString stringWithFormat:@"复活 · 帮复活能量今日已达 6/6 上限，跳过后续好友（今日已成功复活 %ld 位）", (long)count]];
+        }
+        return;
+    }
     if (reviveRunning && [reviveCurrentUserId isEqualToString:userId]) return;
     if ([reviveQueue containsObject:userId]) return;
     if ([reviveQueuedIds containsObject:userId]) return;
     NSString *name = [AntForestManager extractNameFromDictionary:self.friendsName[userId]] ?: @"好友";
-    [self recordStage:[NSString stringWithFormat:@"复活 · 发现好友“%@”有待复活能量，加入复活队列", name]];
+    [self recordStage:[NSString stringWithFormat:@"复活 · 发现好友“%@”有待复活能量(+5g)，加入复活队列", name]];
     [reviveQueue addObject:userId];
     if (!reviveRunning) [self reviveSendNext];
 }
@@ -445,18 +619,21 @@ static NSInteger reviveDailyCount(void) {
                      [[resData[@"resultCode"] description] isEqualToString:@"SUCCESS"] ||
                      [[dict[@"resultCode"] description] isEqualToString:@"SUCCESS"];
     if (isSuccess) {
-        NSInteger count = reviveDailyCount();
-        if (reviveCurrentUserId.length && ![reviveQueuedIds containsObject:reviveCurrentUserId]) {
-            [reviveQueuedIds addObject:reviveCurrentUserId];
-            count++;
-            [NSUserDefaults.standardUserDefaults setInteger:MIN((NSInteger)6, count) forKey:@"autoReviveCount"];
+        NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+        NSMutableArray *successList = [[defaults arrayForKey:@"autoReviveSuccessFriendsToday"] ?: @[] mutableCopy];
+        if (reviveCurrentUserId.length && ![successList containsObject:reviveCurrentUserId]) {
+            [successList addObject:reviveCurrentUserId];
+            [defaults setObject:successList forKey:@"autoReviveSuccessFriendsToday"];
+            [defaults setInteger:successList.count forKey:@"autoReviveCount"];
         }
+        if (reviveCurrentUserId.length) [reviveQueuedIds addObject:reviveCurrentUserId];
+        NSInteger count = successList.count;
         [self recordStage:[NSString stringWithFormat:@"复活 · 成功帮助好友“%@”复活能量（今日 %ld/6 次）", name, (long)MIN((NSInteger)6, count)]];
         reviveRewardRefreshNeeded = YES;
         reviveRunning = NO;
         reviveCurrentUserId = nil;
         reviveRequestToken++;
-        double delaySec = 1.5 + (arc4random_uniform(1500) / 1000.0);
+        double delaySec = 1.2 + (arc4random_uniform(1000) / 1000.0);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (self.enableAutoRevive) [self reviveSendNext];
         });
@@ -468,27 +645,42 @@ static NSInteger reviveDailyCount(void) {
             reviveRunning = NO;
             reviveCurrentUserId = nil;
             reviveRequestToken++;
-            double delaySec = 1.2 + (arc4random_uniform(1000) / 1000.0);
+            double delaySec = 1.0 + (arc4random_uniform(800) / 1000.0);
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 if (self.enableAutoRevive) [self reviveSendNext];
             });
             return;
         }
-        if ([code containsString:@"LIMIT"] || [code containsString:@"EXCEED"] || [code containsString:@"OVER"] || [code containsString:@"TIRED"] || [code isEqualToString:@"PROTECT_REBORN_TIRED"]) {
+        
+        NSString *memo = [NSString stringWithFormat:@"%@ %@", resData[@"resultDesc"] ?: @"", resData[@"memo"] ?: dict[@"memo"] ?: @""];
+        BOOL isDailyLimit = [code isEqualToString:@"PROTECT_REBORN_TIRED"] ||
+                            [code isEqualToString:@"DAILY_PROTECT_LIMIT"] ||
+                            [code isEqualToString:@"TODAY_PROTECT_LIMIT"] ||
+                            [code isEqualToString:@"USER_DAILY_PROTECT_LIMIT"] ||
+                            [code isEqualToString:@"DAILY_LIMIT_EXCEEDED"] ||
+                            [memo containsString:@"今天帮助复活次数已达上限"] ||
+                            [memo containsString:@"今日帮助复活次数已达上限"] ||
+                            [memo containsString:@"今日复活次数已达上限"] ||
+                            [memo containsString:@"今天复活次数已达上限"] ||
+                            [memo containsString:@"每日最多帮助"];
+        if (isDailyLimit) {
+            [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"autoReviveLimitReachedToday"];
             [NSUserDefaults.standardUserDefaults setInteger:6 forKey:@"autoReviveCount"];
-            [self recordStage:[NSString stringWithFormat:@"复活 · 帮复活能量已达支付宝官方上限（今天已用完，明天再继续吧）"]];
+            [NSUserDefaults.standardUserDefaults synchronize];
+            [self recordStage:@"复活 · 帮复活能量已达支付宝官方上限（今天已用完，明天再继续吧）"];
             reviveRunning = NO;
             reviveCurrentUserId = nil;
             reviveRequestToken++;
             [reviveQueue removeAllObjects];
             return;
         }
+        
         if (reviveCurrentUserId.length) [reviveQueuedIds addObject:reviveCurrentUserId];
-        [self recordStage:[NSString stringWithFormat:@"复活 · 帮助好友“%@”复活回包：%@，尝试下一位", name, waterResponseSummary(resData)]];
+        [self recordStage:[NSString stringWithFormat:@"复活 · 帮助好友“%@”复活未完成：%@，尝试下一位", name, waterResponseSummary(resData)]];
         reviveRunning = NO;
         reviveCurrentUserId = nil;
         reviveRequestToken++;
-        double delaySec = 1.2 + (arc4random_uniform(1000) / 1000.0);
+        double delaySec = 1.0 + (arc4random_uniform(800) / 1000.0);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (self.enableAutoRevive) [self reviveSendNext];
         });
@@ -6603,12 +6795,12 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 -(void)queryRankPage:(NSInteger)startIndex {
     if (!self.enableAutoCollect || !self.jsBridge) return;
-    NSString *version = @"20230501";
+    NSString *version = @"20241025";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate date] timeIntervalSince1970]*1000];
     NSString *randNum = [AntForestManager getNumberRandom:16];
     NSString *callbackId = [NSString stringWithFormat:@"rpc_af_silent_rank_%@.%@_p%ld", timeStamp, randNum, (long)startIndex];
     self.lastSilentRankCallbackId = callbackId;
-    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"%@\"}]", version, (long)startIndex, callbackId];
+    NSString *arg1 = [NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startIndex\":%ld,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"%@\"}]", version, (long)startIndex, callbackId];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html";
     [self recordStage:[NSString stringWithFormat:@"请求好友排行榜自动翻页（第 %ld-%ld 位）", (long)startIndex + 1, (long)startIndex + 200]];
     [self safeFlushBridge:[self jsBridge] message:arg1 url:arg2];
@@ -6616,12 +6808,12 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 //查询总排行 可以获取所有人的ID
 -(void)queryTotalRank{
-    NSString *version = @"20230501";
+    NSString *version = @"20241025";
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:16];
     NSString *callbackId = [NSString stringWithFormat:@"rpc_af_silent_rank_%@.%@", timeStamp, randNum];
     self.lastSilentRankCallbackId = callbackId;
-    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"getResponse\":true},\"callbackId\":\"%@\"}]",version,callbackId];
+    NSString *arg1=[NSString stringWithFormat:@"[{\"handlerName\":\"rpc\",\"data\":{\"operationType\":\"alipay.antmember.forest.h5.queryEnergyRanking\",\"showError\":false,\"showLoading\":false,\"headers\":{\"source\":\"chInfo_ch_appcenter__chsub_9patch\",\"ags-source\":\"chInfo_ch_appcenter__chsub_9patch\"},\"requestData\":[{\"rankType\":\"energyRank\",\"periodType\":\"total\",\"version\":\"%@\",\"startNum\":1,\"startIndex\":0,\"pageSize\":200,\"contactsStatus\":\"N\",\"source\":\"chInfo_ch_appcenter__chsub_9patch\"}],\"relationLocal\":{\"pathList\":[\"friendRanking\",\"myself\",\"totalDatas\"]},\"getResponse\":true},\"callbackId\":\"%@\"}]",version,callbackId];
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html";
     if([self jsBridge]) {
         [self recordStage:@"请求全量好友排行榜（200位/页）"];
@@ -6762,9 +6954,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
         // 1. 发起全量好友排行榜查询（早间 07:00 黄金时段绝对 0 延迟秒级触发！）
         static NSDate *lastRankFetchedDate = nil;
-        BOOL isAppInBackground = ([UIApplication sharedApplication].applicationState != UIApplicationStateActive);
         BOOL needsRankFetch = isMorningRush || (self.friendsRank.count == 0) ||
-                              (self.enableAutoRevive && isWithinTaskActiveHours() && reviveDailyCount() < 6 && isAppInBackground) ||
+                              (self.enableAutoRevive && isWithinReviveHours() && reviveDailyCount() < 6) ||
                               (!lastRankFetchedDate || [[NSDate date] timeIntervalSinceDate:lastRankFetchedDate] > 120);
         if (self.enableAutoCollect && needsRankFetch && self.jsBridge) {
             lastRankFetchedDate = [NSDate date];
@@ -7377,18 +7568,22 @@ static BOOL oceanPlanLoggedThisRound = NO;
                                      ![opType containsString:@"Challenge"] &&
                                      ![opType.lowercaseString containsString:@"pk"];
 
-            // 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或后台静默 rank 查询）：
+            BOOL hasRankData = (resData[@"totalDatas"] != nil || dict[@"totalDatas"] != nil ||
+                                resData[@"friendRanking"] != nil || dict[@"friendRanking"] != nil);
+            BOOL hasPeriodTotal = (!periodType.length || [periodType isEqualToString:@"total"]);
+            BOOL hasEnergyRankType = (!rankType.length || [rankType isEqualToString:@"energyRank"]);
+            BOOL hasNoPkData = (!isStrictPkOperationName(opType) &&
+                                !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] &&
+                                !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] &&
+                                !resData[@"userPkInfo"] && !dict[@"userPkInfo"] &&
+                                !resData[@"pkRanking"] && !dict[@"pkRanking"] &&
+                                !resData[@"challengeRank"] && !dict[@"challengeRank"]);
+
+            // 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或后台静默 rank 查询，或客户端进入好友排行榜）：
             // 绝不包含任何 PK/排位/挑战/周榜 结构，杜绝被非总榜覆盖
             isTotalRankResponse = NO;
-            if (isOurSilentRank || (isEnergyRankingOp && (!periodType.length || [periodType isEqualToString:@"total"]) && (!rankType.length || [rankType isEqualToString:@"energyRank"]))) {
-                if (!isStrictPkOperationName(opType) &&
-                    !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] &&
-                    !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] &&
-                    !resData[@"userPkInfo"] && !dict[@"userPkInfo"] &&
-                    !resData[@"pkRanking"] && !dict[@"pkRanking"] &&
-                    !resData[@"challengeRank"] && !dict[@"challengeRank"]) {
-                    isTotalRankResponse = YES;
-                }
+            if (isOurSilentRank || ((isEnergyRankingOp || hasRankData) && hasPeriodTotal && hasEnergyRankType && hasNoPkData)) {
+                isTotalRankResponse = YES;
             }
 
             BOOL isPkOrPvp = !isOurSilentRpc && !isHomePagePayload && !isTaskListPayload && !isTotalRankResponse && (
@@ -7678,12 +7873,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     NSDictionary *userInfo = [dict[@"userBaseInfo"] isKindOfClass:NSDictionary.class] ? dict[@"userBaseInfo"] : nil;
                     NSDictionary *userEnergy = [dict[@"userEnergy"] isKindOfClass:NSDictionary.class] ? dict[@"userEnergy"] : nil;
                     NSDictionary *userForest = [dict[@"userForest"] isKindOfClass:NSDictionary.class] ? dict[@"userForest"] : nil;
-                    NSInteger restTimes = extractRestTimesFromDict(dict);
-                    if (restTimes >= 0) {
-                        NSInteger used = MAX(0, 6 - restTimes);
-                        [NSUserDefaults.standardUserDefaults setInteger:used forKey:@"autoReviveCount"];
-                    }
-                    if (canReviveFriendBubble(dict) || canReviveFriendBubble(userInfo) || canReviveFriendBubble(userEnergy) || canReviveFriendBubble(userForest) || [dict[@"forestSignVOList"] isKindOfClass:NSArray.class]) {
+                    if (canReviveFriendBubble(dict) || canReviveFriendBubble(resData) || canReviveFriendBubble(userInfo) || canReviveFriendBubble(userEnergy) || canReviveFriendBubble(userForest)) {
                         [self queueAutoReviveForUser:userId];
                     }
                 }
@@ -7963,20 +8153,42 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
             // 严格隔离榜单类型：仅允许真正的“总榜”（queryEnergyRanking + periodType=total）进入好友总榜缓存与自动收取扫描
             // 彻底杜绝 PK榜/排位赛/挑战榜/周榜 污染总榜并引发循环分页与卡死
-            if(isTotalRankResponse && resData && (resData[@"friendRanking"] || resData[@"totalDatas"])) {
-                NSArray *rankArr = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : resData[@"totalDatas"];
+            if(isTotalRankResponse && (resData[@"totalDatas"] || dict[@"totalDatas"] || resData[@"friendRanking"] || dict[@"friendRanking"])) {
+                NSArray *rankArr = ([resData[@"totalDatas"] isKindOfClass:NSArray.class] && [resData[@"totalDatas"] count] > 0) ? resData[@"totalDatas"] :
+                                   (([dict[@"totalDatas"] isKindOfClass:NSArray.class] && [dict[@"totalDatas"] count] > 0) ? dict[@"totalDatas"] :
+                                   ([resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] :
+                                   ([dict[@"friendRanking"] isKindOfClass:NSArray.class] ? dict[@"friendRanking"] : nil)));
                 NSUInteger collectable = 0;
-                for (NSDictionary *dictRank in rankArr) if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
-                [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable]];
+                NSUInteger revivable = 0;
+                for (NSDictionary *dictRank in rankArr) {
+                    if ([[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1]) collectable++;
+                    if (canReviveFriendBubble(dictRank)) revivable++;
+                }
+                [self recordStage:[NSString stringWithFormat:@"诊断 · 排行榜校验回包：%lu 位，可收 %lu 位，待复活 %lu 位", (unsigned long)rankArr.count, (unsigned long)collectable, (unsigned long)revivable]];
+                if (revivable > 0) {
+                    [self recordStage:[NSString stringWithFormat:@"复活 · 排行榜扫描发现 %lu 位好友有待复活过期能量(+5g)", (unsigned long)revivable]];
+                }
+                if (self.enableAutoRevive) {
+                    for(NSDictionary *dictRank in rankArr) {
+                        NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
+                        if (!userId.length) continue;
+                        NSString *name = [AntForestManager extractNameFromDictionary:dictRank];
+                        if (name.length) {
+                            NSMutableDictionary *contact = [self.friendsName[userId] mutableCopy] ?: [NSMutableDictionary dictionary];
+                            contact[@"displayName"] = name;
+                            self.friendsName[userId] = contact;
+                        }
+                        if (canReviveFriendBubble(dictRank)) {
+                            [self queueAutoReviveForUser:userId];
+                        }
+                    }
+                }
                 if (self.isScanRunning) {
                     for(NSDictionary *dictRank in rankArr) {
                         NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
                         if (!userId.length) continue;
                         BOOL isCollectable = [[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1];
                         BOOL isReviveable = canReviveFriendBubble(dictRank);
-                        if (isReviveable) {
-                            [self queueAutoReviveForUser:userId];
-                        }
                         if (isCollectable || isReviveable){
                             if (selfPriorityPending) {
                                 [deferredFriendRankIds addObject:userId];
@@ -7990,7 +8202,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
             }
             //匹配排行（仅在确认是总榜回包时更新 friendsRank 与分页，绝不覆盖其他榜单）
-            NSArray *rankTotalArr = isTotalRankResponse ? ([resData[@"totalDatas"] isKindOfClass:NSArray.class] ? resData[@"totalDatas"] : ([resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : nil)) : nil;
+            NSArray *rankTotalArr = isTotalRankResponse ? (([resData[@"totalDatas"] isKindOfClass:NSArray.class] && [resData[@"totalDatas"] count] > 0) ? resData[@"totalDatas"] : (([dict[@"totalDatas"] isKindOfClass:NSArray.class] && [dict[@"totalDatas"] count] > 0) ? dict[@"totalDatas"] : ([resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : ([dict[@"friendRanking"] isKindOfClass:NSArray.class] ? dict[@"friendRanking"] : nil)))) : nil;
             if (rankTotalArr.count > 0) {
                 NSMutableDictionary *fr = [[AntForestManager sharedInstance] friendsRank];
                 NSMutableDictionary *fn = [[AntForestManager sharedInstance] friendsName];
@@ -7998,7 +8210,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 for(NSDictionary *dictTotalRank in rankTotalArr) {
                     NSString *userId = [AntForestManager extractUserIdFromDictionary:dictTotalRank] ?: [dictTotalRank objectForKey:@"userId"];
                     if (!userId.length) continue;
-                    if (self.isScanRunning && canReviveFriendBubble(dictTotalRank)) {
+                    if (self.enableAutoRevive && canReviveFriendBubble(dictTotalRank)) {
                         [self queueAutoReviveForUser:userId];
                     }
                     NSString *rank = [dictTotalRank objectForKey:@"rank"];
