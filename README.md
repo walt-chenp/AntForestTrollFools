@@ -10,7 +10,7 @@
 
 ## 效果图
 
-| 收取记录面板（v3.2.6 正式版） | 功能设置面板 |
+| 收取记录面板（v3.2.7 正式版） | 功能设置面板 |
 | :---: | :---: |
 | ![收取记录面板](docs/ui-preview.png) | ![功能设置面板](docs/ui-settings.png) |
 
@@ -38,17 +38,15 @@
 - 收取日志：最新记录显示在顶部；保留开关状态、本轮扫描开始/结束、浇水赠能、好友浇水和成功收取结果，并区分自己与好友能量。
 - 能量统计：今日显示 g；累计满 1,000 g 后按两位小数换算为 kg；收取成功回包会去重计入统计。
 
-> v3.2.6 正式版：iOS 15 及以上请使用 [`AntForestPort-v3.2.6.dylib`](build/AntForestPort-v3.2.6.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v3.2.6-iOS14.dylib`](build/AntForestPort-v3.2.6-iOS14.dylib)。彻底攻克“自动复活好友过期能量”偶发不执行、脏数据锁死及未自动发起复活的问题。产物均为 `arm64 + arm64e` 通用 dylib。
+> v3.2.7 正式版：iOS 15 及以上请使用 [`AntForestPort-v3.2.7.dylib`](build/AntForestPort-v3.2.7.dylib)；iOS 14 请使用独立兼容包 [`AntForestPort-v3.2.7-iOS14.dylib`](build/AntForestPort-v3.2.7-iOS14.dylib)。彻底隔离 1v1 能量挑战（`pvpHome.html`）与 PK 榜视图，解决 1v1 能量挑战卡在“稍等片刻...”及 PK 榜卡死问题，同时确保好友过期能量自动复活（`+5g`）稳定执行。产物均为 `arm64 + arm64e` 通用 dylib。
 
-## v3.2.6 正式版更新说明
+## v3.2.7 正式版更新说明
 
-- **✨ 彻底重构并攻克“自动复活好友过期能量”偶发停摆问题**：
-  - **脏缓存自愈与去重重构**：彻底清除旧版本遗留的 `autoReviveCount = 6` 误判锁死，建立以当日权威成功列表为准的自愈机制；
-  - **总榜 RPC 协议升级至 2024 最新版**：后台全量榜单查询协议升级至 `20241025`，注入 `relationLocal` 声明，服务端 100% 下发完整 `+5g` 气泡属性；
-  - **全方位特征与橙色徽章覆盖**：全面支持 `+5g` 徽章标签、`reborn`（重生/复活）、`protectFlag`、`rebornFlag`、`protectRewardEnergy` 等全字段识别；
-  - **解除时间限制与前台误拦截**：将复活逻辑从寻宝任务时间（09:00）中解耦，改为独立日间时段（06:00~23:59），并移除前后台限制，自动扫描稳定触发；
-  - **好友昵称实时解析与详细日志**：识别到待复活好友时实时补全联系人昵称，并详细记录复活发现与提交状态。
-- 🏷️ 控制板版本号规范更新：控制板主标题下正式更新为 `当前版本：v3.2.6 正式版`。
+- **✨ 彻底修复 1v1 能量挑战（`pvpHome.html`）卡在“稍等片刻...”与 PK 榜卡死问题**：
+  - **1v1 能量挑战与 PK 子页面零干扰隔离**：精准识别 `pvpHome.html`、`pvpRecord.html`、`pkContestRank.html`、`pkFindEnergy.html` 等子页面，防止插件将其 `PSDJsBridge` 误绑为森林任务/首页桥接并注入后台任务 RPC，确保 1v1 能量挑战与 PK 榜秒开无卡顿；
+  - **正式包启用 `_doFlushMessageQueue:url:` 追踪与 `queryPvpHomeInfo` 特征识别**：出站与入站双向识别 PK/1v1 挑战请求与回包，严格保护前端独立视图状态；
+  - **后台静默 RPC 净空隔离与自动复活（`+5g`）全链路保障**：对后台 `af_silent_` 静默请求返回纯净空成功回包，杜绝 `nextAction="Friend"` 跨页污染首页榜单，同时确保纯净总榜回包 100% 自动触发好友过期能量复活（`+5g`）。
+- 🏷️ 控制板版本号规范更新：控制板主标题下正式更新为 `当前版本：v3.2.7 正式版`。
 
 ## 使用限制
 
@@ -56,13 +54,13 @@
 
 ## iOS 14 独立版本
 
-- iOS 14 请使用独立包 `AntForestPort-v3.2.6-iOS14.dylib`；该兼容包包含 v3.2.6 正式全部功能，不替代 iOS 15+ 的标准包。
+- iOS 14 请使用独立包 `AntForestPort-v3.2.7-iOS14.dylib`；该兼容包包含 v3.2.7 正式全部功能，不替代 iOS 15+ 的标准包。
 - 该包移除了 iOS 15 才提供的 `UISheetPresentationControllerDetent` 与 `customDetent` 引用，面板使用 iOS 14 可用的标准 PageSheet。
 - 已在 iPhone 12 Pro Max、iOS 14.2.1、支付宝 12.12.10、TrollFools 环境完成注入与功能验证。
 
 ## 使用说明
 
-1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v3.2.6.dylib`](build/AntForestPort-v3.2.6.dylib) 到支付宝。
+1. 使用巨魔注入器 TrollFools 注入 [`AntForestPort-v3.2.7.dylib`](build/AntForestPort-v3.2.7.dylib) 到支付宝。
 2. 注入前移除旧的 `AntForestProbe.dylib` 或旧版插件，避免两个 dylib 同时 Hook 同一方法。
 3. 完全杀掉并重开支付宝，进入蚂蚁森林。
 4. 点击右侧叶子按钮；需要调整位置时，直接拖动叶子图标。静置约 2 秒后叶子会自动贴边缩小；左侧向右滑、右侧向左滑可再次展开。
@@ -92,7 +90,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 
 后台使用步骤：
 
-1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v3.2.6.dylib` 和 `ImmortalizerJailed.dylib`。
+1. 使用 TrollFools 同时向支付宝注入 `AntForestPort-v3.2.7.dylib` 和 `ImmortalizerJailed.dylib`。
 2. 完全杀掉并重新打开支付宝，进入蚂蚁森林首页。
 3. 点击叶子按钮，在收取记录面板中开启“自动收取”。
 4. 点击 ImmortalizerJailed 的浮动按钮启用保活。
@@ -114,7 +112,7 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 | 项目 | 当前状态 |
 | --- | --- |
 | CPU 架构 | A11 及以下使用 `arm64`；A12 及以上使用 `arm64e` |
-| iOS | 标准 v3.2.6 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v3.2.6-iOS14.dylib` |
+| iOS | 标准 v3.2.7 包支持 iOS 15 及以上；iOS 14 继续使用独立 `AntForestPort-v3.2.7-iOS14.dylib` |
 | 屏幕尺寸 | 使用 Auto Layout；标准版、Plus、Pro、Pro Max 均应自适应 |
 | 非越狱 | 需要巨魔商店 TrollStore 与巨魔注入器 TrollFools 都支持目标系统 |
 | 越狱 | 可手动注入 dylib；暂未提供 rootful/rootless `.deb` 包 |
@@ -152,13 +150,13 @@ TrollStore 与 TrollFools 解决的是安装、签名绕过和向目标 App 注�
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make
 ```
 
-本地 v3.2.6 正式产物位于 `build/AntForestPort-v3.2.6.dylib` 与 `build/AntForestPort-v3.2.6-iOS14.dylib`。
+本地 v3.2.7 正式产物位于 `build/AntForestPort-v3.2.7.dylib` 与 `build/AntForestPort-v3.2.7-iOS14.dylib`。
 
-GitHub Release 的通用 dylib 按 `AntForestPort-v3.2.6.dylib` 命名。
+GitHub Release 的通用 dylib 按 `AntForestPort-v3.2.7.dylib` 命名。
 
 ## 开发分支约定
 
-- `main`：正式主干分支与发布线（当前为 v3.2.6 正式版）。
+- `main`：正式主干分支与发布线（当前为 v3.2.7 正式版）。
 - `release/v2.8.3-1`：上一正式维护线。
 - `release/v2.8.3-1-ios14`：iOS 14 独立兼容构建，单独发布，不影响 iOS 15+ 正式包。
 - `feature/earn-energy-probe`：保留“赚能量”玩法的实验与诊断记录；已验证的自动点击逻辑已合入正式开发线。
