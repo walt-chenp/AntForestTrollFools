@@ -82,7 +82,19 @@ static BOOL isSelfForestHomeURL(NSURL *url) {
 
 static BOOL isEarnEnergyURL(NSURL *url) {
     NSString *text = [url.absoluteString lowercaseString];
-    return [text containsString:@"forcewhackmole=y"] || [text containsString:@"whackmole"] || [text containsString:@"earnenergy"] || [text containsString:@"earn_energy"] || [text containsString:@"earn.html"] || [text containsString:@"60000002.h5app.alipay.com"];
+    return [text containsString:@"forcewhackmole=y"] || [text containsString:@"whackmole"] || [text containsString:@"earnenergy"] || [text containsString:@"earn_energy"] || [text containsString:@"earn.html"];
+}
+
+static BOOL isPkOrChallengeURL(NSURL *url) {
+    if (!url) return NO;
+    NSString *text = [url.absoluteString lowercaseString];
+    return [text containsString:@"pvphome"] ||
+           [text containsString:@"pvprecord"] ||
+           [text containsString:@"pkcontest"] ||
+           [text containsString:@"pkfind"] ||
+           [text containsString:@"pkrank"] ||
+           [text containsString:@"challenge"] ||
+           [text containsString:@"arena"];
 }
 
 static BOOL isLotteryURL(NSURL *url) {
@@ -203,12 +215,18 @@ static id forestControllerForBridge(id bridge) {
 }
 
 static id findAnyForestController(void) {
-    if (currentForestHomeController) return currentForestHomeController;
+    if (currentForestHomeController) {
+        NSURL *curUrl = [currentForestHomeController respondsToSelector:@selector(url)] ? ((NSURL *(*)(id, SEL))objc_msgSend)(currentForestHomeController, @selector(url)) : nil;
+        if (!curUrl || isSelfForestHomeURL(curUrl)) {
+            return currentForestHomeController;
+        }
+    }
     AntForestManager *manager = AntForestManager.sharedInstance;
-    for (id b in @[ manager.rewardTaskBridge ?: (id)[NSNull null], manager.jsBridge ?: (id)[NSNull null], manager.oceanBridge ?: (id)[NSNull null] ]) {
-        if (b != (id)[NSNull null]) {
-            id c = forestControllerForBridge(b);
-            if (c) return c;
+    if (manager.jsBridge && isForestBridgeAlive(manager.jsBridge)) {
+        id c = forestControllerForBridge(manager.jsBridge);
+        if (c) {
+            NSURL *u = [c respondsToSelector:@selector(url)] ? ((NSURL *(*)(id, SEL))objc_msgSend)(c, @selector(url)) : nil;
+            if (!u || isSelfForestHomeURL(u)) return c;
         }
     }
     NSArray *windows = nil;
@@ -224,12 +242,7 @@ static id findAnyForestController(void) {
             [queue removeObjectAtIndex:0];
             if (!vc) continue;
             NSURL *url = [vc respondsToSelector:@selector(url)] ? ((NSURL *(*)(id, SEL))objc_msgSend)(vc, @selector(url)) : nil;
-            if (url && isForestHomeURL(url)) return vc;
-            if ([vc isKindOfClass:NSClassFromString(@"RVKViewController")] ||
-                [vc isKindOfClass:NSClassFromString(@"H5WebViewController")]) {
-                id bridge = forestBridgeFromController(vc) ?: rewardBridgeFromController(vc);
-                if (bridge) return vc;
-            }
+            if (url && isSelfForestHomeURL(url)) return vc;
             if (vc.presentedViewController) [queue addObject:vc.presentedViewController];
             if ([vc isKindOfClass:[UINavigationController class]]) {
                 [queue addObjectsFromArray:[(UINavigationController *)vc viewControllers]];
@@ -259,12 +272,14 @@ static void probeAndRestoreForestBridge(void) {
         id controller = findAnyForestController();
         if (controller) {
             id bridge = forestBridgeFromController(controller) ?: rewardBridgeFromController(controller);
-            if (bridge && (manager.jsBridge != bridge || !manager.jsBridge)) {
+            if (bridge && !manager.jsBridge) {
                 manager.jsBridge = bridge;
                 [manager recordStage:@"诊断 · 后台探针绑定森林首页 H5 Bridge"];
             }
             if (manager.rewardTaskBridge && manager.rewardTaskBridge != manager.jsBridge) {
-                if (!isForestBridgeAlive(manager.rewardTaskBridge)) {
+                NSString *rtUrlStr = [manager effectiveUrlForBridge:manager.rewardTaskBridge];
+                NSURL *rtUrl = rtUrlStr.length ? [NSURL URLWithString:rtUrlStr] : nil;
+                if (!isForestBridgeAlive(manager.rewardTaskBridge) || (rtUrl && isPkOrChallengeURL(rtUrl))) {
                     manager.rewardTaskBridge = manager.jsBridge;
                 }
             }
@@ -2476,6 +2491,13 @@ static void portViewDidAppear(id self, SEL _cmd, BOOL animated) {
         return;
     }
 
+    // 1v1能量挑战 / PK挑战赛子页面隔离保护：绝不绑定或污染森林首页/任务 Bridge，直接返回
+    if (isPkOrChallengeURL(url)) {
+        manager.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
+        addLogButton(self, NO);
+        return;
+    }
+
     BOOL earnEnergy = isEarnEnergyURL(url);
     BOOL forestHome = isForestHomeURL(url) && !earnEnergy;
     BOOL isSelfHome = isSelfForestHomeURL(url) && !earnEnergy;
@@ -2904,6 +2926,24 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
     NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
 
     NSURL *ctrlUrl = [controller respondsToSelector:@selector(url)] ? [controller url] : nil;
+    if (!ctrlUrl) {
+        NSString *bridgeUrlStr = [manager effectiveUrlForBridge:self];
+        if (bridgeUrlStr.length) ctrlUrl = [NSURL URLWithString:bridgeUrlStr];
+    }
+
+    // 0. 1v1能量挑战 (pvpHome.html) / PK排位赛独立子页面绝对隔离保护：
+    // 该页面初始化时会并发请求 queryPvpHomeInfo 与 com.alipay.antiep.listTask(ANTFOREST_VITALITY_TASK)，
+    // 若不隔离会导致插件将 pvpHome.html 的 Bridge 误绑为 rewardTaskBridge/jsBridge 并在其上狂发森林任务 RPC，导致卡在“稍等片刻...”！
+    if (ctrlUrl && isPkOrChallengeURL(ctrlUrl)) {
+        manager.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
+        if (manager.rewardTaskBridge == self) {
+            manager.rewardTaskBridge = manager.jsBridge;
+        }
+        if (originalTransformResponseData) {
+            return originalTransformResponseData(self, _cmd, value);
+        }
+        return value;
+    }
 
     // 1. URL与Bridge上下文特征探测
     BOOL isForestByUrl = ctrlUrl && isForestHomeURL(ctrlUrl);
@@ -3056,8 +3096,10 @@ static id portTransformResponseData(id self, SEL _cmd, id value) {
                 manager.lotteryBridge = self;
             }
             if (!isMonopoly && !isAIFish && !isOcean && !isFarm && !isLottery && !isManor) {
-                if (manager.rewardTaskBridge != self) {
-                    manager.rewardTaskBridge = self;
+                if (!ctrlUrl || isSelfForestHomeURL(ctrlUrl) || isRewardTaskURL(ctrlUrl)) {
+                    if (manager.rewardTaskBridge != self) {
+                        manager.rewardTaskBridge = self;
+                    }
                 }
             }
         }
@@ -3180,9 +3222,7 @@ static void installHooks(void) {
         if (targetBridgeClass) {
             hookMethod(targetBridgeClass, @selector(transformResponseData:), (IMP)portTransformResponseData, (IMP *)&originalTransformResponseData);
             hookMethod(targetBridgeClass, @selector(updateBridgeReadyStatus:), (IMP)portUpdateBridgeReadyStatus, (IMP *)&originalUpdateBridgeReadyStatus);
-#if ENABLE_PROBE_LOGS
             hookMethod(targetBridgeClass, @selector(_doFlushMessageQueue:url:), (IMP)portDoFlushMessageQueue, (IMP *)&originalDoFlushMessageQueue);
-#endif
         }
         
         int classCount = objc_getClassList(NULL, 0);

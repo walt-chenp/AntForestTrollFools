@@ -27,4 +27,9 @@ sed -n '/-(void)queryTotalRank/,/^}/p' antforest/AntForestManager.m | grep -q "r
 grep -q "autoReviveLimitReachedToday" antforest/AntForestManager.m || { echo "❌ Missing autoReviveLimitReachedToday check"; exit 1; }
 sed -n '/static NSInteger reviveDailyCount/,/^}/p' antforest/AntForestManager.m | grep -q 'return \[defaults integerForKey:@"autoReviveCount"\]' && { echo "❌ reviveDailyCount still falls back to dirty autoReviveCount cache"; exit 1; }
 
-echo "✅ All Auto-Revive expired energy path checks passed successfully!"
+echo "[6/6] Checking 1v1 Energy Challenge (pvpHome.html) & PK subpage isolation..."
+grep -q "isPkOrChallengeURL" PortEntry.m || { echo "❌ Missing isPkOrChallengeURL in PortEntry.m"; exit 1; }
+grep -q "currentEnergyPvpBattleRecord" antforest/AntForestManager.m || { echo "❌ Missing currentEnergyPvpBattleRecord in AntForestManager.m"; exit 1; }
+grep -q "hasPureRankData" antforest/AntForestManager.m || { echo "❌ Missing hasPureRankData total rank fallback in AntForestManager.m"; exit 1; }
+
+echo "✅ All Auto-Revive expired energy & 1v1 Challenge isolation checks passed successfully!"

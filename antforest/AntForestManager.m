@@ -2430,7 +2430,9 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         } else if ([lowerUrl containsString:@"180020010001279274"] || [lowerUrl containsString:@"lotterymachine"] || [lowerUrl containsString:@"draw"]) {
             self.lotteryBridge = bridge;
             self.lotteryH5Url = effectiveUrl;
-        } else if ([lowerUrl containsString:@"180020010001247580"] || [lowerUrl containsString:@"vitality"] || [lowerUrl containsString:@"reward"] || [lowerUrl containsString:@"home.html"]) {
+        } else if ([lowerUrl containsString:@"pvphome"] || [lowerUrl containsString:@"pvp"] || [lowerUrl containsString:@"pkcontest"] || [lowerUrl containsString:@"pkfind"] || [lowerUrl containsString:@"challenge"] || [lowerUrl containsString:@"arena"] || [lowerUrl containsString:@"listrank"]) {
+            self.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
+        } else if (([lowerUrl containsString:@"180020010001247580"] && [lowerUrl containsString:@"home.html"]) || [lowerUrl containsString:@"vitality"] || [lowerUrl containsString:@"reward"] || [lowerUrl hasSuffix:@"home.html"]) {
             self.jsBridge = bridge;
             self.rewardTaskBridge = bridge;
             self.rewardTaskH5Url = effectiveUrl;
@@ -2452,6 +2454,10 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
 - (void)checkAndTriggerPageActionsForUrl:(NSString *)urlStr {
     if (!urlStr.length) return;
     NSString *lowerUrl = urlStr.lowercaseString;
+    if ([lowerUrl containsString:@"pvphome"] || [lowerUrl containsString:@"pvp"] || [lowerUrl containsString:@"pkcontest"] || [lowerUrl containsString:@"pkfind"] || [lowerUrl containsString:@"challenge"] || [lowerUrl containsString:@"arena"] || [lowerUrl containsString:@"listrank"]) {
+        self.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
+        return;
+    }
     
     if ([lowerUrl containsString:@"180020010001293606"] || [lowerUrl containsString:@"monopoly"] || [lowerUrl containsString:@"hsdwy"] || [lowerUrl containsString:@"patrol"] || [lowerUrl containsString:@"guardian"]) {
         if (self.enableAutoPatrolNew) {
@@ -2472,7 +2478,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         if (self.enableAutoOceanTasks) {
             [self queryOceanTaskListWithForce:YES];
         }
-    } else if ([lowerUrl containsString:@"180020010001247580"] || [lowerUrl containsString:@"vitality"] || [lowerUrl containsString:@"reward"]) {
+    } else if (([lowerUrl containsString:@"180020010001247580"] && [lowerUrl containsString:@"home.html"]) || [lowerUrl containsString:@"vitality"] || [lowerUrl containsString:@"reward"]) {
         if (self.enableAutoRewardTasks) {
             [self queryVitalityTaskListWithForce:YES];
             [self claimAllVisibleRewardTaskRewardsOnWebView];
@@ -2570,13 +2576,15 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
     PSDJsBridge *forestHomeBridge = self.jsBridge ?: bridge;
     NSString *urlForestHome = fixedForestHomeUrl;
     NSString *homeDynamic = [self effectiveUrlForBridge:forestHomeBridge];
-    if (homeDynamic.length && ([homeDynamic containsString:@"180020010001247580"] || [homeDynamic containsString:@"home.html"]) && ![homeDynamic containsString:@"180020010001293606"]) {
+    NSString *homeDynamicLower = homeDynamic.lowercaseString;
+    if (homeDynamic.length && [homeDynamicLower containsString:@"home.html"] && ![homeDynamicLower containsString:@"pvphome"] && ![homeDynamicLower containsString:@"pk"] && ![homeDynamicLower containsString:@"challenge"] && ![homeDynamic containsString:@"180020010001293606"]) {
         urlForestHome = homeDynamic;
     }
     
     NSString *urlDynamic = [self effectiveUrlForBridge:bridge];
+    NSString *urlDynamicLower = urlDynamic.lowercaseString;
     NSString *urlVitality = fixedForestHomeUrl;
-    if (urlDynamic.length && ([urlDynamic containsString:@"180020010001247580"] || [urlDynamic containsString:@"home.html"]) && ![urlDynamic containsString:@"180020010001293606"]) {
+    if (urlDynamic.length && [urlDynamicLower containsString:@"home.html"] && ![urlDynamicLower containsString:@"pvphome"] && ![urlDynamicLower containsString:@"pk"] && ![urlDynamicLower containsString:@"challenge"] && ![urlDynamic containsString:@"180020010001293606"]) {
         urlVitality = urlDynamic;
     }
     
@@ -7577,14 +7585,23 @@ static BOOL oceanPlanLoggedThisRound = NO;
                                      ![opType containsString:@"Challenge"] &&
                                      ![opType.lowercaseString containsString:@"pk"];
 
-            // 1. 最高优先级保护：用户手动交互 PK 榜/黄金PK赛/排位赛/挑战赛，必须优先识别并直接拦截返回！
+            // 1. 最高优先级保护：用户手动交互 PK 榜/黄金PK赛/排位赛/1v1能量挑战赛，必须优先识别并直接拦截返回！
             NSString *opTypeLower = [opType lowercaseString];
+            NSArray *firstRankList = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : ([dict[@"friendRanking"] isKindOfClass:NSArray.class] ? dict[@"friendRanking"] : nil);
+            NSDictionary *firstRankItem = ([firstRankList.firstObject isKindOfClass:NSDictionary.class]) ? firstRankList.firstObject : nil;
+            BOOL hasFirstItemPkFields = (firstRankItem[@"challengeExpectedSettlementResult"] != nil || firstRankItem[@"challengeRankLevel"] != nil);
             BOOL isPkOrPvp = !isOurSilentRpc && !isHomePagePayload && !isTaskListPayload && (
                               isStrictPkOperationName(opType) ||
                               [opTypeLower containsString:@"pk"] ||
                               [opTypeLower containsString:@"pvp"] ||
                               [opTypeLower containsString:@"challenge"] ||
                               [opTypeLower containsString:@"arena"] ||
+                              hasFirstItemPkFields ||
+                              resData[@"currentEnergyPvpBattleRecord"] != nil || dict[@"currentEnergyPvpBattleRecord"] != nil ||
+                              resData[@"previousEnergyPvpBattleRecord"] != nil || dict[@"previousEnergyPvpBattleRecord"] != nil ||
+                              resData[@"accumulativeWinProgress"] != nil || dict[@"accumulativeWinProgress"] != nil ||
+                              resData[@"waitToReceiveRewardCount"] != nil || dict[@"waitToReceiveRewardCount"] != nil ||
+                              resData[@"waitToReceiveRecordCount"] != nil || dict[@"waitToReceiveRecordCount"] != nil ||
                               resData[@"energyChallengeRank"] != nil || dict[@"energyChallengeRank"] != nil ||
                               resData[@"energyPvpInfo"] != nil || dict[@"energyPvpInfo"] != nil ||
                               resData[@"userPkInfo"] != nil || dict[@"userPkInfo"] != nil ||
@@ -7613,16 +7630,25 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 return;
             }
 
-            // 2. 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或后台静默 rank 查询）：
-            // 绝不包含任何 PK/排位/挑战/周榜 结构，杜绝被非总榜覆盖
+            // 2. 严格识别真正的“总榜”（queryEnergyRanking + periodType=total，或包含纯净 totalDatas/friendRanking 的非PK榜单回包）：
+            // 绝不包含任何 PK/排位/挑战/周榜 结构，既保证真机 transformResponseData 剥离 responseId 时也能自动复活(+5g)，又杜绝被非总榜覆盖
+            BOOL hasPureRankData = (resData[@"totalDatas"] != nil || dict[@"totalDatas"] != nil || resData[@"friendRanking"] != nil || dict[@"friendRanking"] != nil);
             isTotalRankResponse = NO;
-            if (isOurSilentRank || (isEnergyRankingOp && (!periodType.length || [periodType isEqualToString:@"total"]) && (!rankType.length || [rankType isEqualToString:@"energyRank"]))) {
+            if (isOurSilentRank || ((isEnergyRankingOp || hasPureRankData) && (!periodType.length || [periodType isEqualToString:@"total"]) && (!rankType.length || [rankType isEqualToString:@"energyRank"]))) {
                 if (!isStrictPkOperationName(opType) &&
+                    !hasFirstItemPkFields &&
                     !resData[@"energyChallengeRank"] && !dict[@"energyChallengeRank"] &&
                     !resData[@"energyPvpInfo"] && !dict[@"energyPvpInfo"] &&
                     !resData[@"userPkInfo"] && !dict[@"userPkInfo"] &&
                     !resData[@"pkRanking"] && !dict[@"pkRanking"] &&
-                    !resData[@"challengeRank"] && !dict[@"challengeRank"]) {
+                    !resData[@"challengeRank"] && !dict[@"challengeRank"] &&
+                    !resData[@"rankDisplayParamsVO"] && !dict[@"rankDisplayParamsVO"] &&
+                    !resData[@"dynamicPromoteVO"] && !dict[@"dynamicPromoteVO"] &&
+                    !resData[@"promoteLineEnergy"] && !dict[@"promoteLineEnergy"] &&
+                    !resData[@"nextRankLevelName"] && !dict[@"nextRankLevelName"] &&
+                    !resData[@"promoteCount"] && !dict[@"promoteCount"] &&
+                    !resData[@"extendInfo"][@"rankHeadPortraitVOS"] && !dict[@"extendInfo"][@"rankHeadPortraitVOS"] &&
+                    !resData[@"rankHeadPortraitVOS"] && !dict[@"rankHeadPortraitVOS"]) {
                     isTotalRankResponse = YES;
                 }
             }

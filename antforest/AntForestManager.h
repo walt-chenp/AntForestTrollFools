@@ -176,6 +176,7 @@ NS_ASSUME_NONNULL_BEGIN
 -(void)queryMonopolyTaskList;
 -(void)queryMonopolyTaskListWithForce:(BOOL)force;
 -(void)executeMonopolyScriptOnWebView:(NSString *)js;
+-(nullable NSString *)effectiveUrlForBridge:(nullable id)bridge;
 -(void)registerBridge:(id)bridge withUrl:(NSString *)url;
 -(void)checkAndTriggerPageActionsForUrl:(NSString *)urlStr;
 -(void)openMonopolyTaskPanelOnWebView;
