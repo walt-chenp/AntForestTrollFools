@@ -312,10 +312,10 @@ static void startSilentRewardContext(id forestController) {
     id bridge = rewardBridgeFromController(daemonView) ?: forestBridgeFromController(forestController) ?: manager.jsBridge;
     BOOL ready = bridge && (![bridge respondsToSelector:@selector(isBridgeReady)] || ((BOOL (*)(id, SEL))objc_msgSend)(bridge, @selector(isBridgeReady)));
     NSLog(@"[AntForestPort][RewardSessionProbe] controller=%@ session=%@ daemon=%@ bridge=%@ ready=%d", forestController ? NSStringFromClass([forestController class]) : @"nil", session ? NSStringFromClass([session class]) : @"nil", daemonView ? NSStringFromClass([daemonView class]) : @"nil", bridge ? NSStringFromClass([bridge class]) : @"nil", ready);
-    [manager recordStage:[NSString stringWithFormat:@"首页后台：会话探针 session=%@ daemon=%@ bridge=%d ready=%d", session ? NSStringFromClass([session class]) : @"无", daemonView ? NSStringFromClass([daemonView class]) : @"无", bridge != nil, ready]];
+    [manager recordStage:[NSString stringWithFormat:@"诊断 · 首页后台：会话探针 session=%@ daemon=%@ bridge=%d ready=%d", session ? NSStringFromClass([session class]) : @"无", daemonView ? NSStringFromClass([daemonView class]) : @"无", bridge != nil, ready]];
     if (bridge) {
         manager.rewardTaskBridge = bridge;
-        [manager recordStage:@"首页后台：后台会话奖励桥接已就绪"];
+        [manager recordStage:@"诊断 · 首页后台：后台会话奖励桥接已就绪"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [manager queryVitalityTaskList];
         });
@@ -327,7 +327,12 @@ static void finishForestHomeStart(id controller, id bridge) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     manager.jsBridge = bridge;
     objc_setAssociatedObject(controller, ForestHomeStartKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
+    static NSTimeInterval sLastHomeBridgeLogTime = 0;
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (now - sLastHomeBridgeLogTime > 30.0) {
+        sLastHomeBridgeLogTime = now;
+        [manager recordStage:@"收取 · 森林首页 H5 Bridge 已就绪"];
+    }
     startSilentRewardContext(controller);
     if (manager.enableWaterOnLaunch) [manager startLaunchWateringThenCollect];
     else if (manager.enableAutoCollect) {
@@ -335,7 +340,7 @@ static void finishForestHomeStart(id controller, id bridge) {
             [manager recordStage:@"诊断 · 首页桥接就绪：前一轮扫描执行中，跳过重复启动"];
             return;
         }
-        [manager recordStage:@"收取 · 首页桥接就绪，平滑延迟启动好友扫描"];
+        [manager recordStage:@"诊断 · 首页桥接就绪，平滑延迟启动好友扫描"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
             if (manager.enableAutoCollect && !manager.isScanRunning && manager.jsBridge) {
                 [manager autoCollectBubbles];
@@ -1837,7 +1842,7 @@ static void installEarnEnergyCollector(id controller) {
 
     [self.view addSubview:grabber];
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"当前版本：v3.2.7 正式版";
+    versionLabel.text = @"当前版本：v3.2.8 正式版";
     versionLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightRegular];
     versionLabel.textColor = [UIColor systemGray2Color];
     versionLabel.textAlignment = NSTextAlignmentCenter;
@@ -1980,6 +1985,7 @@ static void installEarnEnergyCollector(id controller) {
 
 - (void)refresh {
     AntForestManager *manager = [AntForestManager sharedInstance];
+    [manager checkAndResetTodayEnergyIfNeeded];
     self.todayLabel.text = [NSString stringWithFormat:@"今日\n%ld g", (long)manager.todayCollectedEnergy];
     if (manager.totalCollectedEnergy >= 1000) {
         self.totalLabel.text = [NSString stringWithFormat:@"累计\n%.2f kg", manager.totalCollectedEnergy / 1000.0];
@@ -1997,7 +2003,7 @@ static void installEarnEnergyCollector(id controller) {
     [manager recordStage:[NSString stringWithFormat:@"收取 · 自动收取已%@", sender.on ? @"开启" : @"关闭"]];
     if (sender.on) {
         if (manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval ?: 300];
-        if (manager.enableScheduledCollect) [manager startScheduledCollectTimer];
+        [manager startScheduledCollectTimer];
         if (!manager.enableBackgroundLoop && manager.jsBridge) [manager autoCollectBubbles];
     } else {
         [manager stopAutoCollectTimer];
@@ -2047,7 +2053,7 @@ static void installEarnEnergyCollector(id controller) {
     AntForestManager *manager = AntForestManager.sharedInstance;
     manager.enableScheduledCollect = sender.on;
     [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"enableScheduledCollect"];
-    if (sender.on && manager.enableAutoCollect) [manager startScheduledCollectTimer]; else { [manager.scheduledCollectTimer invalidate]; manager.scheduledCollectTimer = nil; }
+    if (manager.enableAutoCollect) [manager startScheduledCollectTimer];
 }
 
 - (void)showSettings {
@@ -2092,6 +2098,7 @@ static void installEarnEnergyCollector(id controller) {
 
 - (void)copyDiagnosticLogs:(UIButton *)sender {
     AntForestManager *manager = AntForestManager.sharedInstance;
+    [manager checkAndResetTodayEnergyIfNeeded];
     NSArray *logs = manager.logRecord.reverseObjectEnumerator.allObjects;
     NSPredicate *predicate = [NSPredicate predicateWithBlock:^BOOL(NSString *log, __unused NSDictionary *bindings) {
         return log.length > 0 && ![log containsString:@"[Diag]"] && ![log containsString:@"诊断 ·"];
@@ -2376,6 +2383,7 @@ static void initializeManager(void) {
         [defaults setInteger:0 forKey:@"totalCollectedEnergy"];
     }
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     formatter.dateFormat = @"yyyy-MM-dd";
     NSString *today = [formatter stringFromDate:NSDate.date];
     if ([[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:today]) {
@@ -2388,6 +2396,7 @@ static void initializeManager(void) {
         manager.todayCollectedEnergy = 0;
         [defaults setInteger:0 forKey:@"todayCollectedEnergy"];
         [defaults setObject:today forKey:@"todayCollectedEnergyDate"];
+        [defaults synchronize];
     }
     manager.enableAutoCollect = [defaults boolForKey:@"enableAutoCollect"];
     manager.enableSelfCollect = [defaults objectForKey:@"enableSelfCollect"] ? [defaults boolForKey:@"enableSelfCollect"] : YES;
@@ -2420,7 +2429,7 @@ static void initializeManager(void) {
     probeAndRestoreForestBridge();
     [manager recordStage:[NSString stringWithFormat:@"诊断 · 初始化：自动=%d，循环=%d", manager.enableAutoCollect, manager.enableBackgroundLoop]];
     if (manager.enableAutoCollect && manager.enableBackgroundLoop) [manager startAutoCollectTimerWithInterval:manager.collectInterval];
-    if (manager.enableAutoCollect && manager.enableScheduledCollect) [manager startScheduledCollectTimer];
+    if (manager.enableAutoCollect) [manager startScheduledCollectTimer];
     if (manager.enableAutoWater) [manager startScheduledWaterTimer];
 }
 

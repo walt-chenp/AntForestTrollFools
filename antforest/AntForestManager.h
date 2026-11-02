@@ -97,6 +97,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 -(BOOL)isAnimalEnergyCollectedTodayForCode:(NSString *)code name:(NSString *)name;
 -(void)markAnimalEnergyCollectedTodayForCode:(NSString *)code name:(NSString *)name reason:(NSString *)reason;
+-(void)checkAndResetTodayEnergyIfNeeded;
+-(void)collectMaturedWaitingBubbles;
 -(void)startAutoCollectTimerWithInterval:(NSTimeInterval)interval;
 -(void)startScheduledCollectTimer;
 -(void)startScheduledWaterTimer;

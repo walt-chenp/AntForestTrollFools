@@ -27,9 +27,15 @@ sed -n '/-(void)queryTotalRank/,/^}/p' antforest/AntForestManager.m | grep -q "r
 grep -q "autoReviveLimitReachedToday" antforest/AntForestManager.m || { echo "❌ Missing autoReviveLimitReachedToday check"; exit 1; }
 sed -n '/static NSInteger reviveDailyCount/,/^}/p' antforest/AntForestManager.m | grep -q 'return \[defaults integerForKey:@"autoReviveCount"\]' && { echo "❌ reviveDailyCount still falls back to dirty autoReviveCount cache"; exit 1; }
 
-echo "[6/6] Checking 1v1 Energy Challenge (pvpHome.html) & PK subpage isolation..."
+echo "[6/6] Checking 1v1 Energy Challenge (pvpHome.html), PK isolation, 00:00 reset & 07:00-07:30 scan..."
 grep -q "isPkOrChallengeURL" PortEntry.m || { echo "❌ Missing isPkOrChallengeURL in PortEntry.m"; exit 1; }
 grep -q "currentEnergyPvpBattleRecord" antforest/AntForestManager.m || { echo "❌ Missing currentEnergyPvpBattleRecord in AntForestManager.m"; exit 1; }
 grep -q "hasPureRankData" antforest/AntForestManager.m || { echo "❌ Missing hasPureRankData total rank fallback in AntForestManager.m"; exit 1; }
+grep -q "checkAndResetTodayEnergyIfNeeded" antforest/AntForestManager.m || { echo "❌ Missing checkAndResetTodayEnergyIfNeeded in AntForestManager.m"; exit 1; }
+grep -q "collectMaturedWaitingBubbles" antforest/AntForestManager.m || { echo "❌ Missing collectMaturedWaitingBubbles in AntForestManager.m"; exit 1; }
+sed -n '/-(void)collectMaturedWaitingBubbles/,/^}/p' antforest/AntForestManager.m | grep -q "rawBid" || { echo "❌ Missing NSNumber-safe rawBid key handling in collectMaturedWaitingBubbles"; exit 1; }
+grep -q "sShieldedFriendsExpireMs" antforest/AntForestManager.m || { echo "❌ Missing shielded friends skipUsers cache in AntForestManager.m"; exit 1; }
+sed -n '/static inline BOOL isStrictPkOperationName/,/^}/p' antforest/AntForestManager.m | grep -q "filluserrobflag" || { echo "❌ Missing filluserrobflag in isStrictPkOperationName (needed for PK pagination)"; exit 1; }
+grep -q "relationLocal" antforest/AntForestManager.m && { echo "❌ AntForestManager.m should NOT contain relationLocal (causes H5 PK board freeze)"; exit 1; }
 
-echo "✅ All Auto-Revive expired energy & 1v1 Challenge isolation checks passed successfully!"
+echo "✅ All Auto-Revive expired energy, 1v1 Challenge isolation, 00:00 reset & 07:00-07:30 scan checks passed successfully!"

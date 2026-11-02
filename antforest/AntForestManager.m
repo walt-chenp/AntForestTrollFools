@@ -62,6 +62,7 @@ static BOOL reviveRewardRefreshNeeded = NO;
 static NSMutableSet<NSString *> *todayCollectedAnimalKeys = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *lastAnimalCollectAttemptTimes = nil;
 static NSMutableSet<NSString *> *shieldReportedFriendsInRound = nil;
+static NSMutableDictionary<NSString *, NSNumber *> *sShieldedFriendsExpireMs = nil;
 static NSMutableSet<NSString *> *sDoubleCollectCheckedUsers = nil;
 
 static NSString *getTaskActiveStartTimeString(void) {
@@ -121,8 +122,14 @@ dispatch_queue_t globalSerialQueueTest;
         shieldReportedFriendsInRound = [NSMutableSet set];
         sDoubleCollectCheckedUsers = [NSMutableSet set];
         afm.rewardTaskStartTime = [[NSUserDefaults standardUserDefaults] stringForKey:@"rewardTaskStartTime"] ?: @"07:00";
+        [afm ensureBackgroundPulseTimer];
+        
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationSignificantTimeChangeNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(__unused NSNotification * _Nonnull note) {
+            [afm checkAndResetTodayEnergyIfNeeded];
+        }];
         
         [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification * _Nonnull note) {
+            [afm checkAndResetTodayEnergyIfNeeded];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(500 * NSEC_PER_MSEC)), dispatch_get_main_queue(), ^{
                 [afm notifyActiveH5PageToRefresh];
                 if (afm.enableAutoPatrolNew) {
@@ -1253,26 +1260,169 @@ static dispatch_source_t sBackgroundPulseTimer = nil;
     [self checkScheduledCollect];
 }
 
+-(void)checkAndResetTodayEnergyIfNeeded {
+    NSString *today = getCurrentDateString();
+    if (!today.length) return;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *savedDate = [defaults stringForKey:@"todayCollectedEnergyDate"];
+    if (!savedDate.length || ![savedDate isEqualToString:today]) {
+        BOOL hadEnergy = (self.todayCollectedEnergy != 0 || [defaults integerForKey:@"todayCollectedEnergy"] != 0);
+        self.todayCollectedEnergy = 0;
+        [defaults setInteger:0 forKey:@"todayCollectedEnergy"];
+        [defaults setObject:today forKey:@"todayCollectedEnergyDate"];
+        if (savedDate.length) {
+            [defaults removeObjectForKey:@"oceanLimitReachedToday"];
+            [defaults removeObjectForKey:@"oceanCleanedFriendsToday"];
+            @synchronized (self) {
+                if (recordedCollectedBubbles) [recordedCollectedBubbles removeAllObjects];
+                if (pendingCollectBubbles) [pendingCollectBubbles removeAllObjects];
+                if (todayCollectedAnimalKeys) [todayCollectedAnimalKeys removeAllObjects];
+            }
+        }
+        [defaults synchronize];
+        if (hadEnergy || savedDate.length) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [[NSNotificationCenter defaultCenter] postNotificationName:@"LogUpdated" object:nil];
+            });
+        }
+    }
+}
+
+-(void)collectMaturedWaitingBubbles {
+    @try {
+        if (!self.enableAutoCollect || !self.jsBridge) return;
+        NSTimeInterval nowSec = [[NSDate date] timeIntervalSince1970];
+        if (self.lastPkInteractionTime > 0 && (nowSec - self.lastPkInteractionTime < 25.0)) return;
+        long long nowMs = (long long)(nowSec * 1000.0);
+        NSMutableArray<NSDictionary *> *maturedList = [NSMutableArray array];
+        BOOL didMutate = NO;
+        @synchronized (self) {
+            if (![self.friendsBubbles isKindOfClass:NSMutableDictionary.class] || !self.friendsBubbles.count) return;
+            NSArray *userIds = [self.friendsBubbles.allKeys copy];
+            for (id rawUid in userIds) {
+                NSString *uid = [rawUid isKindOfClass:NSString.class] ? (NSString *)rawUid : ([rawUid respondsToSelector:@selector(stringValue)] ? [rawUid stringValue] : [NSString stringWithFormat:@"%@", rawUid ?: @""]);
+                id entry = self.friendsBubbles[rawUid];
+                if (![entry isKindOfClass:NSDictionary.class] || !uid.length) {
+                    [self.friendsBubbles removeObjectForKey:rawUid];
+                    didMutate = YES;
+                    continue;
+                }
+                NSDictionary *entryDict = (NSDictionary *)entry;
+                NSMutableDictionary *userBubbles = [NSMutableDictionary dictionaryWithCapacity:entryDict.count];
+                NSArray *bids = [entryDict.allKeys copy];
+                BOOL userMutated = NO;
+                for (id rawBid in bids) {
+                    id overTimeObj = entryDict[rawBid];
+                    NSString *bid = [rawBid isKindOfClass:NSString.class] ? (NSString *)rawBid : ([rawBid respondsToSelector:@selector(stringValue)] ? [rawBid stringValue] : [NSString stringWithFormat:@"%@", rawBid ?: @""]);
+                    if (![rawBid isKindOfClass:NSString.class]) {
+                        userMutated = YES;
+                    }
+                    long long overTimeMs = [overTimeObj respondsToSelector:@selector(longLongValue)] ? [overTimeObj longLongValue] : 0;
+                    if (overTimeMs <= 0 || (nowMs - overTimeMs > 3600000)) {
+                        userMutated = YES;
+                    } else if (nowMs >= overTimeMs) {
+                        userMutated = YES;
+                        if (uid.length && bid.length) {
+                            [maturedList addObject:@{@"userId": uid, @"bubbleId": bid}];
+                        }
+                    } else if (bid.length) {
+                        userBubbles[bid] = @(overTimeMs);
+                    }
+                }
+                if (![rawUid isKindOfClass:NSString.class]) {
+                    [self.friendsBubbles removeObjectForKey:rawUid];
+                    userMutated = YES;
+                }
+                if (userBubbles.count > 0) {
+                    if (userMutated || entryDict.count != userBubbles.count) {
+                        self.friendsBubbles[uid] = userBubbles;
+                        didMutate = YES;
+                    }
+                } else {
+                    [self.friendsBubbles removeObjectForKey:rawUid];
+                    didMutate = YES;
+                }
+            }
+        }
+        if (didMutate) {
+            NSDictionary *snapshot = nil;
+            @synchronized (self) {
+                snapshot = [self.friendsBubbles copy];
+            }
+            if (snapshot) {
+                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+                    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:snapshot requiringSecureCoding:NO error:nil];
+                    if (data) {
+                        [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsBubbles"];
+                    }
+                });
+            }
+        }
+        if (maturedList.count > 0) {
+            NSMutableSet<NSString *> *queriedUsers = [NSMutableSet set];
+            for (NSDictionary *item in maturedList) {
+                NSString *uid = item[@"userId"];
+                NSString *bid = item[@"bubbleId"];
+                if (![uid isKindOfClass:NSString.class] || !uid.length || ![bid isKindOfClass:NSString.class] || !bid.length) continue;
+                NSString *friendName = [self friendDisplayNameForUser:uid];
+                NSString *targetDesc = [uid isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
+                [self recordStage:[NSString stringWithFormat:@"⚡️ 蹲点秒收：%@的等待能量球已到点成熟，立即触发毫秒级抢收！", targetDesc]];
+                dispatch_async(globalSerialQueueCollect, ^{
+                    [[AntForestManager sharedInstance] collectBubbles:uid bubblesId:bid];
+                });
+                if (![queriedUsers containsObject:uid]) {
+                    [queriedUsers addObject:uid];
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(300 * NSEC_PER_MSEC)), globalSerialQueueQuery, ^{
+                        if ([uid isEqualToString:self.myUserId]) {
+                            [[AntForestManager sharedInstance] queryMyBubbles];
+                        } else {
+                            [[AntForestManager sharedInstance] queryFriendsBubbles:uid];
+                        }
+                    });
+                }
+            }
+        }
+    } @catch (NSException *exception) {
+        NSLog(@"[AntForestPort] collectMaturedWaitingBubbles exception: %@", exception);
+    }
+}
+
 -(void)checkScheduledCollect {
+    [self checkAndResetTodayEnergyIfNeeded];
     if (!self.enableAutoCollect) return;
+    [self collectMaturedWaitingBubbles];
     
     NSDate *nowDate = [NSDate date];
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     formatter.dateFormat = @"HH:mm";
     NSString *time = [formatter stringFromDate:nowDate];
     formatter.dateFormat = @"yyyy-MM-dd HH:mm";
     NSString *minute = [formatter stringFromDate:nowDate];
     
     BOOL isScheduledTime = self.enableScheduledCollect && [self.scheduledTimes containsObject:time];
-    // 特别强化：早 07:00 作为蚂蚁森林全局能量成熟爆发期，无论用户是否在列表中添加，均在 07:00:00 准点全力触发极速冲刺
-    BOOL is7AmRush = [time isEqualToString:@"07:00"];
+    // 特别强化：早 07:00 ~ 07:30 作为蚂蚁森林全局能量成熟爆发黄金期，07:00 准点极速冲刺，并在 07:00~07:30 期间自动高频多波次补扫
+    BOOL is7AmExact = [time isEqualToString:@"07:00"];
+    BOOL isMorningPeakWave = NO;
+    if ([time hasPrefix:@"07:"]) {
+        NSInteger minVal = [[time substringFromIndex:3] integerValue];
+        if (minVal > 0 && minVal <= 30 && !self.isScanRunning) {
+            NSTimeInterval elapsedSinceLast = lastCollectStartedAt ? [nowDate timeIntervalSinceDate:lastCollectStartedAt] : 999.0;
+            if ((minVal % 2 == 0 && elapsedSinceLast >= 60.0) || elapsedSinceLast >= 110.0) {
+                isMorningPeakWave = YES;
+            }
+        }
+    }
     
-    if (!isScheduledTime && !is7AmRush) return;
+    if (!isScheduledTime && !is7AmExact && !isMorningPeakWave) return;
     if ([lastScheduledMinute isEqualToString:minute]) return;
     lastScheduledMinute = minute;
     
-    if (is7AmRush) {
+    if (is7AmExact) {
         [self recordStage:@"⚡️ 早间 07:00:00 黄金时段：启动全速秒级无延迟能量冲刺！"];
+        [self autoCollectBubblesWithRush:YES];
+    } else if (isMorningPeakWave) {
+        [self recordStage:[NSString stringWithFormat:@"⚡️ 早间黄金档（%@）：启动高频能量巡航抢收！", time]];
         [self autoCollectBubblesWithRush:YES];
     } else {
         [self recordStage:[NSString stringWithFormat:@"定时收取开始（%@）", time]];
@@ -1286,6 +1436,7 @@ NSString* getCurrentDateString() {
     
     // 创建日期格式化器
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     
     // 设置日期格式
     [formatter setDateFormat:@"yyyy-MM-dd"];
@@ -1300,6 +1451,7 @@ NSString* getCurrentDateTimeString() {
     
     // 创建日期格式化器
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    formatter.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
     
     // 设置日期格式
     [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
@@ -1345,11 +1497,25 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
     NSString *timeStamp = [NSString stringWithFormat:@"%ld",(long)[[NSDate  date] timeIntervalSince1970]*1000];
     NSString *randNum=[AntForestManager getNumberRandom:15];
     __block NSArray<NSString *> *visitedFriends = nil;
+    NSMutableDictionary *skipUsers = [NSMutableDictionary dictionary];
+    long long nowMs = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
     @synchronized (self) {
         visitedFriends = takeLookRunning ? takeLookVisitedFriends.allObjects : @[];
+        for (NSString *friendId in visitedFriends) {
+            if (friendId.length) skipUsers[friendId] = @YES;
+        }
+        if (sShieldedFriendsExpireMs.count > 0) {
+            NSArray<NSString *> *shieldKeys = [sShieldedFriendsExpireMs.allKeys copy];
+            for (NSString *suid in shieldKeys) {
+                long long expMs = [sShieldedFriendsExpireMs[suid] longLongValue];
+                if (expMs > nowMs) {
+                    skipUsers[suid] = @YES;
+                } else {
+                    [sShieldedFriendsExpireMs removeObjectForKey:suid];
+                }
+            }
+        }
     }
-    NSMutableDictionary *skipUsers = [NSMutableDictionary dictionaryWithCapacity:visitedFriends.count];
-    for (NSString *friendId in visitedFriends) skipUsers[friendId] = @YES;
     NSData *skipUsersData = [NSJSONSerialization dataWithJSONObject:skipUsers options:0 error:nil];
     NSString *skipUsersJSON = [[NSString alloc] initWithData:skipUsersData encoding:NSUTF8StringEncoding] ?: @"{}";
     NSString *callbackId = [NSString stringWithFormat:@"rpc_af_silent_takelook_%@.%@", timeStamp, randNum];
@@ -1357,7 +1523,7 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
     NSString *arg2 = @"https://render.alipay.com/p/yuyan/180020010001247580/home.html?__webview_options__=bc%3D3194732";
     
     if([self jsBridge]) {
-        [self recordStage:[NSString stringWithFormat:@"诊断 · 请求找能量续查：已跳过 %lu 位", (unsigned long)visitedFriends.count]];
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 请求找能量续查：已跳过 %lu 位", (unsigned long)skipUsers.count]];
         [self safeFlushBridge:[self jsBridge] message:arg1 url:arg2];
         //FileLog(@"anthook takeLook");
     }
@@ -1461,9 +1627,10 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
 -(void)advanceTakeLookForFriend:(NSString *)friendId {
     @synchronized (self) {
         if (!takeLookRunning) return;
-        if (friendId.length && takeLookCurrentFriendId.length && ![takeLookCurrentFriendId isEqualToString:friendId]) return;
+        if (friendId.length && (!takeLookCurrentFriendId.length || ![takeLookCurrentFriendId isEqualToString:friendId])) return;
         takeLookCurrentFriendId = nil;
         takeLookWaitingForFriend = NO;
+        self.lastScanStartTime = [[NSDate date] timeIntervalSince1970];
     }
     // 收取请求在全局串行队列中发送；以该队列的栅栏作为下一位候选的起点，避免与前一位的多颗气泡请求重叠。
     dispatch_async(globalSerialQueueCollect, ^{
@@ -1523,7 +1690,7 @@ static inline BOOL isStrictPkOperationName(NSString *opType) {
     if (now - lastLockLogTime > 300.0) {
         lastLockLogTime = now;
         NSString *aName = name.length ? name : (code.length ? code : @"巡护伙伴");
-        [self recordStage:[NSString stringWithFormat:@"保护地巡护 · %@今日能量已确认收取/不可收（%@），锁定单日防重", aName, reason ?: @"防重生效"]];
+        [self recordStage:[NSString stringWithFormat:@"诊断 · 保护地巡护 · %@今日能量已确认收取/不可收（%@），锁定单日防重", aName, reason ?: @"防重生效"]];
     }
 }
 
@@ -1885,17 +2052,24 @@ static NSMutableArray<NSDictionary *> *vitalityTaskQueue = nil;
 static BOOL vitalityTaskRunning = NO;
 static NSMutableSet<NSString *> *gDailyCompletedTasks = nil;
 static NSMutableSet<NSString *> *gDailyFailedTasks = nil;
+static NSMutableSet<NSString *> *gDailyLoggedClaimKeys = nil;
 static NSString *gDailyTaskDate = nil;
 static NSString *gCurrentExecutingTaskKey = nil;
+static NSString *gCurrentExecutingTaskTitle = nil;
+static NSString *gCurrentExecutingTaskAwardName = nil;
 static BOOL gCurrentExecutingTaskIsMultiStage = NO;
 static NSMutableDictionary<NSString *, NSNumber *> *gFarmTaskRetryCounts = nil;
 static NSMutableDictionary<NSString *, NSNumber *> *gVitalityTaskRetryCounts = nil;
 
 static void initDailyTaskCache(void) {
     NSString *today = getCurrentDateString();
+    if (!gDailyLoggedClaimKeys) {
+        gDailyLoggedClaimKeys = [NSMutableSet set];
+    }
     if (![gDailyTaskDate isEqualToString:today] || !gDailyCompletedTasks || !gDailyFailedTasks) {
         BOOL isCrossDay = (gDailyTaskDate.length > 0 && ![gDailyTaskDate isEqualToString:today]);
         gDailyTaskDate = today;
+        [gDailyLoggedClaimKeys removeAllObjects];
         if (!gFarmTaskRetryCounts) {
             gFarmTaskRetryCounts = [NSMutableDictionary dictionary];
         } else {
@@ -1923,6 +2097,8 @@ static void initDailyTaskCache(void) {
             }
             vitalityTaskRunning = NO;
             gCurrentExecutingTaskKey = nil;
+            gCurrentExecutingTaskTitle = nil;
+            gCurrentExecutingTaskAwardName = nil;
             gCurrentExecutingTaskIsMultiStage = NO;
             [defaults setObject:today forKey:@"vitality_task_cache_date"];
             [defaults setObject:@[] forKey:@"vitality_daily_completed"];
@@ -2560,7 +2736,7 @@ static BOOL isSafeFarmTask(NSString *taskType, NSString *title) {
         bridge = self.jsBridge ?: self.oceanBridge ?: self.aiFishBridge ?: self.farmBridge ?: self.monopolyBridge ?: self.lotteryBridge;
     }
     if (!self.enableAutoRewardTasks || !bridge) {
-        if (self.enableAutoRewardTasks) [self recordStage:@"首页后台：等待领奖励任务桥接"];
+        if (self.enableAutoRewardTasks) [self recordStage:@"诊断 · 首页后台：等待领奖励任务桥接"];
         return;
     }
     initDailyTaskCache();
@@ -3444,6 +3620,8 @@ static void silentlyPrefetchTaskUrl(NSString *jumpUrl) {
             
             NSString *taskKey = taskType.length ? [NSString stringWithFormat:@"%@:%@", sceneCode, taskType] : nil;
             gCurrentExecutingTaskKey = taskKey;
+            gCurrentExecutingTaskTitle = title;
+            gCurrentExecutingTaskAwardName = awardName;
             BOOL isMultiIncomplete = isMultiStageIncompleteTask(title, 0, 0) || [item[@"isMultiStage"] boolValue];
             gCurrentExecutingTaskIsMultiStage = isMultiIncomplete;
             
@@ -3451,7 +3629,7 @@ static void silentlyPrefetchTaskUrl(NSString *jumpUrl) {
                 BOOL isDone = NO;
                 @synchronized(self) {
                     if (!isMultiIncomplete) {
-                        if (![action isEqualToString:@"receive"] && [gDailyFailedTasks containsObject:taskKey]) {
+                        if ([gDailyFailedTasks containsObject:taskKey]) {
                             isDone = YES;
                         } else if (![action isEqualToString:@"receive"] && [gDailyCompletedTasks containsObject:taskKey] && !isFarmScene) {
                             // 农场任务在服务端确认已领取前不以本地缓存阻断
@@ -3564,7 +3742,7 @@ static void silentlyPrefetchTaskUrl(NSString *jumpUrl) {
                 NSString *jumpUrl = [item[@"jumpUrl"] isKindOfClass:NSString.class] ? [item[@"jumpUrl"] copy] : @"";
                 NSInteger seconds = [item[@"browseSeconds"] respondsToSelector:@selector(integerValue)] ? [item[@"browseSeconds"] integerValue] : 15;
                 if (seconds <= 0) seconds = 15;
-                [self recordStage:[NSString stringWithFormat:@"%@：正在后台自动执行“%@”（type=%@, 保持运行 %ld 秒）...", scenePrefix, title, taskType, (long)seconds]];
+                [self recordStage:[NSString stringWithFormat:@"%@：正在执行“%@”（浏览 %ld 秒）...", scenePrefix, title, (long)seconds]];
                 
                 if (taskKey.length) {
                     @synchronized(self) {
@@ -3659,8 +3837,14 @@ static void silentlyPrefetchTaskUrl(NSString *jumpUrl) {
                         gVitalityTaskRetryCounts[taskKey] = @(curr + 1);
                     }
                 }
-                [self recordStage:[NSString stringWithFormat:@"%@：正在提交领取“%@”（%@）...", scenePrefix, title, awardName]];
-                [self receiveVitalityTaskAward:taskType sceneCode:sceneCode taskTitle:title awardName:awardName];
+                BOOL isRawAccTitle = [title containsString:@"#"] || [title hasPrefix:@"acc_"] || [title hasPrefix:@"ANTFOREST_"];
+                NSString *displayTitle = (isAcc || [scenePrefix isEqualToString:@"阶梯大奖"]) ? ((isRawAccTitle || !title.length) ? @"今日累计阶梯奖励" : title) : title;
+                if ([scenePrefix isEqualToString:@"阶梯大奖"]) {
+                    [self recordStage:[NSString stringWithFormat:@"阶梯大奖：正在领取%@（%@）...", displayTitle, awardName]];
+                } else {
+                    [self recordStage:[NSString stringWithFormat:@"%@：正在领取“%@”（%@）...", scenePrefix, displayTitle, awardName]];
+                }
+                [self receiveVitalityTaskAward:taskType sceneCode:sceneCode taskTitle:displayTitle awardName:awardName];
             }
             
             double delaySec = 1.0 + (arc4random_uniform(800) / 1000.0);
@@ -3995,37 +4179,55 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
         if (isTaskExecOp) {
             BOOL isSuccess = [resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"1000"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] || [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"];
             if (!isSuccess && ![resCode isEqualToString:@"400000040"] && resCode.length) {
-                [self recordStage:[NSString stringWithFormat:@"领奖励·执行回包：%@ (code=%@, desc=%@)", opType, resCode ?: @"-", resDesc ?: @"-"]];
+                NSLog(@"[AntForestPort] 领奖励·执行回包：%@ (code=%@, desc=%@)", opType, resCode ?: @"-", resDesc ?: @"-");
             }
         }
         
         BOOL isRightsSuccess = [data[@"provideRightsSuccess"] boolValue] || [args[@"provideRightsSuccess"] boolValue] || [data[@"incAwardCount"] integerValue] > 0 || [args[@"incAwardCount"] integerValue] > 0 || (data[@"taskConfigResultVO"] != nil && [data[@"success"] boolValue]);
-        if (receiveVO != nil || isRightsSuccess || [opType containsString:@"receiveTaskAward"] || [opType containsString:@"receive"] || [resDesc containsString:@"任务已完结"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"] || [resDesc containsString:@"无法重复领取"] || finishHasNoNextStage) {
+        BOOL hasExplicitTaskRespFields = (receiveVO != nil || finishVO != nil || isRightsSuccess || data[@"code"] != nil || args[@"code"] != nil);
+        if (hasExplicitTaskRespFields && (receiveVO != nil || isRightsSuccess || [opType containsString:@"receiveTaskAward"] || [opType containsString:@"receive"] || [resDesc containsString:@"任务已完结"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"] || [resDesc containsString:@"无法重复领取"] || finishHasNoNextStage)) {
             if ([resCode isEqualToString:@"100000000"] || [resCode isEqualToString:@"1000"] || [resCode isEqualToString:@"400000030"] || [resCode isEqualToString:@"400000005"] || [resCode isEqualToString:@"400000012"] || [resCode isEqualToString:@"B000000008"] || [resCode isEqualToString:@"SUCCESS"] || [data[@"success"] boolValue] || [args[@"success"] boolValue] ||
                 [resDesc containsString:@"处理成功"] || [resDesc containsString:@"成功"] || [resDesc containsString:@"超过上限"] || [resDesc containsString:@"无法重复领取"] || [resDesc containsString:@"已完结"] || [resDesc containsString:@"已领取"] || isRightsSuccess) {
+                if ([self.lastRpcOperationType containsString:@"receiveTaskAward"] || [self.lastRpcOperationType containsString:@"finishTask"]) {
+                    self.lastRpcOperationType = nil;
+                }
                 if (resolvedKey.length) {
+                    BOOL shouldLogClaimSuccess = NO;
                     @synchronized(self) {
                         if (gCurrentExecutingTaskIsMultiStage && ![resDesc containsString:@"已完结"] && ![resDesc containsString:@"超过上限"] && !finishHasNoNextStage) {
                             // 多阶段任务本轮领奖成功，但未彻底做满全部次数，严禁锁入今日完成缓存，并主动移除
                             [gDailyCompletedTasks removeObject:resolvedKey];
+                            shouldLogClaimSuccess = YES;
                         } else {
                             [gDailyCompletedTasks addObject:resolvedKey];
+                            if (![gDailyLoggedClaimKeys containsObject:resolvedKey]) {
+                                [gDailyLoggedClaimKeys addObject:resolvedKey];
+                                shouldLogClaimSuccess = YES;
+                            }
                         }
                         [gVitalityTaskRetryCounts removeObjectForKey:resolvedKey];
                         saveDailyTaskCache();
                     }
-                    NSString *moduleTag = ([resolvedKey containsString:@"FARM"] || [resolvedKey containsString:@"ORCHARD"]) ? @"芭芭农场" : (([resolvedKey containsString:@"DRAW"] || [resolvedKey containsString:@"LOTTERY"]) ? @"森林寻宝" : (([resolvedKey containsString:@"MONOPOLY"] || [resolvedKey containsString:@"HSDWY"]) ? @"新版保护地" : (([resolvedKey containsString:@"RESCUE"] || [resolvedKey containsString:@"OCEAN"]) ? @"神奇海洋" : ([resolvedKey containsString:@"AIFISH"] ? @"AI摸鱼" : @"领奖励"))));
-                    if (isRightsSuccess) {
-                        NSDictionary *tcVO = [data[@"taskConfigResultVO"] isKindOfClass:NSDictionary.class] ? data[@"taskConfigResultVO"] : ([args[@"taskConfigResultVO"] isKindOfClass:NSDictionary.class] ? args[@"taskConfigResultVO"] : nil);
-                        NSString *awardType = tcVO[@"awardType"] ?: @"";
-                        NSInteger count = [data[@"incAwardCount"] integerValue] ?: [args[@"incAwardCount"] integerValue];
-                        if ([awardType isEqualToString:@"LUCKY_DRAW"] || [awardType containsString:@"DRAW"]) {
-                            [self recordStage:[NSString stringWithFormat:@"%@：服务端已确认领取成功（获得 %ld 次抽奖机会）", moduleTag, (long)(count > 0 ? count : 1)]];
+                    if (shouldLogClaimSuccess) {
+                        NSString *moduleTag = ([resolvedKey containsString:@"FARM"] || [resolvedKey containsString:@"ORCHARD"]) ? @"芭芭农场" : (([resolvedKey containsString:@"DRAW"] || [resolvedKey containsString:@"LOTTERY"]) ? @"森林寻宝" : (([resolvedKey containsString:@"MONOPOLY"] || [resolvedKey containsString:@"HSDWY"]) ? @"新版保护地" : (([resolvedKey containsString:@"RESCUE"] || [resolvedKey containsString:@"OCEAN"]) ? @"神奇海洋" : ([resolvedKey containsString:@"AIFISH"] ? @"AI摸鱼" : ([resolvedKey containsString:@"acc_task"] ? @"阶梯大奖" : @"领奖励")))));
+                        if (isRightsSuccess) {
+                            NSDictionary *tcVO = [data[@"taskConfigResultVO"] isKindOfClass:NSDictionary.class] ? data[@"taskConfigResultVO"] : ([args[@"taskConfigResultVO"] isKindOfClass:NSDictionary.class] ? args[@"taskConfigResultVO"] : nil);
+                            NSString *awardType = tcVO[@"awardType"] ?: @"";
+                            NSInteger count = [data[@"incAwardCount"] integerValue] ?: [args[@"incAwardCount"] integerValue];
+                            if ([awardType isEqualToString:@"LUCKY_DRAW"] || [awardType containsString:@"DRAW"]) {
+                                [self recordStage:[NSString stringWithFormat:@"%@：服务端已确认领取成功（获得 %ld 次抽奖机会）", moduleTag, (long)(count > 0 ? count : 1)]];
+                            } else if ([moduleTag isEqualToString:@"阶梯大奖"] && count > 0) {
+                                [self recordStage:[NSString stringWithFormat:@"阶梯大奖：已领取今日累计阶梯奖励（+%ld g 能量）", (long)count]];
+                            } else if (gCurrentExecutingTaskTitle.length && ![gCurrentExecutingTaskTitle containsString:@"#"] && ![gCurrentExecutingTaskTitle hasPrefix:@"acc_"]) {
+                                [self recordStage:[NSString stringWithFormat:@"%@：已领取“%@”奖励", moduleTag, gCurrentExecutingTaskTitle]];
+                            } else {
+                                [self recordStage:[NSString stringWithFormat:@"%@：服务端已确认领取成功", moduleTag]];
+                            }
+                        } else if (gCurrentExecutingTaskTitle.length && ![gCurrentExecutingTaskTitle containsString:@"#"] && ![gCurrentExecutingTaskTitle hasPrefix:@"acc_"]) {
+                            [self recordStage:[NSString stringWithFormat:@"%@：已领取“%@”奖励", moduleTag, gCurrentExecutingTaskTitle]];
                         } else {
                             [self recordStage:[NSString stringWithFormat:@"%@：服务端已确认领取成功", moduleTag]];
                         }
-                    } else {
-                        [self recordStage:[NSString stringWithFormat:@"%@：服务端已确认领取成功", moduleTag]];
                     }
                 }
             }
@@ -4101,7 +4303,7 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                 // 旧版 antiep RPC 对导流/浏览/淘宝类任务不支持直接调用属于正常回包，已被 OpenGreen 覆盖，严禁误将任务加入失败黑名单
                 return;
             }
-            NSString *moduleTag = ([resolvedKey containsString:@"FARM"] || [resolvedKey containsString:@"ORCHARD"]) ? @"芭芭农场" : (([resolvedKey containsString:@"DRAW"] || [resolvedKey containsString:@"LOTTERY"]) ? @"森林寻宝" : (([resolvedKey containsString:@"MONOPOLY"] || [resolvedKey containsString:@"HSDWY"]) ? @"新版保护地" : (([resolvedKey containsString:@"RESCUE"] || [resolvedKey containsString:@"OCEAN"]) ? @"神奇海洋" : ([resolvedKey containsString:@"AIFISH"] ? @"AI摸鱼" : @"任务中心"))));
+            NSString *moduleTag = ([resolvedKey containsString:@"FARM"] || [resolvedKey containsString:@"ORCHARD"]) ? @"芭芭农场" : (([resolvedKey containsString:@"DRAW"] || [resolvedKey containsString:@"LOTTERY"]) ? @"森林寻宝" : (([resolvedKey containsString:@"MONOPOLY"] || [resolvedKey containsString:@"HSDWY"]) ? @"新版保护地" : (([resolvedKey containsString:@"RESCUE"] || [resolvedKey containsString:@"OCEAN"]) ? @"神奇海洋" : ([resolvedKey containsString:@"AIFISH"] ? @"AI摸鱼" : @"领奖励"))));
             BOOL alreadyFailed = NO;
             if (resolvedKey.length) {
                 @synchronized(self) {
@@ -4109,11 +4311,25 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                     [gDailyFailedTasks addObject:resolvedKey];
                     [gVitalityTaskRetryCounts removeObjectForKey:resolvedKey];
                     [gFarmTaskRetryCounts removeObjectForKey:resolvedKey];
+                    if (vitalityTaskQueue.count > 0) {
+                        NSMutableIndexSet *toRemove = [NSMutableIndexSet indexSet];
+                        for (NSUInteger qi = 0; qi < vitalityTaskQueue.count; qi++) {
+                            NSDictionary *qItem = vitalityTaskQueue[qi];
+                            NSString *qk = [NSString stringWithFormat:@"%@:%@", qItem[@"sceneCode"] ?: @"", qItem[@"taskType"] ?: @""];
+                            if ([qk isEqualToString:resolvedKey]) {
+                                [toRemove addIndex:qi];
+                            }
+                        }
+                        if (toRemove.count > 0) {
+                            [vitalityTaskQueue removeObjectsAtIndexes:toRemove];
+                        }
+                    }
                     saveDailyTaskCache();
                 }
             }
             if (!alreadyFailed) {
-                [self recordStage:[NSString stringWithFormat:@"%@ · 当前任务需在对应界面手动操作完成（服务端不支持直接调用）", moduleTag]];
+                NSString *displayTitle = (gCurrentExecutingTaskTitle.length && ![gCurrentExecutingTaskTitle containsString:@"#"]) ? [NSString stringWithFormat:@"“%@”", gCurrentExecutingTaskTitle] : @"当前任务";
+                [self recordStage:[NSString stringWithFormat:@"%@：%@需手动交互完成，已自动跳过", moduleTag, displayTitle]];
             }
         }
         
@@ -4489,11 +4705,13 @@ static NSInteger extractTaskBrowseSeconds(NSDictionary *baseInfo, NSDictionary *
                         }
                     }
                     if (!alreadyInAccQueue) {
+                        BOOL isRawIdTitle = [taskTitle isEqualToString:taskType] || [taskTitle containsString:@"#"] || [taskTitle hasPrefix:@"acc_"] || [taskTitle hasPrefix:@"ANTFOREST_"];
+                        NSString *cleanAccTitle = (!isRawIdTitle && taskTitle.length) ? taskTitle : @"今日累计阶梯奖励";
                         [accTasks addObject:@{
                             @"action": @"receive",
                             @"taskType": taskType,
                             @"sceneCode": sceneCode,
-                            @"title": taskTitle.length ? taskTitle : [NSString stringWithFormat:@"今日累计阶梯奖励（%ldg）", (long)awardCount],
+                            @"title": cleanAccTitle,
                             @"awardName": (awardCount > 0) ? [NSString stringWithFormat:@"%ldg 能量", (long)awardCount] : @"阶梯能量",
                             @"isAcc": @YES
                         }];
@@ -6894,11 +7112,13 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
 -(void)autoCollectBubblesWithRush:(BOOL)isRush {
     @try {
+        [self checkAndResetTodayEnergyIfNeeded];
         [self probeAndRestoreBridges];
         if (!self.enableAutoCollect || (!self.jsBridge && !self.oceanBridge)) {
             [self recordStage:[NSString stringWithFormat:@"诊断 · 收取未启动：自动收取=%d，森林桥接=%d，海洋桥接=%d", self.enableAutoCollect, self.jsBridge != nil, self.oceanBridge != nil]];
             return;
         }
+        [self collectMaturedWaitingBubbles];
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         if (self.isScanRunning) {
             if (self.lastScanStartTime > 0 && now - self.lastScanStartTime > 30.0) {
@@ -6926,9 +7146,11 @@ static BOOL oceanPlanLoggedThisRound = NO;
         self.isScanRunning = YES;
         
         NSDateFormatter *hourFmt = [[NSDateFormatter alloc] init];
+        hourFmt.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
         hourFmt.dateFormat = @"HH:mm";
         NSString *currentHHmm = [hourFmt stringFromDate:[NSDate date]];
-        BOOL isMorningRush = isRush || [currentHHmm isEqualToString:@"07:00"];
+        NSInteger currentMinVal = currentHHmm.length >= 5 ? [[currentHHmm substringFromIndex:3] integerValue] : -1;
+        BOOL isMorningRush = isRush || ([currentHHmm hasPrefix:@"07:"] && currentMinVal >= 0 && currentMinVal <= 35);
 
         oceanCleanedInCurrentRound = 0;
         oceanPlanLoggedThisRound = NO;
@@ -6963,9 +7185,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
         }
         [shieldReportedFriendsInRound removeAllObjects];
-        [self recordStage:isMorningRush ? @"⚡️ 早间 07:00 黄金时段：全速全量扫描好友能量" : @"本轮扫描开始"];
+        [self recordStage:isMorningRush ? @"⚡️ 早间黄金时段：全速全量扫描好友能量" : @"本轮扫描开始"];
 
-        // 1. 发起全量好友排行榜查询（早间 07:00 黄金时段绝对 0 延迟秒级触发！）
+        // 1. 发起全量好友排行榜查询（早间黄金时段绝对 0 延迟秒级触发！）
         static NSDate *lastRankFetchedDate = nil;
         BOOL isAppInBackground = ([UIApplication sharedApplication].applicationState != UIApplicationStateActive);
         BOOL hasCooldownPassed = (!lastRankFetchedDate || [[NSDate date] timeIntervalSinceDate:lastRankFetchedDate] > 120);
@@ -7181,40 +7403,13 @@ static BOOL oceanPlanLoggedThisRound = NO;
 //自动收集能量每分钟执行一次
 -(void)autoCollectBubblesOld{
     @try {
-        //1.takeLook 也就是找到一个有能量球的好友 然后查询到这个人的所有能量球(queryFriendBubbles) 能收集的直接一键收集 不能收集的按 uid->bid->{} 存储到 friendBubbles 字典中
         [self takeLook];
-        //延时两秒
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            //2.遍历字典树 friendBubbles 中 能领取的执行领取 领取完需要从字典树中移出
-            // FileLog(@"anthook friendBubbles: %@",[[AntForestManager sharedInstance] friendsBubbles]);
-            NSMutableDictionary *fb = [[AntForestManager sharedInstance] friendsBubbles];
-            for(NSString *uid in fb){
-                NSMutableDictionary *dict = [fb objectForKey:uid];
-                for(NSString *bid in dict) {
-                    NSString *overTime = [dict objectForKey:bid]; // 假设获取到的时间戳是字符串类型
-                    long long overTimeValue = [overTime longLongValue];
-                    // 获取当前时间的毫秒数
-                    long long currentTime = (long long)([[NSDate date] timeIntervalSince1970] * 1000);
-                    if(overTimeValue < currentTime){
-                        //可以执行领取
-                        NSString *friendName = [self friendDisplayNameForUser:uid];
-                        NSString *targetDesc = [uid isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
-                        [self recordStage:[NSString stringWithFormat:@"拾取%@定时成熟的能量球", targetDesc]];
-                        [[AntForestManager sharedInstance] collectBubbles:uid bubblesId:bid];
-                        [dict removeObjectForKey:bid]; //从字典树中移除
-                    } else {
-                        //可以考虑做个开关是否展示 数量有点多 更新频繁
-                        //NSString *log = [NSString stringWithFormat:@"%@\n能量球等待中: %@|%@",[[AntForestManager sharedInstance] getUserName:uid],bid,convertTimestampToDateString(overTimeValue)];
-                        //[[AntForestManager sharedInstance] addLog:log];
-                    }
-                }
-            }
-            //主要是更新标题 失败次数与当前时间间隔
+            [self collectMaturedWaitingBubbles];
             self.failedTimes++;
             [[NSNotificationCenter defaultCenter] postNotificationName:@"LogUpdated" object:nil];
         });
     } @catch (NSException *exception) {
-        // 捕获异常的代码
         FileLog(@"Exception caught: %@", exception);
         [Tool Alert:[exception description]];
     }
@@ -7313,6 +7508,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
         }
         if (!energy || energy.integerValue <= 0 || energy.integerValue > 2000) continue;
+        if (!bubble[@"id"] && !isAnimalEnergy) continue;
         NSString *userId = [bubble[@"userId"] description] ?: (self.myUserId ?: @"");
         NSString *bubbleId = [bubble[@"id"] description] ?: (isAnimalEnergy ? [NSString stringWithFormat:@"SETTLE_%ld_%ld", (long)[[NSDate date] timeIntervalSince1970], (long)energy.integerValue] : @"");
         NSString *respId = [NSString stringWithFormat:@"%@", rootDict[@"responseId"] ?: (rootDict[@"callbackId"] ?: @"")];
@@ -7329,11 +7525,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 [pendingCollectBubbles removeObject:[NSString stringWithFormat:@"%@:%@", userId, bubbleId]];
             }
         }
+        [self checkAndResetTodayEnergyIfNeeded];
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
-            self.todayCollectedEnergy = 0;
-            [defaults setObject:getCurrentDateString() forKey:@"todayCollectedEnergyDate"];
-        }
         self.totalCollectedEnergy += energy.integerValue;
         self.todayCollectedEnergy += energy.integerValue;
         [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
@@ -7585,17 +7778,21 @@ static BOOL oceanPlanLoggedThisRound = NO;
                                      ![opType containsString:@"Challenge"] &&
                                      ![opType.lowercaseString containsString:@"pk"];
 
-            // 1. 最高优先级保护：用户手动交互 PK 榜/黄金PK赛/排位赛/1v1能量挑战赛，必须优先识别并直接拦截返回！
+            // 1. 最高优先级保护：用户手动交互 PK 榜（青铜/白银/黄金/铂金/钻石/王者各段位）/排位赛/1v1能量挑战赛及下滑分页 fillUserRobFlag，必须优先识别并直接拦截返回！
             NSString *opTypeLower = [opType lowercaseString];
             NSArray *firstRankList = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : ([dict[@"friendRanking"] isKindOfClass:NSArray.class] ? dict[@"friendRanking"] : nil);
             NSDictionary *firstRankItem = ([firstRankList.firstObject isKindOfClass:NSDictionary.class]) ? firstRankList.firstObject : nil;
-            BOOL hasFirstItemPkFields = (firstRankItem[@"challengeExpectedSettlementResult"] != nil || firstRankItem[@"challengeRankLevel"] != nil);
+            BOOL hasTotalDatas = (resData[@"totalDatas"] != nil || dict[@"totalDatas"] != nil);
+            BOOL hasFirstItemPkFields = (firstRankItem[@"challengeExpectedSettlementResult"] != nil ||
+                                         firstRankItem[@"challengeRankLevel"] != nil ||
+                                         (!hasTotalDatas && firstRankItem && [firstRankItem[@"rank"] integerValue] < 0));
             BOOL isPkOrPvp = !isOurSilentRpc && !isHomePagePayload && !isTaskListPayload && (
                               isStrictPkOperationName(opType) ||
                               [opTypeLower containsString:@"pk"] ||
                               [opTypeLower containsString:@"pvp"] ||
                               [opTypeLower containsString:@"challenge"] ||
                               [opTypeLower containsString:@"arena"] ||
+                              [opTypeLower containsString:@"filluserrobflag"] ||
                               hasFirstItemPkFields ||
                               resData[@"currentEnergyPvpBattleRecord"] != nil || dict[@"currentEnergyPvpBattleRecord"] != nil ||
                               resData[@"previousEnergyPvpBattleRecord"] != nil || dict[@"previousEnergyPvpBattleRecord"] != nil ||
@@ -7611,6 +7808,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
                               resData[@"rankDisplayParamsVO"] != nil || dict[@"rankDisplayParamsVO"] != nil ||
                               resData[@"dynamicPromoteVO"] != nil || dict[@"dynamicPromoteVO"] != nil ||
                               resData[@"promoteLineEnergy"] != nil || dict[@"promoteLineEnergy"] != nil ||
+                              resData[@"keepLineEnergy"] != nil || dict[@"keepLineEnergy"] != nil ||
+                              resData[@"demoteLineEnergy"] != nil || dict[@"demoteLineEnergy"] != nil ||
+                              resData[@"relegateLineEnergy"] != nil || dict[@"relegateLineEnergy"] != nil ||
                               resData[@"nextRankLevelName"] != nil || dict[@"nextRankLevelName"] != nil ||
                               resData[@"promoteCount"] != nil || dict[@"promoteCount"] != nil ||
                               resData[@"extendInfo"][@"rankHeadPortraitVOS"] != nil || dict[@"extendInfo"][@"rankHeadPortraitVOS"] != nil ||
@@ -7624,7 +7824,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
 
             if (isPkOrPvp) {
                 self.lastPkInteractionTime = [[NSDate date] timeIntervalSince1970];
-                // 用户在前端 H5 手动交互 PK 榜/黄金PK赛/排位赛/挑战赛：
+                // 用户在前端 H5 手动交互 PK 榜/排位赛/挑战赛：
                 // 保持前端视图完全独立，绝不触发后台气泡匹配、任务刷新、签到、巡护等一切侧链逻辑，彻底杜绝死锁与卡顿！
                 [self recordStage:@"诊断 · 捕获PK/排位赛交互回包，保持前端视图独立，跳过自动化逻辑"];
                 return;
@@ -7645,6 +7845,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     !resData[@"rankDisplayParamsVO"] && !dict[@"rankDisplayParamsVO"] &&
                     !resData[@"dynamicPromoteVO"] && !dict[@"dynamicPromoteVO"] &&
                     !resData[@"promoteLineEnergy"] && !dict[@"promoteLineEnergy"] &&
+                    !resData[@"keepLineEnergy"] && !dict[@"keepLineEnergy"] &&
+                    !resData[@"demoteLineEnergy"] && !dict[@"demoteLineEnergy"] &&
+                    !resData[@"relegateLineEnergy"] && !dict[@"relegateLineEnergy"] &&
                     !resData[@"nextRankLevelName"] && !dict[@"nextRankLevelName"] &&
                     !resData[@"promoteCount"] && !dict[@"promoteCount"] &&
                     !resData[@"extendInfo"][@"rankHeadPortraitVOS"] && !dict[@"extendInfo"][@"rankHeadPortraitVOS"] &&
@@ -7664,7 +7867,8 @@ static BOOL oceanPlanLoggedThisRound = NO;
             BOOL isSignDateStr = (signStr.length >= 8 && signStr.length <= 15 && [signStr containsString:@"-"]);
             BOOL isSignResp = (([opType containsString:@"antiep.sign"] || [self.lastRpcOperationType containsString:@"antiep.sign"]) && isSignDateStr);
             BOOL isManualRankRpc = (!isOurSilentRpc && (resData[@"friendRanking"] != nil || resData[@"totalDatas"] != nil || dict[@"friendRanking"] != nil || dict[@"totalDatas"] != nil || isPkOrPvp));
-            if (![AntForestManager isManorResponse:args] && ![opType containsString:@"antocean"] && !isManualRankRpc) {
+            BOOL isForestBubbleOrRankResp = isHomePagePayload || hasPureRankData || resData[@"failedBubbleIds"] != nil || dict[@"failedBubbleIds"] != nil || resData[@"friendId"] != nil || dict[@"friendId"] != nil;
+            if (![AntForestManager isManorResponse:args] && ![opType containsString:@"antocean"] && !isManualRankRpc && !isForestBubbleOrRankResp) {
                 if (resData[@"forestTasksNew"] || resData[@"energySignVO"] || resData[@"forestSignVOList"] || dict[@"forestSignVOList"] || resData[@"forestSignVO"] || dict[@"forestSignVO"] || resData[@"signModel"] || dict[@"signModel"] || taskInfoList || resData[@"taskList"] || dict[@"taskList"] || resData[@"drawAsset"] || resData[@"drawEntranceVO"] || resData[@"drawActivity"] || resData[@"drawPrize"] || resData[@"drawPrizes"] || resData[@"finishAwardResultVO"] || resData[@"receiveAwardResultVO"] || resData[@"awardResultVO"] || resData[@"finishVO"] || isSignResp || [opType containsString:@"antiep"] || [opType containsString:@"queryTaskList"] || [opType containsString:@"queryCommonSign"] || [opType containsString:@"finishTask"] || [opType containsString:@"receiveTaskAward"] || [opType containsString:@"draw"] || [opType containsString:@"exchangeVitality"] || [resData[@"code"] isEqualToString:@"400000040"] || [resData[@"code"] isEqualToString:@"400000004"] || [resData[@"code"] isEqualToString:@"400000030"] || [resData[@"code"] isEqualToString:@"B000000008"] || [resData[@"desc"] containsString:@"不支持rpc调用"] || [resData[@"desc"] containsString:@"无法领取"] || [dict[@"error"] integerValue] == 3000) {
                     [self handleVitalityTaskListResponse:dict];
                 }
@@ -7698,30 +7902,24 @@ static BOOL oceanPlanLoggedThisRound = NO;
             }
             NSString *resResultCode = [NSString stringWithFormat:@"%@", resData[@"resultCode"] ?: dict[@"resultCode"] ?: @""];
             NSString *resMemo = [NSString stringWithFormat:@"%@", resData[@"memo"] ?: dict[@"memo"] ?: resData[@"resultMsg"] ?: dict[@"resultMsg"] ?: @""];
-            BOOL isAnimalRpc = [opType containsString:@"collectMonopolyCreatureEnergy"] || 
+            BOOL isAnimalRpc = !resData[@"bubbles"] && !dict[@"bubbles"] && !resData[@"userCreatureVO"] && !dict[@"userCreatureVO"] && (
+                               [opType containsString:@"collectMonopolyCreatureEnergy"] || 
                                [opType containsString:@"collectAnimalRobEnergy"] ||
-                               resData[@"collectedEnergy"] != nil ||
-                               dict[@"collectedEnergy"] != nil ||
                                resData[@"creatureCode"] != nil ||
-                               dict[@"creatureCode"] != nil;
+                               dict[@"creatureCode"] != nil);
                                
             if (isAnimalRpc) {
                 NSString *respCode = resData[@"creatureCode"] ?: dict[@"creatureCode"];
-                BOOL isSuccess = ([resResultCode isEqualToString:@"SUCCESS"] || [resResultCode isEqualToString:@"100"] || [resData[@"success"] boolValue] || [dict[@"success"] boolValue] || collected > 0);
-                if (isSuccess) {
+                if (collected > 0) {
                     [self markAnimalEnergyCollectedTodayForCode:respCode name:@"" reason:@"收取成功回包"];
-                    NSInteger displayEnergy = (collected > 0) ? collected : 60;
+                    [self checkAndResetTodayEnergyIfNeeded];
                     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-                    if (![[defaults stringForKey:@"todayCollectedEnergyDate"] isEqualToString:getCurrentDateString()]) {
-                        self.todayCollectedEnergy = 0;
-                        [defaults setObject:getCurrentDateString() forKey:@"todayCollectedEnergyDate"];
-                    }
-                    self.totalCollectedEnergy += displayEnergy;
-                    self.todayCollectedEnergy += displayEnergy;
+                    self.totalCollectedEnergy += collected;
+                    self.todayCollectedEnergy += collected;
                     [defaults setInteger:self.totalCollectedEnergy forKey:@"totalCollectedEnergy"];
                     [defaults setInteger:self.todayCollectedEnergy forKey:@"todayCollectedEnergy"];
                     [defaults synchronize];
-                    [self recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护动物能量球已成功收取：%ldg（今日累计 %ldg）", (long)displayEnergy, (long)self.todayCollectedEnergy]];
+                    [self recordStage:[NSString stringWithFormat:@"收取 · 保护地巡护动物能量球已成功收取：%ldg（今日累计 %ldg）", (long)collected, (long)self.todayCollectedEnergy]];
                 } else if ([resResultCode isEqualToString:@"ENERGY_CAN_NOT_COLLECT"] || 
                            [resResultCode isEqualToString:@"ENERGY_HAS_COLLECTED"] || 
                            [resResultCode isEqualToString:@"ENERGY_NOT_EXIST"] ||
@@ -7762,6 +7960,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
             NSDictionary *dict = args;
             NSDictionary *resData = [dict[@"resData"] isKindOfClass:NSDictionary.class] ? dict[@"resData"] : nil;
             NSString *respId = [NSString stringWithFormat:@"%@", dict[@"responseId"] ?: (dict[@"callbackId"] ?: @"")];
+            NSString *opType = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: (self.lastRpcOperationType ?: @""))];
+            NSArray *firstRankList = [resData[@"friendRanking"] isKindOfClass:NSArray.class] ? resData[@"friendRanking"] : ([dict[@"friendRanking"] isKindOfClass:NSArray.class] ? dict[@"friendRanking"] : nil);
+            NSDictionary *firstRankItem = ([firstRankList.firstObject isKindOfClass:NSDictionary.class]) ? firstRankList.firstObject : nil;
             // 匹配 每日能量签到 (forestSignVOList 或 forestSignVO 或 signModel)
             NSArray *signList = [resData[@"forestSignVOList"] isKindOfClass:NSArray.class] ? resData[@"forestSignVOList"] : ([dict[@"forestSignVOList"] isKindOfClass:NSArray.class] ? dict[@"forestSignVOList"] : nil);
             if (!signList.count && [resData[@"forestSignVO"] isKindOfClass:NSDictionary.class]) {
@@ -7838,25 +8039,26 @@ static BOOL oceanPlanLoggedThisRound = NO;
             if(takeLookRunning && takeLookFriendId.length) {
                 NSString *friendId = takeLookFriendId;
                 if (![self consumeTakeLookFriend:friendId]) return;
-                NSMutableDictionary* fb = [[AntForestManager sharedInstance] friendsBubbles];
-                //如果字典树中没有
-                if(![fb objectForKey:friendId]){
-                    [fb setObject:[NSMutableDictionary dictionary] forKey:friendId];
-                    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fb requiringSecureCoding:NO error:nil];
-                    [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsBubbles"];
-                    [[NSUserDefaults standardUserDefaults] synchronize];
-                }
                 //继续查这个人的能量球
                 dispatch_async(globalSerialQueueQuery, ^{
                     [[AntForestManager sharedInstance] queryFriendsBubbles:friendId];
                 });
             }
-            // 匹配查询好的返回的所有能量球（兼容 userBaseInfo、userEnergy、loginUserBaseInfo 与 combineHandlerVOMap）
+            // 匹配查询好的返回的所有能量球（兼容 userBaseInfo、userEnergy、loginUserBaseInfo 与 combineHandlerVOMap，排除 collectEnergy 结算回包）
             id bubblesList = dict[@"bubbles"] ?: resData[@"bubbles"];
             id wateringBubblesList = dict[@"wateringBubbles"] ?: resData[@"wateringBubbles"];
             id userInfoMap = dict[@"userBaseInfo"] ?: resData[@"userBaseInfo"] ?: dict[@"loginUserBaseInfo"] ?: resData[@"loginUserBaseInfo"] ?: dict[@"userEnergy"] ?: resData[@"userEnergy"] ?: dict[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"] ?: resData[@"combineHandlerVOMap"][@"userInfo"][@"userBaseInfo"];
+            NSString *explicitBubbleOp = [NSString stringWithFormat:@"%@", dict[@"operationType"] ?: (resData[@"operationType"] ?: @"")];
+            BOOL isCollectBubbleResp = [respId containsString:@"af_silent_collect_"] ||
+                                       [explicitBubbleOp containsString:@"collectEnergy"] ||
+                                       resData[@"failedBubbleIds"] != nil || dict[@"failedBubbleIds"] != nil ||
+                                       resData[@"robExpandOverLimitToday"] != nil || dict[@"robExpandOverLimitToday"] != nil ||
+                                       ([bubblesList isKindOfClass:NSArray.class] && [(NSArray *)bubblesList count] > 0 &&
+                                        [[(NSArray *)bubblesList firstObject] isKindOfClass:NSDictionary.class] &&
+                                        [(NSArray *)bubblesList firstObject][@"collectedEnergy"] != nil &&
+                                        [(NSArray *)bubblesList firstObject][@"collectStatus"] == nil);
             
-            if((bubblesList || wateringBubblesList) && userInfoMap) {
+            if(!isCollectBubbleResp && (bubblesList || wateringBubblesList) && userInfoMap) {
                 // 1. 提取登录账户 UID (loginUserBaseInfo 恒等于当前登录用户)
                 NSString *loginUid = dict[@"loginUserBaseInfo"][@"userId"] ?: resData[@"loginUserBaseInfo"][@"userId"];
                 if (loginUid.length) {
@@ -7931,6 +8133,19 @@ static BOOL oceanPlanLoggedThisRound = NO;
                             NSString *type = [dic objectForKey:@"type"] ?: [dic objectForKey:@"propGroup"] ?: @"";
                             if ([type containsString:@"Shield"] || [type containsString:@"shield"]) {
                                 [self recordStage:@"诊断 · 好友气泡回包：检测到保护罩，跳过该好友"];
+                                if (userId.length) {
+                                    long long nowMs = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
+                                    long long endMs = [dic[@"endTime"] respondsToSelector:@selector(longLongValue)] ? [dic[@"endTime"] longLongValue] : 0;
+                                    if (endMs <= nowMs || endMs - nowMs > 86400000LL) {
+                                        endMs = nowMs + 1800000LL;
+                                    }
+                                    @synchronized (self) {
+                                        if (!sShieldedFriendsExpireMs) {
+                                            sShieldedFriendsExpireMs = [NSMutableDictionary dictionary];
+                                        }
+                                        sShieldedFriendsExpireMs[userId] = @(endMs);
+                                    }
+                                }
                                 static dispatch_once_t onceToken;
                                 dispatch_once(&onceToken, ^{
                                     if (!shieldReportedFriendsInRound) {
@@ -8053,14 +8268,21 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
                 // 初始化一个空的可变数组
                 NSMutableArray *bidArr = [NSMutableArray array];
+                BOOL waitingBubblesUpdated = NO;
                 for (NSDictionary *bubble in dictBubbles) {
-                    NSString *bUserId = [bubble objectForKey:@"userId"] ?: userId;
-                    NSString *bid = [bubble objectForKey:@"id"];
-                    NSString *overTime = [bubble objectForKey:@"overTime"];
-                    NSString *remainEnergy = [bubble objectForKey:@"remainEnergy"];
+                    if (![bubble isKindOfClass:NSDictionary.class]) continue;
+                    id rawBUserId = [bubble objectForKey:@"userId"];
+                    NSString *bUserId = ([rawBUserId isKindOfClass:NSString.class] && [(NSString *)rawBUserId length] > 0) ? (NSString *)rawBUserId : ([rawBUserId respondsToSelector:@selector(stringValue)] ? [rawBUserId stringValue] : nil);
+                    if (!bUserId.length) {
+                        bUserId = [userId isKindOfClass:NSString.class] ? userId : ([userId respondsToSelector:@selector(stringValue)] ? [(id)userId stringValue] : @"");
+                    }
+                    id rawBid = [bubble objectForKey:@"id"];
+                    NSString *bid = [rawBid isKindOfClass:NSString.class] ? (NSString *)rawBid : ([rawBid respondsToSelector:@selector(stringValue)] ? [rawBid stringValue] : nil);
+                    id overTime = [bubble objectForKey:@"overTime"];
+                    id remainEnergy = [bubble objectForKey:@"remainEnergy"];
                     
                     //可收取直接收取
-                    if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"]){
+                    if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"AVAILABLE"] && bUserId.length && bid.length){
                         [bidArr addObject:bid];
                         NSString *friendName = [self friendDisplayNameForUser:bUserId];
                         NSString *targetDesc = [bUserId isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
@@ -8074,15 +8296,16 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         // 能量不足只记录调试日志，避免在主日志面板中刷屏
                         NSLog(@"[AntForestPort] 能量不足: %@, 剩%@g, %@", [self friendDisplayNameForUser:bUserId], remainEnergy, bid);
                     }
-                    //等待中放入字典树中
-                    if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"WAITING"] && overTime){
+                    //等待中放入字典树中（支持单好友多颗等待能量球累加存储，到点毫秒级蹲守秒收）
+                    if([[bubble objectForKey:@"collectStatus"] isEqualToString:@"WAITING"] && [overTime respondsToSelector:@selector(longLongValue)] && [overTime longLongValue] > 0 && bUserId.length && bid.length){
                         NSMutableDictionary* fb = [[AntForestManager sharedInstance] friendsBubbles];
-                        NSDictionary *myBubble = @{bid:overTime};
-                        //无论有没有直接覆盖
-                        [fb setObject:myBubble forKey:bUserId];
-                        NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fb requiringSecureCoding:NO error:nil];
-                        [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsBubbles"];
-                        [[NSUserDefaults standardUserDefaults] synchronize];
+                        @synchronized (self) {
+                            NSDictionary *existing = [fb[bUserId] isKindOfClass:NSDictionary.class] ? fb[bUserId] : nil;
+                            NSMutableDictionary *userBubbles = existing ? [existing mutableCopy] : [NSMutableDictionary dictionary];
+                            userBubbles[bid] = @([overTime longLongValue]);
+                            [fb setObject:userBubbles forKey:bUserId];
+                            waitingBubblesUpdated = YES;
+                        }
                         // 等待能量球入库只进系统日志，避免每颗气泡挤爆用户面板
                         NSLog(@"[AntForestPort] 等待能量球入库: %@, %@g, %@", [self friendDisplayNameForUser:bUserId], remainEnergy, bid);
                     }
@@ -8091,6 +8314,20 @@ static BOOL oceanPlanLoggedThisRound = NO;
                         NSString *friendName = [self friendDisplayNameForUser:bUserId];
                         NSString *targetDesc = [bUserId isEqualToString:self.myUserId] ? @"自己" : [NSString stringWithFormat:@"好友“%@”", friendName];
                         [self recordStage:[NSString stringWithFormat:@"帮助%@收取能量球（%@g）", targetDesc, remainEnergy]];
+                    }
+                }
+                if (waitingBubblesUpdated) {
+                    NSDictionary *fbSnapshot = nil;
+                    @synchronized (self) {
+                        fbSnapshot = [self.friendsBubbles copy];
+                    }
+                    if (fbSnapshot) {
+                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+                            NSData *data = [NSKeyedArchiver archivedDataWithRootObject:fbSnapshot requiringSecureCoding:NO error:nil];
+                            if (data) {
+                                [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"friendsBubbles"];
+                            }
+                        });
                     }
                 }
                 
@@ -8105,9 +8342,9 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     
                     for (NSDictionary *wb in wateringBubbles) {
                         if (![wb isKindOfClass:NSDictionary.class]) continue;
-                        NSNumber *bidNum = wb[@"id"] ?: wb[@"bubbleId"];
-                        if (bidNum && [bidNum longLongValue] > 0) {
-                            NSString *bid = [bidNum stringValue];
+                        id bidNum = wb[@"id"] ?: wb[@"bubbleId"];
+                        if ([bidNum respondsToSelector:@selector(longLongValue)] && [bidNum longLongValue] > 0) {
+                            NSString *bid = [bidNum isKindOfClass:NSString.class] ? (NSString *)bidNum : ([bidNum respondsToSelector:@selector(stringValue)] ? [bidNum stringValue] : [NSString stringWithFormat:@"%@", bidNum]);
                             NSString *bizType = [NSString stringWithFormat:@"%@", wb[@"bizType"] ?: @""];
                             NSString *fullEnergy = [NSString stringWithFormat:@"%@", wb[@"fullEnergy"] ?: wb[@"energy"] ?: @""];
                             
@@ -8215,7 +8452,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 }
                 if (self.enableAutoRevive) {
                     for(NSDictionary *dictRank in rankArr) {
-                        NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
+                        NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank];
                         if (!userId.length) continue;
                         NSString *name = [AntForestManager extractNameFromDictionary:dictRank];
                         if (name.length) {
@@ -8229,14 +8466,35 @@ static BOOL oceanPlanLoggedThisRound = NO;
                     }
                 }
                 if (self.isScanRunning) {
+                    long long nowMs = (long long)([[NSDate date] timeIntervalSince1970] * 1000.0);
                     for(NSDictionary *dictRank in rankArr) {
-                        NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank] ?: [dictRank objectForKey:@"userId"];
+                        NSString *userId = [AntForestManager extractUserIdFromDictionary:dictRank];
                         if (!userId.length) continue;
-                        BOOL isCollectable = [[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1];
+                        BOOL isShielded = NO;
+                        @synchronized (self) {
+                            long long shieldExp = [sShieldedFriendsExpireMs[userId] longLongValue];
+                            if (shieldExp > nowMs) isShielded = YES;
+                        }
+                        BOOL isCollectable = !isShielded && [[dictRank objectForKey:@"canCollectEnergy"] isEqualToNumber:@1];
                         BOOL isReviveable = canReviveFriendBubble(dictRank);
-                        if (isCollectable || isReviveable){
+                        long long laterTimeMs = (!isShielded && [dictRank[@"canCollectLaterTime"] respondsToSelector:@selector(longLongValue)]) ? [dictRank[@"canCollectLaterTime"] longLongValue] : -1;
+                        BOOL isMaturingSoon = NO;
+                        if (laterTimeMs > 0) {
+                            if (laterTimeMs <= nowMs) {
+                                isCollectable = YES;
+                            } else if (laterTimeMs - nowMs <= 1800000) {
+                                @synchronized (self) {
+                                    NSDictionary *cached = [self.friendsBubbles[userId] isKindOfClass:NSDictionary.class] ? self.friendsBubbles[userId] : nil;
+                                    if (!cached.count) isMaturingSoon = YES;
+                                }
+                            }
+                        }
+                        if (isCollectable || isReviveable || isMaturingSoon){
+                            self.lastScanStartTime = [[NSDate date] timeIntervalSince1970];
                             if (selfPriorityPending) {
-                                [deferredFriendRankIds addObject:userId];
+                                if (![deferredFriendRankIds containsObject:userId]) {
+                                    [deferredFriendRankIds addObject:userId];
+                                }
                             } else {
                                 dispatch_async(globalSerialQueueQuery, ^{
                                     [[AntForestManager sharedInstance] queryFriendsBubbles:userId];
@@ -8253,7 +8511,7 @@ static BOOL oceanPlanLoggedThisRound = NO;
                 NSMutableDictionary *fn = [[AntForestManager sharedInstance] friendsName];
                 BOOL nameUpdated = NO;
                 for(NSDictionary *dictTotalRank in rankTotalArr) {
-                    NSString *userId = [AntForestManager extractUserIdFromDictionary:dictTotalRank] ?: [dictTotalRank objectForKey:@"userId"];
+                    NSString *userId = [AntForestManager extractUserIdFromDictionary:dictTotalRank];
                     if (!userId.length) continue;
                     if (self.enableAutoRevive && canReviveFriendBubble(dictTotalRank)) {
                         [self queueAutoReviveForUser:userId];
